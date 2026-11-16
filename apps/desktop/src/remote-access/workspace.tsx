@@ -40,7 +40,11 @@ function configFromHost(info?: HostInfo, choice?: ModelChoice): GyroConfig {
       authStatus:
         provider.runtimeStatus === "ready" ? "connected" : "not-connected",
       kind: provider.kind,
-      models: provider.models.map((id) => ({ id, displayName: id })),
+      models: provider.models.map((id) => ({
+        id,
+        displayName: id,
+        ...provider.modelDetails?.find((model) => model.id === id),
+      })),
       modelIds: provider.models,
       selectedReasoningEffort: choice?.providerId === provider.id
         ? choice.reasoningEffort as ReasoningEffort : undefined,

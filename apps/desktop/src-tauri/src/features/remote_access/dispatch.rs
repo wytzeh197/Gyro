@@ -115,18 +115,38 @@ pub(super) fn execute(runtime: &Runtime, peer: &str, request: &Request) -> Resul
         }
         Operation::SetModel { session_id, model } => {
             validate_model(model)?;
-            let updated = open_store()?.update_session_model(
-                parse_uuid(session_id)?, Some(model.provider_id.clone()), None,
-                Some(model.model_id.clone()), None, model.reasoning_effort.clone(),
-            ).map_err(err)?.ok_or("Session not found")?;
+            let updated = open_store()?
+                .update_session_model(
+                    parse_uuid(session_id)?,
+                    Some(model.provider_id.clone()),
+                    None,
+                    Some(model.model_id.clone()),
+                    None,
+                    model.reasoning_effort.clone(),
+                )
+                .map_err(err)?
+                .ok_or("Session not found")?;
             value(updated)
         }
-        Operation::UploadAttachment { session_id, upload_id, name, kind, offset, data, complete } =>
-            super::media::upload(runtime, peer, session_id, *upload_id, name, kind, *offset, data, *complete),
-        Operation::AttachWorkspaceFile { session_id, path } =>
-            value(super::media::workspace_attachment(runtime, session_id, path)?),
-        Operation::ReadImage { session_id, path, offset } =>
-            super::media::read_image(runtime, session_id, path, *offset),
+        Operation::UploadAttachment {
+            session_id,
+            upload_id,
+            name,
+            kind,
+            offset,
+            data,
+            complete,
+        } => super::media::upload(
+            runtime, peer, session_id, *upload_id, name, kind, *offset, data, *complete,
+        ),
+        Operation::AttachWorkspaceFile { session_id, path } => value(
+            super::media::workspace_attachment(runtime, session_id, path)?,
+        ),
+        Operation::ReadImage {
+            session_id,
+            path,
+            offset,
+        } => super::media::read_image(runtime, session_id, path, *offset),
         Operation::History {
             session_id,
             before,
@@ -186,7 +206,15 @@ pub(super) fn execute(runtime: &Runtime, peer: &str, request: &Request) -> Resul
             model,
             attachments,
             mode,
-        } => submit(runtime, session_id, turn_id, message, model, attachments, mode.as_deref()),
+        } => submit(
+            runtime,
+            session_id,
+            turn_id,
+            message,
+            model,
+            attachments,
+            mode.as_deref(),
+        ),
         Operation::Stop { session_id } => Ok(json!(crate::state::provider_run::stop_provider_run(
             &runtime.app,
             session_id,
@@ -240,6 +268,13 @@ pub(super) fn execute(runtime: &Runtime, peer: &str, request: &Request) -> Resul
     }
 }
 
+#[derive(Serialize)]
+struct RemoteModelDetails {
+    id: String,
+    #[serde(flatten)]
+    profile: crate::model_catalog::CatalogModelProfile,
+}
+
 fn hello(runtime: &Runtime) -> Result<Value, String> {
     let paths = gyro_core::GyroPaths::for_current_user().map_err(err)?;
     let config = gyro_core::GyroConfig::load(&paths).map_err(err)?;
@@ -249,7 +284,14 @@ fn hello(runtime: &Runtime) -> Result<Value, String> {
         if let Some(default)=p.default_model_id.as_ref(){if !models.contains(default){models.push(default.clone());}}
         let health=gyro_core::provider_health(gyro_core::ProviderHealthRequest{provider_id:p.id.clone(),base_url:p.base_url.clone(),api_key_ref:Some(p.api_key_ref.clone()),kind:p.kind.clone(),force:false});
         let status=health.as_ref().map(|h|h.runtime_status.as_str()).unwrap_or("unknown");
-        json!({"id":p.id,"displayName":p.display_name,"models":models,"defaultModelId":p.default_model_id,"kind":p.kind,"runtimeStatus":status})
+        // Keep the ID list for old clients, and send the host's accepted
+        // catalog metadata so newer clients need not guess names or efforts.
+        let model_details = models.iter().filter_map(|id| {
+            crate::model_catalog::catalog_model_profile(&p.id, Some(id)).map(|profile| {
+                RemoteModelDetails { id: id.clone(), profile }
+            })
+        }).collect::<Vec<_>>();
+        json!({"id":p.id,"displayName":p.display_name,"models":models,"modelDetails":model_details,"defaultModelId":p.default_model_id,"kind":p.kind,"runtimeStatus":status})
     }).collect::<Vec<_>>();
     Ok(
         json!({"protocol":1,"hostId":runtime.node.get().unwrap().id(),"name":runtime.store.settings().map_err(err)?.name,"providers":providers,"selectedProviderId":config.selected_provider_id,"fullAccess":config.full_access,"requireCommandApproval":config.require_command_approval,"requireFileEditApproval":config.require_file_edit_approval,"capabilities":["liveCatchup","chat","files","git","terminal","approvals","questions","worktrees","sessionModel","attachments","imagePreviews","chatModes"],"experimental":true}),

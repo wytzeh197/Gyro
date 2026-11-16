@@ -2,6 +2,7 @@ import type {
   Session,
   SessionEvent,
   ProviderChatStreamEvent,
+  ProviderModel,
   ProviderUsageState,
   SessionUsageTotals,
   SourceControlState,
@@ -66,6 +67,8 @@ export type HostInfo = {
     displayName: string;
     defaultModelId?: string;
     models: string[];
+    /** Optional on older hosts; IDs above remain the selectable inventory. */
+    modelDetails?: ProviderModel[];
     kind?: string;
     runtimeStatus: string;
   }>;

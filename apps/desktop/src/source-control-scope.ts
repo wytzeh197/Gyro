@@ -31,13 +31,27 @@ export function sourceControlForWorkspace(
 }
 
 /** Shared IDE state may hold a late result or a previous root's snapshot. */
-export function useScopedIdeState(ide: IdeState, workspacePath?: string) {
+export function useScopedIdeState(
+  ide: IdeState,
+  workspacePath?: string,
+): IdeState {
   const sourceControl =
     sourceControlForWorkspace(ide.sourceControl, workspacePath) ??
     EMPTY_SOURCE_CONTROL;
-  return useMemo(
-    () =>
-      sourceControl === ide.sourceControl ? ide : { ...ide, sourceControl },
-    [ide, sourceControl],
-  );
+  return useMemo(() => {
+    const root = workspacePath?.replace(/\/+$/, "");
+    if (!ide.diagnostics)
+      return sourceControl === ide.sourceControl
+        ? ide
+        : { ...ide, sourceControl };
+    const filtered = ide.diagnostics.filter((problem) =>
+      Boolean(root && problem.path.startsWith(root + "/")),
+    );
+    const diagnostics =
+      filtered.length === ide.diagnostics.length ? ide.diagnostics : filtered;
+    return sourceControl === ide.sourceControl &&
+      diagnostics === ide.diagnostics
+      ? ide
+      : { ...ide, sourceControl, diagnostics };
+  }, [ide, sourceControl, workspacePath]);
 }

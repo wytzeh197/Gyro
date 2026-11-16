@@ -98,6 +98,8 @@ async function runBoot(surface, failure) {
       }
       if (id === failure) throw new Error("failed module");
       if (id === "./dictation-access") return {};
+      if (id === "@gyro-dev/ui/tooltips") return { installGyroTooltips() {} };
+      if (id === "./remote-access/root") return { RemoteWorkspaceRoot: "remote-root" };
       if (id === "./App") return { App: "app" };
       if (id === "./MenuBarPopover") return { MenuBarPopover: "menu" };
       if (id.endsWith(".css")) return {};
@@ -111,7 +113,7 @@ for (const [surface, module] of [
   ["main", "./App"],
   ["menu-bar", "./MenuBarPopover"],
 ]) {
-  for (const failed of [module, "@gyro-dev/ui/styles.css"]) {
+  for (const failed of [module, "@gyro-dev/ui/styles.css", "@gyro-dev/ui/tooltips", ...(surface === "main" ? ["./remote-access/root"] : [])]) {
     const result = await runBoot(surface, failed);
     const fallback = result.renders.at(-1);
     assert.equal(
@@ -135,7 +137,9 @@ for (const [surface, module] of [
   const Boundary = boundaryElement.type;
   const boundary = new Boundary();
   boundary.props = boundaryElement.props;
-  assert.equal(boundary.render()[0].type, surface === "main" ? "app" : "menu");
+  const content = boundary.render()[0];
+  assert.equal(content.type, surface === "main" ? "remote-root" : "menu");
+  if (surface === "main") assert.equal(content.props.children[0].type, "app");
   for (const thrown of [new Error("render failed"), null, "bad render"]) {
     boundary.state = Boundary.getDerivedStateFromError(thrown);
     assert.equal(boundary.render().type({}).props.role, "alert");

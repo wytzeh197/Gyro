@@ -1761,6 +1761,8 @@ export type WorkbenchAction =
       results: WorkspaceSearchResult[];
     }
   | { type: "ide-set-diagnostics"; diagnostics: ProblemDiagnostic[] }
+  | { type: "ide-publish-lsp-diagnostics"; paths: string[]; diagnostics: ProblemDiagnostic[] }
+  | { type: "ide-set-task-diagnostics"; workspacePath: string; taskId: string; diagnostics: ProblemDiagnostic[] }
   | { type: "ide-set-document-symbols"; documentSymbols?: DocumentSymbolsState }
   | { type: "ide-set-source-control"; sourceControl: SourceControlState }
   | { type: "github-reset" }
@@ -3443,6 +3445,33 @@ export function workbenchReducer(
             ...state,
             ide: { ...state.ide, documentSymbols: action.documentSymbols },
           };
+    case "ide-publish-lsp-diagnostics": {
+      const paths = new Set(action.paths);
+      return {
+        ...state,
+        ide: { ...state.ide, diagnostics: [
+          ...state.ide.diagnostics.filter((problem) =>
+            problem.source?.startsWith("task:") || !paths.has(problem.path)),
+          ...action.diagnostics,
+        ] },
+      };
+    }
+    case "ide-set-task-diagnostics": {
+      const root = action.workspacePath.replace(/\/+$/, "") + "/";
+      const source = `task:${action.taskId}`;
+      return {
+        ...state,
+        ide: {
+          ...state.ide,
+          diagnostics: [
+            ...state.ide.diagnostics.filter((problem) =>
+              problem.source !== source || !problem.path.startsWith(root)),
+            ...action.diagnostics.filter((problem) =>
+              problem.source === source && problem.path.startsWith(root)),
+          ],
+        },
+      };
+    }
     case "ide-set-diagnostics":
       return {
         ...state,

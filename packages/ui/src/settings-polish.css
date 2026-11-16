@@ -75,7 +75,7 @@
 :root[data-theme] .gyro-provider-api-key-row > input {
   background: var(--gyro-premium-control) !important;
   border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
-  border-radius: 8px !important;
+  border-radius: var(--gyro-radius-md) !important;
   color: var(--gyro-text) !important;
   flex: 1 1 200px !important;
   font-size: var(--gyro-font-micro) !important;
@@ -102,7 +102,7 @@
 :root[data-theme] .gyro-provider-api-key-row > button {
   background: transparent !important;
   border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
-  border-radius: 8px !important;
+  border-radius: var(--gyro-radius-md) !important;
   box-shadow: none !important;
   color: var(--gyro-text) !important;
   font-size: var(--gyro-font-caption) !important;
@@ -238,7 +238,7 @@
 :root[data-theme] .gyro-provider-custom-form :is(input, textarea) {
   background: var(--gyro-premium-control) !important;
   border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
-  border-radius: 8px !important;
+  border-radius: var(--gyro-radius-md) !important;
   color: var(--gyro-text) !important;
   font-size: var(--gyro-font-micro) !important;
   min-width: 0;
@@ -291,7 +291,7 @@
 :root[data-theme] .gyro-provider-custom-actions > button {
   background: transparent !important;
   border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
-  border-radius: 8px !important;
+  border-radius: var(--gyro-radius-md) !important;
   box-shadow: none !important;
   color: var(--gyro-text) !important;
   font-size: var(--gyro-font-caption) !important;
@@ -321,7 +321,7 @@
 :root[data-theme] .gyro-provider-custom-fetch > button {
   background: transparent !important;
   border: 0.5px solid var(--gyro-premium-hairline-strong) !important;
-  border-radius: 8px !important;
+  border-radius: var(--gyro-radius-md) !important;
   box-shadow: none !important;
   color: var(--gyro-muted) !important;
   font-size: var(--gyro-font-caption) !important;

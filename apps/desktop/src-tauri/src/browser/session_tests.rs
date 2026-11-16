@@ -96,12 +96,16 @@ fn scoped_observation_rejects_navigation_changes_before_reading() {
         .unwrap()
         .insert("chat".into(), browser_slot("chat", false));
     let mut dispatched = Vec::new();
-    let result =
-        manager.observe_document("chat", "readPage", serde_json::json!({"ref":"old-ref"}), |lease, _, action, _| {
+    let result = manager.observe_document(
+        "chat",
+        "readPage",
+        serde_json::json!({"ref":"old-ref"}),
+        |lease, _, action, _| {
             dispatched.push(action.to_owned());
             manager.reserve_navigation(&lease.resource, Some("https://other.example/"))?;
             Ok(serde_json::json!({"readyState":"complete"}))
-        });
+        },
+    );
     assert!(result.is_err());
     assert_eq!(dispatched, ["status"]);
 }
@@ -110,24 +114,33 @@ fn scoped_observation_rejects_navigation_changes_before_reading() {
 fn whole_page_observation_follows_navigation_without_replaying_actions() {
     for redirect_during in ["status", "readPage"] {
         let manager = SessionBrowserManager::default();
-        manager.inner.lock().unwrap()
+        manager
+            .inner
+            .lock()
+            .unwrap()
             .insert("chat".into(), browser_slot("chat", false));
         let mut redirected = false;
-        let result = manager.observe_document(
-            "chat", "readPage", Value::Null, |lease, snapshot, action, _| {
-                if action == redirect_during && !redirected {
-                    redirected = true;
-                    manager.reserve_navigation(&lease.resource, Some("https://next.example/"))?;
-                    manager.commit_navigation(&lease.resource, "https://next.example/")?;
-                    return Err("evaluation interrupted by navigation".into());
-                }
-                if action == "status" {
-                    Ok(serde_json::json!({"readyState":"interactive"}))
-                } else {
-                    Ok(serde_json::json!({"url":snapshot.url}))
-                }
-            },
-        ).unwrap();
+        let result = manager
+            .observe_document(
+                "chat",
+                "readPage",
+                Value::Null,
+                |lease, snapshot, action, _| {
+                    if action == redirect_during && !redirected {
+                        redirected = true;
+                        manager
+                            .reserve_navigation(&lease.resource, Some("https://next.example/"))?;
+                        manager.commit_navigation(&lease.resource, "https://next.example/")?;
+                        return Err("evaluation interrupted by navigation".into());
+                    }
+                    if action == "status" {
+                        Ok(serde_json::json!({"readyState":"interactive"}))
+                    } else {
+                        Ok(serde_json::json!({"url":snapshot.url}))
+                    }
+                },
+            )
+            .unwrap();
         assert!(redirected);
         assert_eq!(result["url"], "https://next.example/");
     }
@@ -136,14 +149,21 @@ fn whole_page_observation_follows_navigation_without_replaying_actions() {
 #[test]
 fn whole_page_observation_rejects_resource_replacement() {
     let manager = SessionBrowserManager::default();
-    manager.inner.lock().unwrap()
+    manager
+        .inner
+        .lock()
+        .unwrap()
         .insert("chat".into(), browser_slot("chat", false));
     let mut calls = 0;
     let result = manager.observe_document("chat", "readPage", Value::Null, |_, _, _, _| {
         calls += 1;
         let mut replacement = browser_slot("chat", false);
         replacement.resource_id = "replacement".into();
-        manager.inner.lock().unwrap().insert("chat".into(), replacement);
+        manager
+            .inner
+            .lock()
+            .unwrap()
+            .insert("chat".into(), replacement);
         Ok(serde_json::json!({"readyState":"interactive"}))
     });
     assert!(result.is_err());
@@ -154,10 +174,15 @@ fn whole_page_observation_rejects_resource_replacement() {
 fn successful_action_receipt_survives_its_navigation_without_stale_metadata() {
     for method in ["click", "type", "formInput", "backgroundPointer"] {
         let manager = SessionBrowserManager::default();
-        manager.inner.lock().unwrap()
+        manager
+            .inner
+            .lock()
+            .unwrap()
             .insert("chat".into(), browser_slot("chat", false));
         let (lease, _) = manager.capture_document("chat").unwrap();
-        manager.reserve_navigation(&lease.resource, Some("https://next.example/")).unwrap();
+        manager
+            .reserve_navigation(&lease.resource, Some("https://next.example/"))
+            .unwrap();
         let value = serde_json::json!({
             "ok":true, "url":"https://old.example/", "title":"Old document",
         });
@@ -168,12 +193,20 @@ fn successful_action_receipt_survives_its_navigation_without_stale_metadata() {
         assert_ne!(current.url, "https://old.example/");
         assert_ne!(current.title, "Old document");
         assert!(!current.document_committed);
-        assert!(manager.record_agent_result(&lease, "readPage", &value).is_err());
-        assert!(manager.record_agent_result(&lease, method, &serde_json::json!({"ok":false})).is_err());
+        assert!(manager
+            .record_agent_result(&lease, "readPage", &value)
+            .is_err());
+        assert!(manager
+            .record_agent_result(&lease, method, &serde_json::json!({"ok":false}))
+            .is_err());
 
         let mut replacement = browser_slot("chat", false);
         replacement.resource_id = "replacement".into();
-        manager.inner.lock().unwrap().insert("chat".into(), replacement);
+        manager
+            .inner
+            .lock()
+            .unwrap()
+            .insert("chat".into(), replacement);
         assert!(manager.record_agent_result(&lease, method, &value).is_err());
     }
 }

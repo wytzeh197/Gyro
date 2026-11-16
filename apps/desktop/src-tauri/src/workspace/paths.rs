@@ -615,9 +615,7 @@ pub(crate) fn search_workspace_impl(
         ignore_case: !request.case_sensitive.unwrap_or(true),
         whole_word: request.whole_word.unwrap_or(false),
     };
-    let fallback = || {
-        fallback_search_workspace(&root, query, max_results, options.ignore_case)
-    };
+    let fallback = || fallback_search_workspace(&root, query, max_results, options.ignore_case);
     match run_workspace_rg_search(&root, query, request.globs.as_ref(), max_results, options) {
         Ok(results) => Ok(results),
         // Agents sometimes send patterns that are invalid regex. Fall back to a

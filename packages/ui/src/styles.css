@@ -11461,6 +11461,18 @@ body {
   font-size: var(--gyro-font-tiny);
 }
 
+.gyro-problem-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+}
+.gyro-problem-entry > .gyro-problem-row {
+  flex: 1;
+  min-width: 0;
+}
+.gyro-problem-entry > .gyro-secondary-button {
+  flex: none;
+}
 .gyro-problems-list {
   min-height: 0;
   overflow: auto;
@@ -28892,7 +28904,7 @@ textarea:focus-visible,
   .gyro-provider-table.is-native-list
   .gyro-provider-details
   > div {
-  border-radius: 12px;
+  border-radius: var(--gyro-radius-lg);
   gap: 2px;
   justify-items: stretch;
   min-width: 240px;

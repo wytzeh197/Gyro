@@ -16,7 +16,9 @@ pub trait RefreshStore: Send + Sync {
     /// dispatch. An ambiguous result is never retried automatically.
     fn take_for_reconnect(&self) -> Result<Option<RefreshCredential>, AuthError> {
         let saved = self.load()?;
-        if saved.is_some() { self.clear()?; }
+        if saved.is_some() {
+            self.clear()?;
+        }
         Ok(saved)
     }
     fn save(&self, session: &Session) -> Result<(), AuthError>;
@@ -70,7 +72,15 @@ pub struct MacKeychain {
 }
 impl MacKeychain {
     pub(crate) fn v3(config: &StagingConfig, staging: bool, scope: &str) -> Self {
-        Self { project_ref: config.project_ref.clone(), environment: if staging { "staging-v3" } else { "production-v3" }, scope: Some(scope.into()) }
+        Self {
+            project_ref: config.project_ref.clone(),
+            environment: if staging {
+                "staging-v3"
+            } else {
+                "production-v3"
+            },
+            scope: Some(scope.into()),
+        }
     }
     pub fn staging(config: &StagingConfig) -> Self {
         Self {
@@ -183,7 +193,10 @@ impl MacKeychain {
             }
             "take-for-reconnect" => {
                 let saved = store.take_for_reconnect()?.ok_or(AuthError::Storage)?;
-                if saved.refresh_token != rotated || saved.account_id != account || store.load()?.is_some() {
+                if saved.refresh_token != rotated
+                    || saved.account_id != account
+                    || store.load()?.is_some()
+                {
                     return Err(AuthError::Storage);
                 }
                 Ok(())
@@ -199,7 +212,6 @@ impl MacKeychain {
             .as_ref()
             .map_or(account.clone(), |scope| format!("{account}:{scope}"))
     }
-
 }
 impl RefreshStore for MacKeychain {
     fn load(&self) -> Result<Option<RefreshCredential>, AuthError> {
@@ -217,7 +229,8 @@ impl RefreshStore for MacKeychain {
         #[cfg(all(target_os = "macos", not(test)))]
         {
             macos::take_for_reconnect(&self.account())?
-                .map(|value| decode(&value, &self.project_ref)).transpose()
+                .map(|value| decode(&value, &self.project_ref))
+                .transpose()
         }
         #[cfg(any(not(target_os = "macos"), test))]
         Err(AuthError::Storage)

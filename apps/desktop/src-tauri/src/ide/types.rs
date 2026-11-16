@@ -10,6 +10,8 @@ use std::{
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct IdeCommandOutput {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) diagnostics: Vec<super::task_problems::TaskProblem>,
     pub(crate) status: String,
     pub(crate) stdout: String,
     pub(crate) stderr: String,

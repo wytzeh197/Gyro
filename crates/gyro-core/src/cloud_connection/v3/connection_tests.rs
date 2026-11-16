@@ -399,7 +399,6 @@ fn unexpected_remembered_credentials_are_preserved_without_provider_dispatch() {
     assert!(store.value.lock().unwrap().is_some());
 }
 
-
 #[test]
 fn reconnect_keychain_failure_is_actionable_and_never_dispatches_refresh() {
     let (temp, connection, store, wire) = fixture(false, None);
@@ -423,8 +422,10 @@ fn v3_reuses_reviewed_production_identity_without_accepting_staging_or_arbitrary
     assert!(!reviewed_production_project(""));
     // The independently controlled v3 release switch remains closed.
     let config: Config = serde_json::from_str(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"), "/../../config/cloud-v3.json"
-    ))).unwrap();
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/cloud-v3.json"
+    )))
+    .unwrap();
     assert!(!config.enabled);
 }
 
@@ -434,7 +435,10 @@ fn reconnect_keeps_verified_rotation_during_cloud_outage_without_local_authority
     wire.refresh_failure.store(false, Ordering::SeqCst);
     let prepared = temp.path().join("prepared-local-copy");
     std::fs::write(&prepared, b"preserve-local-data").unwrap();
-    assert!(matches!(connection.restore_session(), Err(Error::Unavailable)));
+    assert!(matches!(
+        connection.restore_session(),
+        Err(Error::Unavailable)
+    ));
     assert!(!connection.view().connected);
     assert!(!connection.view().registered);
     assert!(connection.view().account_id.is_none());
@@ -442,7 +446,10 @@ fn reconnect_keeps_verified_rotation_during_cloud_outage_without_local_authority
     assert!(store.value.lock().unwrap().is_some());
     // A deliberate retry uses the new credential. There is no automatic retry
     // of either the issuer exchange or device-registration mutation.
-    assert!(matches!(connection.restore_session(), Err(Error::Unavailable)));
+    assert!(matches!(
+        connection.restore_session(),
+        Err(Error::Unavailable)
+    ));
     assert_eq!(wire.refresh_calls.load(Ordering::SeqCst), 2);
     assert_eq!(
         *wire.refresh_tokens_used.lock().unwrap(),
@@ -451,9 +458,15 @@ fn reconnect_keeps_verified_rotation_during_cloud_outage_without_local_authority
     assert_eq!(std::fs::read(prepared).unwrap(), b"preserve-local-data");
     // A genuinely ambiguous issuer failure still consumes the selected token.
     wire.refresh_failure.store(true, Ordering::SeqCst);
-    assert!(matches!(connection.restore_session(), Err(Error::SessionUnavailable)));
+    assert!(matches!(
+        connection.restore_session(),
+        Err(Error::SessionUnavailable)
+    ));
     assert!(store.value.lock().unwrap().is_none());
-    assert!(matches!(connection.restore_session(), Err(Error::SessionUnavailable)));
+    assert!(matches!(
+        connection.restore_session(),
+        Err(Error::SessionUnavailable)
+    ));
     assert_eq!(wire.refresh_calls.load(Ordering::SeqCst), 3);
 }
 
@@ -480,8 +493,7 @@ fn signout_during_reconnect_cannot_save_rotation_after_cloud_outage() {
 fn reconnect_reports_failed_rotation_persistence_during_cloud_outage() {
     let entered = Arc::new(Barrier::new(2));
     let release = Arc::new(Barrier::new(2));
-    let (_temp, connection, store, wire) =
-        fixture(false, Some((entered.clone(), release.clone())));
+    let (_temp, connection, store, wire) = fixture(false, Some((entered.clone(), release.clone())));
     wire.refresh_failure.store(false, Ordering::SeqCst);
     let c = connection.clone();
     let task = std::thread::spawn(move || c.restore_session());

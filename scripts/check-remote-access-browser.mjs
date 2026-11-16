@@ -657,9 +657,26 @@ try {
   await until(() => evaluate("document.querySelectorAll('.gyro-model-rail-model').length === 2"), "host model list");
   assert.equal(await evaluate("document.querySelectorAll('.gyro-model-rail-providers .gyro-model-rail-tile').length"), 1,
     "local-only providers never leak into the remote model menu");
-  await evaluate("[...document.querySelectorAll('.gyro-model-rail-model')].find(b => b.textContent.includes('gpt-6') && !b.textContent.includes('gpt-6.1')).click()");
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.gyro-model-rail-model-name')].map(b => b.textContent)"),
+    ["Host GPT 6.1", "Host GPT 6"], "remote picker uses host names, not raw IDs");
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.gyro-model-rail-context')].map(b => b.textContent)"),
+    ["300K", "500K"], "context sizes come from the host metadata");
+  await evaluate("[...document.querySelectorAll('.gyro-model-rail-model')].find(b => b.querySelector('.gyro-model-rail-model-name').textContent === 'Host GPT 6').click()");
   await until(() => evaluate("window.gyroRemoteFixture.sessions.find(s => s.id === 'existing-chat').modelId === 'gpt-6'"),
     "model switch persists on the host before Send");
+  await until(() => evaluate("!!document.querySelector('.gyro-remote-chat button[aria-label=\"Model: Host GPT 6\"]')"),
+    "selected chip uses the host model name");
+  await until(() => evaluate("!!document.querySelector('.gyro-remote-chat button[aria-label=\"Reasoning effort: Max\"]')"),
+    "reasoning chip uses the host default");
+  await evaluate("document.querySelector('.gyro-remote-chat button[aria-label^=\"Reasoning effort:\"]').click()");
+  assert.equal(await evaluate("document.querySelector('input[aria-label=\"Reasoning effort\"]').max"), "1",
+    "only the two host-supported reasoning levels are selectable");
+  await call("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 });
+  await call("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowLeft", code: "ArrowLeft", windowsVirtualKeyCode: 37 });
+  await until(() => evaluate("window.gyroRemoteFixture.sessions.find(s => s.id === 'existing-chat').reasoningEffort === 'high'"),
+    "keyboard effort choice persists on the host");
+  await call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+  await call("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
   await evaluate(`(() => {
     const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZqkAAAAASUVORK5CYII='), c => c.charCodeAt(0));
     const data = new DataTransfer();

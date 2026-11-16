@@ -18,6 +18,38 @@ import {
 
 const provider = providerCatalog.find((p) => p.id === "openai");
 const original = structuredClone(provider);
+
+// Remote inventories stay host-owned, including labels for newer/custom models.
+const knownModel = original.models.find((model) => model.displayName !== model.id);
+assert.ok(knownModel);
+const hostConfig = {
+  hostModelCatalog: true,
+  modelProviders: [{
+    ...original,
+    selectedModelId: knownModel.id,
+    models: [
+      { id: knownModel.id, displayName: knownModel.id },
+      { id: "host-new-model", displayName: "Host New Model",
+        contextWindowTokens: 321000, supportedReasoningEfforts: ["high"],
+        defaultReasoningEffort: "high" },
+      { id: "unknown-host-id", displayName: "unknown-host-id" },
+    ],
+  }],
+};
+const hostModels = providersForConfig(hostConfig)[0].models;
+assert.deepEqual(hostModels.map((model) => model.id),
+  [knownModel.id, "host-new-model", "unknown-host-id"]);
+assert.equal(hostModels[0].displayName, knownModel.displayName,
+  "ID-only legacy hosts use the catalog's readable name");
+assert.equal(hostModels[1].displayName, "Host New Model");
+assert.equal(hostModels[1].contextWindowTokens, 321000);
+assert.deepEqual(hostModels[1].supportedReasoningEfforts, ["high"]);
+assert.equal(hostModels[1].defaultReasoningEffort, "high");
+assert.equal(hostModels[2].displayName, "unknown-host-id",
+  "unknown IDs are preserved without inventing names");
+hostConfig.modelProviders[0].models[0].displayName = "Host override";
+assert.equal(providersForConfig(hostConfig)[0].models[0].displayName, "Host override");
+
 const entry = {
   providerId: "openai",
   id: "catalog-test-model",

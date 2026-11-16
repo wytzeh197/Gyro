@@ -27,12 +27,7 @@ pub(super) fn execute(
             &paths,
             uuid::Uuid::parse_str(&bound.session_id)?,
         );
-        return read_spill(
-            &bound.session_id,
-            arguments,
-            requested_path,
-            max_bytes,
-        );
+        return read_spill(&bound.session_id, arguments, requested_path, max_bytes);
     }
     let path = gyro_core::normalize_capability_relative_path(requested_path)?;
     let workspace = bound.workspace.display().to_string();
@@ -167,7 +162,8 @@ fn read_spill(
     let limit = max_bytes
         .saturating_sub(SPILL_RESULT_OVERHEAD)
         .clamp(1, SPILL_TOOL_WINDOW);
-    let Some(window) = gyro_core::efficiency::spill::read_scoped_window(address, offset, limit)? else {
+    let Some(window) = gyro_core::efficiency::spill::read_scoped_window(address, offset, limit)?
+    else {
         anyhow::bail!(
             "{address} is not a copy this session can read: it was swept, or never written"
         );
@@ -260,7 +256,8 @@ mod spill_read_tests {
         use gyro_core::{CapabilityResponse, CapabilityResult, GyroPaths};
         let temp = tempfile::tempdir().unwrap();
         let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
-        let _scope = gyro_core::efficiency::spill::SessionScope::start(&paths, uuid::Uuid::new_v4());
+        let _scope =
+            gyro_core::efficiency::spill::SessionScope::start(&paths, uuid::Uuid::new_v4());
         for id in [
             CapabilityId::WorkspaceRead,
             CapabilityId::WorkspaceReadRange,
@@ -359,7 +356,8 @@ mod spill_read_tests {
     fn an_address_with_no_copy_reports_absence_not_a_workspace_miss() {
         let temp = tempfile::tempdir().unwrap();
         let paths = gyro_core::GyroPaths::from_base_dir(temp.path().join("Gyro"));
-        let _scope = gyro_core::efficiency::spill::SessionScope::start(&paths, uuid::Uuid::new_v4());
+        let _scope =
+            gyro_core::efficiency::spill::SessionScope::start(&paths, uuid::Uuid::new_v4());
         let error = read_spill(
             "session",
             &json!({ "path": "spill://cap/tool/0000000000000000" }),
@@ -373,8 +371,8 @@ mod spill_read_tests {
 
     #[test]
     fn api_and_native_spills_can_only_be_recovered_by_the_bound_session() {
-        use gyro_core::{CapabilityResponse, CapabilityResult, GyroPaths};
         use gyro_core::efficiency::spill::{self, SessionScope};
+        use gyro_core::{CapabilityResponse, CapabilityResult, GyroPaths};
         let temp = tempfile::tempdir().unwrap();
         let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
         let owner = uuid::Uuid::new_v4();
@@ -384,17 +382,28 @@ mod spill_read_tests {
         let address = spill::address(id.as_str(), id.provider_tool_name(), &text);
         {
             let _scope = SessionScope::start(&paths, owner);
-            let response = CapabilityResponse::completed("test", CapabilityResult {
-                call_id: uuid::Uuid::new_v4(), capability_id: id,
-                summary: "Read source".into(),
-                data: json!({"content":text, "path":"source.rs", "source":"disk"}),
-                resource: None,
-            });
-            let api = gyro_core::provider_runtime::tool_batch::model_response_text(&response).unwrap();
-            let native = crate::capabilities::mcp_server::capability_mcp_response(&paths, response, false).unwrap();
+            let response = CapabilityResponse::completed(
+                "test",
+                CapabilityResult {
+                    call_id: uuid::Uuid::new_v4(),
+                    capability_id: id,
+                    summary: "Read source".into(),
+                    data: json!({"content":text, "path":"source.rs", "source":"disk"}),
+                    resource: None,
+                },
+            );
+            let api =
+                gyro_core::provider_runtime::tool_batch::model_response_text(&response).unwrap();
+            let native =
+                crate::capabilities::mcp_server::capability_mcp_response(&paths, response, false)
+                    .unwrap();
             assert!(api.contains(&address));
-            assert!(native["content"][0]["text"].as_str().unwrap().contains(&address));
-            let (_, recovered, _) = read_spill(&owner.to_string(), &json!({}), &address, 8192).unwrap();
+            assert!(native["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains(&address));
+            let (_, recovered, _) =
+                read_spill(&owner.to_string(), &json!({}), &address, 8192).unwrap();
             assert!(text.starts_with(recovered["content"].as_str().unwrap()));
             assert!(!recovered["content"].as_str().unwrap().is_empty());
         }

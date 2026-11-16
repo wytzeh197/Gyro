@@ -18,14 +18,14 @@ import { EnvironmentPlanSteps } from "@problem-plan";
 const empty={commandProfiles:[],modelProviders:[],requireCommandApproval:true,requireFileEditApproval:true,telemetryEnabled:false};
 const config={...empty,selectedProviderId:"openai",modelProviders:providersForConfig(empty).map(p=>p.id==="openai"?{...p,enabled:true,authStatus:"connected"}:p)};
 const diagnostic={id:"type-error",path:"src/main.ts",message:"Type 'string' is not assignable to type 'number'.",severity:"error",source:"TypeScript",startLineNumber:12,startColumn:7};
-window.deliveries=[];window.sends=[];window.errors=[];window.opened=[];
+window.sentProblems=[];window.deliveries=[];window.sends=[];window.errors=[];window.opened=[];
 function Fixture(){
  const [attachments,setAttachments]=React.useState({});
  const [drafts,setDrafts]=React.useState({a:"Fix this problem",b:"Explain this error"});
  window.attachments=attachments;window.drafts=drafts;
  return <main style={{height:"100vh",display:"grid",gridTemplateRows:"180px minmax(0,1fr)"}}>
  <section style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
- <WorkspaceToolPanel activePaneTab="problems" profiles={[]} terminalPanes={[]} workspacePath="/fixture/source" ide={{diagnostics:[diagnostic]}} onPaneTabChange={()=>{}} onOpenDiffInEditor={(...args)=>window.opened.push(args)} />
+ <WorkspaceToolPanel activePaneTab="problems" profiles={[]} terminalPanes={[]} workspacePath="/fixture/source" ide={{diagnostics:[diagnostic]}} onSendProblemToChat={problem=>window.sentProblems.push(problem)} onPaneTabChange={()=>{}} onOpenDiffInEditor={(...args)=>window.opened.push(args)} />
  <div style={{padding:20}}><h3>Release plan</h3><EnvironmentPlanSteps workspacePath="/fixture/source" plan={{title:"Release plan",items:[{id:"verify",title:"Verify staging",detail:"Waiting for staging access",status:"blocked"}]}} /></div>
  </section>
  <section style={{display:"grid",gridTemplateColumns:"1fr 1fr",minHeight:0}}>
@@ -184,6 +184,13 @@ try {
   assert.match(await evaluate("window.deliveries[2].text"),/Waiting for staging access/);
   assert.equal(await evaluate("window.attachments.b[0].name"),"Verify-staging.problem.txt");
   assert.equal(await evaluate("window.sends.length"),1);
+  await evaluate(`document.querySelector('button[aria-label^="Send problem to chat:"]').focus()`);
+  assert.equal(await evaluate(`document.activeElement?.getAttribute('aria-label')?.startsWith('Send problem to chat:')`), true, "problem action receives focus");
+  await call("Input.dispatchKeyEvent",{type:"keyDown",key:"Enter",code:"Enter",text:"\r",unmodifiedText:"\r",windowsVirtualKeyCode:13});
+  await call("Input.dispatchKeyEvent",{type:"keyUp",key:"Enter",code:"Enter",windowsVirtualKeyCode:13});
+  await until(async()=>await evaluate("window.sentProblems.length")===1,"keyboard sends problem to chat");
+  assert.equal(await evaluate("window.sentProblems[0].path"),"src/main.ts");
+  assert.equal(await evaluate("window.sends.length"),1,"attaching a problem never submits a prompt");
   const output=resolve("artifacts/problem-drag");
   await mkdir(output,{recursive:true});
   for(const theme of ["dark","light"]){

@@ -1,6 +1,6 @@
 {
   "name": "@gyro-dev/workspace",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "Open-source local-first coding agent workspace.",
   "license": "Apache-2.0",
@@ -31,7 +31,7 @@
     "release:cli:finalize": "node scripts/finalize-cli-release.mjs",
     "smoke:native": "node scripts/run-native-smoke.mjs",
     "smoke:workbench": "pnpm smoke:workbench:source && pnpm test:chat-render:invariants",
-    "test": "pnpm test:differentiation && pnpm test:reliability && pnpm test:cloud && pnpm -r test",
+    "test": "pnpm test:launch-regressions && pnpm test:differentiation && pnpm test:reliability && pnpm test:cloud && pnpm -r test",
     "test:differentiation": "node --experimental-strip-types scripts/check-task-completion.mjs && node --experimental-strip-types scripts/check-workflow-starters.mjs",
     "test:chat-render": "node scripts/run-chat-render.mjs",
     "test:project-memory:browser": "node scripts/check-project-memory-browser.mjs",
@@ -59,7 +59,7 @@
     "test:canvas-browser": "node scripts/run-canvas-preview-browser.mjs",
     "test:cli-update-scope": "node --experimental-strip-types scripts/check-cli-update-scope.mjs",
     "test:dictation": "node --experimental-strip-types scripts/check-dictation.mjs",
-    "test:efficiency-pilot": "node scripts/check-efficiency-pilot.mjs && node scripts/check-efficiency-run-manifest.mjs",
+    "test:efficiency-pilot": "node scripts/check-efficiency-pilot.mjs && node scripts/check-efficiency-run-manifest.mjs && node scripts/check-efficiency-diagnostics.mjs",
     "test:efficiency-browser": "node scripts/check-efficiency-browser.mjs",
     "test:google-models-browser": "node scripts/check-google-models-browser.mjs",
     "test:companion-motion": "node scripts/check-companion-motion.mjs",
@@ -82,7 +82,7 @@
     "test:workspace-syntax-native": "node scripts/run-workspace-syntax-native.mjs",
     "test:companion-browser": "node scripts/check-companion-polish-browser.mjs",
     "test:efficiency-repo-pilot": "node scripts/check-efficiency-repo-pilot.mjs",
-    "test:first-run-tour-browser": "node scripts/check-first-run-tour-browser.mjs",
+    "test:first-run-tour-browser": "node scripts/run-canvas-preview-browser.mjs --first-run-tour",
     "test:local-app": "node --experimental-strip-types scripts/check-assistant-response-headings.mjs && node --experimental-strip-types scripts/check-model-default-suggestion.mjs && node --experimental-strip-types scripts/check-settings-upgrade.mjs && node --experimental-strip-types scripts/check-ide-evidence-push.mjs",
     "test:local-check-browser": "node scripts/check-local-check-browser.mjs",
     "test:cloud": "node --experimental-strip-types scripts/check-cloud-chat-continuation.mjs && node --experimental-strip-types scripts/check-cloud-connection-view.mjs && node --experimental-strip-types scripts/check-cloud-services-state.mjs && node --experimental-strip-types scripts/check-cloud-settings-render.mjs && node --experimental-strip-types scripts/check-cloud-v2-contract.mjs && node scripts/check-cloud-staging-build.mjs",
@@ -90,7 +90,9 @@
     "smoke:keychain": "cargo run --locked -p gyro-core --example cloud_keychain_acceptance",
     "test:activity-composer-browser": "node scripts/run-canvas-preview-browser.mjs --activity-composer",
     "smoke:workbench:source": "node scripts/check-workbench-ui.mjs && node scripts/check-ui-tokens.mjs && node scripts/check-sidebar-project-groups.mjs && node scripts/check-run-tasks.mjs",
-    "test:chat-render:invariants": "node scripts/run-chat-render.mjs --extended --invariants-only --shots"
+    "test:chat-render:invariants": "node scripts/run-chat-render.mjs --extended --invariants-only --shots",
+    "test:launch-regressions": "node --experimental-strip-types scripts/check-remote-access-client.mjs && node --experimental-strip-types scripts/check-remote-media-client.mjs && node --experimental-strip-types scripts/check-problem-drag.mjs && node scripts/check-cloud-v3-contract.mjs && node --test --experimental-strip-types scripts/check-cloud-v3-settings.test.mjs scripts/check-cloud-v3-transfers.test.mjs && node scripts/check-guard-registry.mjs",
+    "test:launch-browser": "node scripts/run-canvas-preview-browser.mjs --environment && node scripts/run-canvas-preview-browser.mjs --remote-access && node scripts/run-canvas-preview-browser.mjs --usage-settings && node scripts/check-problem-drag-browser.mjs && pnpm test:first-run-tour-browser && pnpm test:local-check-browser"
   },
   "devDependencies": {
     "@types/node": "^24.0.10",

@@ -145,7 +145,9 @@ pub fn run() {
         .manage(quit_confirmation::QuitConfirmation::default())
         .setup(|app| {
             #[cfg(debug_assertions)]
-            if crate::features::remote_access::smoke::start(app.handle())? { return Ok(()); }
+            if crate::features::remote_access::smoke::start(app.handle())? {
+                return Ok(());
+            }
             #[cfg(all(debug_assertions, feature = "native-browser-events-smoke"))]
             if browser_frontend_smoke::start(app.handle())? {
                 return Ok(());

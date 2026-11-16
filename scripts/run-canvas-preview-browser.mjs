@@ -6,10 +6,25 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createServer } from "node:net";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const origin = process.env.GYRO_TEST_ORIGIN || "http://127.0.0.1:1420";
+async function isolatedOrigin() {
+  const socket = createServer();
+  await new Promise((resolve, reject) => {
+    socket.once("error", reject);
+    socket.listen(0, "127.0.0.1", resolve);
+  });
+  const port = socket.address().port;
+  await new Promise((resolve) => socket.close(resolve));
+  return `http://127.0.0.1:${port}`;
+}
+const origin = process.env.GYRO_TEST_ORIGIN || await isolatedOrigin();
 const browserChecks = [
+  ["--first-run-tour", "first-run-tour-fixture.html", "scripts/check-first-run-tour-browser.mjs"],
+  ["--environment", "first-run-tour-fixture.html", "scripts/check-chat-environment-overlay.mjs"],
+  ["--remote-access", "remote-access-preview.html", "scripts/check-remote-access-browser.mjs"],
+  ["--usage-settings", "settings-preview.html", "scripts/check-usage-settings-browser.mjs"],
   ["--theme-parity", "capture.html", "scripts/check-theme-parity-browser.mjs"],
   ["--activity-composer", "goal-composer-fixture.html", "scripts/check-activity-composer-browser.mjs"],
   ["--workflows", "v012-workflow-fixture.html", "scripts/check-workflows-browser.mjs"],
@@ -47,6 +62,16 @@ const reachable = async () => {
 };
 
 let devServer;
+function stopDevServer() {
+  if (!devServer) return;
+  try {
+    // pnpm starts Vite as a child. Stop our entire group, never a reused server.
+    if (process.platform !== "win32") process.kill(-devServer.pid, "SIGTERM");
+    else devServer.kill("SIGTERM");
+  } catch (error) {
+    if (error.code !== "ESRCH") throw error;
+  }
+}
 if (!(await reachable())) {
   console.log(`Starting the desktop dev server for ${origin}...`);
   devServer = spawn("pnpm", [
@@ -54,6 +79,7 @@ if (!(await reachable())) {
     "--host", "127.0.0.1", "--port", new URL(origin).port || "1420", "--strictPort",
   ], {
     cwd: repoRoot,
+    detached: process.platform !== "win32",
     stdio: ["ignore", "ignore", "inherit"],
   });
   const deadline = Date.now() + 60000;
@@ -66,7 +92,7 @@ if (!(await reachable())) {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   if (!ready) {
-    devServer.kill("SIGTERM");
+    stopDevServer();
     console.error(
       `The dev server never served ${origin}/${fixture}; start 'pnpm desktop:dev' or set GYRO_TEST_ORIGIN.`,
     );
@@ -84,5 +110,5 @@ const check = spawn(process.execPath, [guard], {
   },
 });
 const exitCode = await new Promise((resolve) => check.once("exit", resolve));
-devServer?.kill("SIGTERM");
+stopDevServer();
 process.exit(exitCode ?? 1);

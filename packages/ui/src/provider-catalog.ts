@@ -1062,10 +1062,22 @@ export function providersForConfig(config: GyroConfig): ModelProviderConfig[] {
         ...catalog,
         ...host,
         capabilities: catalog?.capabilities,
-        models: host.models.map((model) => ({
-          ...catalog?.models.find((item) => item.id === model.id),
-          ...model,
-        })),
+        models: host.models.map((model) => {
+          const fallback = catalog?.models.find((item) => item.id === model.id);
+          const known = getProviderCatalogEntry(host.id)?.models.find(
+            (item) => item.id === model.id,
+          );
+          return {
+            ...fallback,
+            ...model,
+            // Older hosts send IDs only. Do not let that placeholder hide a
+            // catalog label, but preserve explicit names supplied by the host.
+            displayName:
+              model.displayName === model.id
+                ? (known?.displayName ?? model.displayName)
+                : model.displayName,
+          };
+        }),
       };
     });
   }

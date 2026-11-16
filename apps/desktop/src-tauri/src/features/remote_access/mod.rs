@@ -308,8 +308,16 @@ impl Runtime {
         }
         // Only mutations change state other devices should refetch. Publishing on reads made
         // every watching client reload on its own reload, an unbounded refresh loop.
-        if request.operation.mutates() && result.is_ok()
-            && !matches!(request.operation, Operation::UploadAttachment { complete: false, .. }) {
+        if request.operation.mutates()
+            && result.is_ok()
+            && !matches!(
+                request.operation,
+                Operation::UploadAttachment {
+                    complete: false,
+                    ..
+                }
+            )
+        {
             if let Some(session) = request.operation.session_id() {
                 self.publish(session, "refresh", Value::Null);
             }

@@ -83,6 +83,7 @@ for (const test of [
     custom: true,
     expected: [["command", "user-command"]],
   },
+  { name: "remote workspace leaves its shortcuts to the remote view", remote: true, expected: [] },
   { name: "plain typing does not invoke Browser", meta: false, expected: [] },
 ]) {
   const calls = [];
@@ -99,6 +100,7 @@ for (const test of [
   };
   const context = {
     result: undefined,
+    remoteWorkspaceVisible: { current: Boolean(test.remote) },
     navigator: { platform: "MacIntel" },
     workbench: {
       activeDestination: "workspace",
@@ -106,6 +108,7 @@ for (const test of [
       preferences: { workspaceKeybindings: {} },
       ide: {},
     },
+    editorCommandWouldStealTyping: () => false,
     workspaceCommandForKeybinding: () =>
       test.custom ? { id: "user-command" } : undefined,
     activeSession: undefined,

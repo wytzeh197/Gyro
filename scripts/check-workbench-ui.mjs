@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import ts from "typescript";
 import { readUiStyles } from "./ui-style-sources.mjs";
 
 import { readRepoSource } from "./read-repo-source.mjs";
@@ -5548,7 +5549,7 @@ expect(
     readRepoFile("apps/desktop/src-tauri/src/window_controls.rs").includes(
       "MAIN_TRAFFIC_LIGHT_Y",
     ) &&
-    desktopRustSource.includes("apply_macos_traffic_light_position(&window)") &&
+    desktopRustSource.includes("apply_macos_native_window_controls(&window)") &&
     desktopRustSource.includes("apply_macos_traffic_light_position(&main)") &&
     readRepoFile("apps/desktop/src-tauri/src/session_browser.rs").includes(
       "window_controls::apply_macos_traffic_light_position(&main)",
@@ -6147,7 +6148,7 @@ expect(
       'const railPanel: ChatSidePanelId = activeRailPanel ?? "environment"',
     ) &&
     sourceIncludes(surfaceSource, "const isEnvironmentPopoverOpen =") &&
-    sourceIncludes(surfaceSource, "!isEmptyStart &&") &&
+    sourceIncludes(surfaceSource, "(!isEmptyStart || Boolean(environmentRemote)) &&") &&
     sourceIncludes(surfaceSource, "const environmentPopover =") &&
     sourceIncludes(surfaceSource, "{sidePanel}") &&
     sourceIncludes(surfaceSource, '"Reopen goal"') &&
@@ -6389,7 +6390,7 @@ expect(
       surfaceSource,
       'onComposerAction?.("select-workspace-mode")',
     ) &&
-    sourceIncludes(surfaceSource, 'onComposerAction?.("select-branch")') &&
+    sourceIncludes(surfaceSource, 'onAction?.("select-branch")') &&
     sourceIncludes(surfaceSource, "sourceControl?.additions") &&
     sourceIncludes(surfaceSource, "sourceControl?.deletions") &&
     sourceIncludes(surfaceSource, "sourceControl?.files.length") &&
@@ -8060,10 +8061,10 @@ expect(
     ) &&
     sourceIncludes(surfaceSource, "if (isEmptyStart)") &&
     sourceIncludes(surfaceSource, 'aria-label="New Chat"') &&
-    sourceIncludes(surfaceSource, "!isEmptyStart &&") &&
+    sourceIncludes(surfaceSource, "(!isEmptyStart || Boolean(environmentRemote)) &&") &&
     sourceIncludes(
       surfaceSource,
-      '!isEmptyStart && activeRailPanel === "environment" && !isCompanionPanel',
+      'isCompanionPanel ? environmentOverlayKey === environmentKey : activeRailPanel === "environment"',
     ),
   "Cold launch and New chat should keep recent sessions unselected, honor per-draft workspace defaults, and render the start screen from transcript events.",
 );
@@ -8352,19 +8353,19 @@ for (const transcriptHelper of [
   );
 }
 
-const buttonMatches = surfaceSource.matchAll(/<button[\s\S]*?>/g);
-for (const match of buttonMatches) {
-  const tag = match[0];
-  // Resize handles and sliders act via pointer/keyboard rather than click.
-  if (
-    !tag.includes("onClick") &&
-    !tag.includes("disabled") &&
-    !tag.includes("onPointerDown") &&
-    !tag.includes("onKeyDown")
-  ) {
-    failures.push(`Button has no deterministic action: ${tag}`);
+// Parse JSX attributes: an arrow in onDragStart must not truncate the tag
+// before its onClick handler, as a <button...> regular expression would.
+const buttonTree = ts.createSourceFile("surfaces.tsx", surfaceSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+function checkButtonActions(node) {
+  if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText(buttonTree) === "button") {
+    const attributes = new Set(node.attributes.properties.filter(ts.isJsxAttribute).map(attribute => attribute.name.getText(buttonTree)));
+    if (!["onClick", "disabled", "onPointerDown", "onKeyDown"].some(name => attributes.has(name))) {
+      failures.push(`Button has no deterministic action: ${node.getText(buttonTree)}`);
+    }
   }
+  ts.forEachChild(node, checkButtonActions);
 }
+checkButtonActions(buttonTree);
 
 for (const secretPattern of [
   /sk-[A-Za-z0-9_-]{20,}/,
@@ -8878,7 +8879,7 @@ expect(
     surfaceSource.includes(
       '"--usage": `${(remaining.percent ?? 0) * 3.6}deg`',
     ) &&
-    surfaceSource.includes("No plan window API on this provider") &&
+    surfaceSource.includes("This provider does not report plan windows. View recorded usage in Tokens.") &&
     surfaceSource.includes("level not reported") &&
     surfaceSource.includes('aria-label="Plan usage limits"') &&
     surfaceSource.includes('className="gyro-composer-limit-summary"') &&

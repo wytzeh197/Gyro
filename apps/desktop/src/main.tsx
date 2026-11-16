@@ -3,7 +3,6 @@ import { isTauri } from "@tauri-apps/api/core";
 import { syncNativeAppearance } from "./native-appearance";
 import ReactDOM from "react-dom/client";
 import { EarlyShell } from "./early-shell";
-import { RemoteWorkspaceRoot } from "./remote-access/root";
 import { AppFailure } from "./app-failure";
 import { resolveBootSurface } from "./surface-boundary";
 import { readStoredAppearance } from "./ui-storage";
@@ -125,13 +124,14 @@ if (bootSurface === "embedded") {
 
   void Promise.all([
     import("./App"),
+    import("./remote-access/root"),
     import("@gyro-dev/ui/styles.css"),
     import("@gyro-dev/ui/installed-update.css"),
     import("./menu-bar.css"),
     import("./dictation-access"),
     import("@gyro-dev/ui/tooltips"),
   ])
-    .then(([{ App }, , , , , { installGyroTooltips }]) => {
+    .then(([{ App }, { RemoteWorkspaceRoot }, , , , , { installGyroTooltips }]) => {
       installGyroTooltips();
       root.render(
         <React.StrictMode>

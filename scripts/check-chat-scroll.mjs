@@ -55,7 +55,12 @@ class Transcript {
     this.clientHeight = 200;
     this.top = 0;
     this.children = [];
-    this.style = { setProperty() {} };
+    this.style = {
+      getPropertyValue() {
+        return "";
+      },
+      setProperty() {},
+    };
   }
   get scrollTop() {
     return this.top;
@@ -74,6 +79,9 @@ function mount(sessionId, ids = ["first"], height = 1000, paging = {}) {
   const layouts = [],
     effects = [],
     frames = new Map();
+  const activityLayouts = [],
+    activityEffects = [];
+  let resizeCallback;
   let frameId = 0;
   const context = {
     exports: {},
@@ -81,11 +89,25 @@ function mount(sessionId, ids = ["first"], height = 1000, paging = {}) {
     Element: Transcript,
     window: {
       getComputedStyle: () => ({ paddingTop: "0", paddingBottom: "0" }),
+      addEventListener() {},
+      removeEventListener() {},
       requestAnimationFrame: (callback) => {
         frames.set(++frameId, callback);
         return frameId;
       },
       cancelAnimationFrame: (id) => frames.delete(id),
+    },
+    ResizeObserver: class {
+      constructor(callback) {
+        resizeCallback = callback;
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+    MutationObserver: class {
+      observe() {}
+      disconnect() {}
     },
     require: (name) => {
       if (name === "react")
@@ -93,8 +115,14 @@ function mount(sessionId, ids = ["first"], height = 1000, paging = {}) {
           useState: (value) => [value, () => {}],
           useRef: (value) => ({ current: value }),
           useCallback: (callback) => callback,
-          useLayoutEffect: (callback) => layouts.push(callback),
-          useEffect: (callback) => effects.push(callback),
+          useLayoutEffect: (callback, deps) => {
+            layouts.push(callback);
+            if (deps.some(Array.isArray)) activityLayouts.push(callback);
+          },
+          useEffect: (callback, deps) => {
+            effects.push(callback);
+            if (deps.some(Array.isArray)) activityEffects.push(callback);
+          },
         };
       if (name === "./chat-scroll-memory") return { chatScrollMemory: memory };
       throw new Error("Unexpected scroll dependency " + name);
@@ -110,21 +138,60 @@ function mount(sessionId, ids = ["first"], height = 1000, paging = {}) {
   });
   const node = new Transcript(height);
   hook.transcriptRef.current = node;
-  layouts.forEach((callback) => callback());
-  const cleanup = effects.map((callback) => callback()).filter(Boolean);
+  const cleanup = layouts.map((callback) => callback()).filter(Boolean);
+  cleanup.push(...effects.map((callback) => callback()).filter(Boolean));
   [...frames.values()].forEach((callback) => callback());
   frames.clear();
   return {
     hook,
     node,
+    activityBeforePaint: () =>
+      activityLayouts.forEach((callback) => callback()),
+    resizeBeforePaint: () => resizeCallback(),
     activityUpdate: () => {
-      effects[0]();
+      activityLayouts.forEach((callback) => callback());
+      activityEffects.forEach((callback) => callback());
       [...frames.values()].forEach((callback) => callback());
       frames.clear();
     },
     unmount: () => cleanup.forEach((callback) => callback()),
   };
 }
+const live = mount("tool-transition");
+live.node.scrollHeight += 320;
+live.activityBeforePaint();
+assert.equal(
+  live.node.scrollTop,
+  1120,
+  "tool activity follows before paint, without waiting for a frame",
+);
+live.node.scrollHeight -= 240;
+live.resizeBeforePaint();
+assert.equal(
+  live.node.scrollTop,
+  880,
+  "collapsing tool details corrects scroll before paint",
+);
+live.node.scrollHeight += 400;
+live.resizeBeforePaint();
+assert.equal(
+  live.node.scrollTop,
+  1280,
+  "async tool content growth follows before paint",
+);
+live.hook.onTranscriptWheel({ deltaY: -100 });
+live.node.scrollTop = 700;
+live.hook.onTranscriptScroll({ currentTarget: live.node });
+live.node.scrollHeight += 300;
+live.activityBeforePaint();
+live.resizeBeforePaint();
+assert.equal(
+  live.node.scrollTop,
+  700,
+  "tool layout changes preserve the reader position",
+);
+live.unmount();
+
 const initial = mount("one");
 assert.equal(initial.node.scrollTop, 800);
 initial.hook.onTranscriptWheel({ deltaY: -1 });
@@ -222,9 +289,17 @@ const shortPage = mount("short-page", ["recent"], 150, {
   onLoadEarlier: () => olderRequests++,
 });
 shortPage.hook.requestEarlierMessages(false);
-assert.equal(olderRequests, 0, "short pages cannot auto-fetch the entire history");
+assert.equal(
+  olderRequests,
+  0,
+  "short pages cannot auto-fetch the entire history",
+);
 shortPage.hook.requestEarlierMessages(true);
-assert.equal(olderRequests, 1, "manual paging works even when recent activity fits on screen");
+assert.equal(
+  olderRequests,
+  1,
+  "manual paging works even when recent activity fits on screen",
+);
 shortPage.unmount();
 const busyPage = mount("busy-page", ["recent"], 150, {
   hasMoreBefore: true,
@@ -235,5 +310,5 @@ busyPage.hook.requestEarlierMessages(true);
 assert.equal(olderRequests, 1, "loading blocks another page request");
 busyPage.unmount();
 console.log(
-  "Chat scroll: small wheel/touch/key/pointer gestures, activity updates, remount, reader/following state, older-page geometry, sibling isolation and bounded memory passed.",
+  "Chat scroll: before-paint tool updates and resize, small wheel/touch/key/pointer gestures, remount, reader/following state, older-page geometry, sibling isolation and bounded memory passed.",
 );

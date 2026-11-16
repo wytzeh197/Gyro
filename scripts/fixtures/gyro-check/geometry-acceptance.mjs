@@ -3,6 +3,33 @@
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { readUiStyles } from "../../ui-style-sources.mjs";
+
+// Render the real component instead of depending on a dated design mockup.
+async function productionAgents() {
+  const requireUi = createRequire(new URL("../../../packages/ui/package.json", import.meta.url));
+  const requireDesktop = createRequire(new URL("../../../apps/desktop/package.json", import.meta.url));
+  const { build } = createRequire(requireDesktop.resolve("vite"))("esbuild");
+  const compiled = await build({
+    stdin: { contents: `
+      import React from "react";
+      import { renderToStaticMarkup } from "react-dom/server";
+      import { SubagentList } from "./packages/ui/src/subagents-view.tsx";
+      import { subagentActivitySummary } from "./packages/ui/src/subagents.ts";
+      export function renderAgents(statuses) {
+        const agents = statuses.map((status, i) => ({ agentId:["parser","tests","review"][i], name:["Parser","Tests","Review"][i], status, task:"Verify", providerId:"fixture", readOnly:true, parentSessionId:"fixture", createdAt:"2026-11-16T10:00:00Z", updatedAt:"2026-11-16T10:00:00Z", elapsedMs:1000 }));
+        return renderToStaticMarkup(<main id="ready"><div id="agent-group"><SubagentList state={{agents, eventsByAgentId:{}, onSelect:()=>{}, onStop:()=>{}}} /></div><output id="summary">{subagentActivitySummary(agents).label}</output></main>);
+      }`, resolveDir: fileURLToPath(new URL("../../../", import.meta.url)), loader:"tsx" },
+    bundle:true, write:false, format:"cjs", platform:"node", jsx:"automatic",
+    external:["react", "react-dom", "react-dom/server", "lucide-react"],
+    loader:{".png":"dataurl", ".svg":"dataurl", ".css":"empty"},
+  });
+  const module = { exports:{} };
+  new Function("require", "module", "exports", compiled.outputFiles[0].text)(requireUi, module, module.exports);
+  return module.exports.renderAgents;
+}
 
 export async function checkGeometryAndCompletion({
   send,
@@ -80,62 +107,41 @@ export async function checkGeometryAndCompletion({
     checks++;
   }
 
-  const html = await readFile(
-    join(root, "mockups/subagents-2026-10-30/conversation.html"),
-    "utf8",
-  );
-  await send("Page.setDocumentContent", { frameId: frameTree.frame.id, html });
-  await install();
+  const renderAgents = await productionAgents();
+  const styles = readUiStyles();
+  const show = async (statuses) => {
+    await send("Page.setDocumentContent", { frameId: frameTree.frame.id,
+      html: `<!doctype html><html data-theme="dark"><head><style>${styles}</style></head><body>${renderAgents(statuses)}</body></html>` });
+    await install();
+  };
+  await show(["completed", "waiting", "running"]);
   const rows = {};
-  for (const id of ["parser", "tests", "review"]) {
-    result = await read(`[data-agent-row="${id}"]`, "height", "#agent-group");
+  for (const name of ["Parser", "Tests", "Review"]) {
+    result = await read(`button[aria-label^="Open ${name} working process"]`, "height", "#agent-group");
     assert.equal(result.ok, true);
     assert.ok(result.values.row > 0 && result.values.row < 90);
-    rows[id] = result.values.row;
+    rows[name] = result.values.row;
     checks++;
   }
-  const click = (selector) =>
-    evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
-  const reply = () =>
-    evaluate(
-      "document.querySelector('.latest-assistant .assistant-copy').textContent",
-    );
-  await click("#add-reply");
-  assert.match(await reply(), /still waiting/);
+  const summary = () => evaluate("document.querySelector('#summary').textContent");
+  assert.match(await summary(), /approval.*working/);
   checks++;
-  await click('[data-action="review"][data-agent="tests"]');
-  await click('[data-action="decline"][data-agent="tests"]');
-  await click("#add-reply");
-  assert.match(
-    await reply(),
-    /stopped or declined.*still in progress; the checks are incomplete/,
-  );
-  checks++;
-  await click('[data-action="stop"][data-agent="review"]');
-  await click("#add-reply");
-  assert.match(await reply(), /stopped or declined.*checks are incomplete/);
-  assert.doesNotMatch(await reply(), /all checks are complete/);
-  checks++;
+  await show(["completed", "cancelled", "interrupted"]);
+  assert.match(await summary(), /attention/);
+  assert.equal(await evaluate("document.querySelector('[aria-label=\"Open Tests working process · Cancelled\"]') !== null"), true);
+  assert.doesNotMatch(await summary(), /3 done|all checks.*complete/i);
+  checks += 3;
   const screenshot = await send("Page.captureScreenshot", { format: "png" });
-  await writeFile(
-    join(artifacts, "stopped-work-corrected.png"),
-    Buffer.from(screenshot.data, "base64"),
-  );
-  await click('[data-scenario="finished"]');
-  await click("#add-reply");
-  assert.match(await reply(), /all checks are complete/);
-  checks++;
-  assert.equal(
-    await evaluate(
-      "document.querySelectorAll('.latest-assistant #agent-group').length",
-    ),
-    1,
-  );
-  checks++;
+  await writeFile(join(artifacts, "stopped-work-production.png"), Buffer.from(screenshot.data, "base64"));
+  await show(["completed", "completed", "completed"]);
+  assert.equal(await summary(), "3 done");
+  // Agent completion describes activity; it does not certify independent checks.
+  assert.doesNotMatch(await summary(), /checks.*complete|verified/i);
+  checks += 2;
   return {
     checks,
     rows,
     viewport: { width: 1440, height: 1080 },
-    evidence: "Chromium DOM component and mockup; native WebKit unverified",
+    evidence: "Chromium DOM using the production SubagentList and status summary; native WebKit unverified",
   };
 }

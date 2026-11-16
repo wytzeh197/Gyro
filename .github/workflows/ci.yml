@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main, v0.1.0, Heads/v0.1.1, v0.1.3]
+    branches: [main, v0.1.0, Heads/v0.1.1, v0.1.3, v0.1.4]
 
 jobs:
   node:
@@ -40,6 +40,7 @@ jobs:
           retention-days: 7
       # Drives the Canvas preview in a headless Chromium against the dev
       # server; scripts/run-canvas-preview-browser.mjs boots Vite itself.
+      - run: pnpm test:launch-browser
       - run: pnpm test:canvas-browser
       - run: pnpm test:activity-composer-browser
       - run: pnpm test:theme-parity:browser

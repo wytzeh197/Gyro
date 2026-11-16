@@ -284,6 +284,7 @@ fn command_output(output: gyro_core::ExecutionOutcome) -> IdeCommandOutput {
         stderr.push_str("\n[stderr truncated by Gyro]");
     }
     IdeCommandOutput {
+        diagnostics: Vec::new(),
         exit_code: match output.termination {
             ExecutionTermination::Exited { code } => code,
             _ => None,

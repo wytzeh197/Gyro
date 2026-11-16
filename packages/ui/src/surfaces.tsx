@@ -286,6 +286,7 @@ import {
   revealSettingsTarget,
 } from "./settings-disclosure";
 import { SettingsHelp } from "./settings-help";
+import { TokenUsageSummary, UsageSettingsPages } from "./usage-settings";
 import {
   SettingsSection,
   SettingsStatus,
@@ -426,6 +427,7 @@ import {
   chatGridDropZones,
   nearestChatGridDropZone,
 } from "./chat-grid-drop";
+import type { ProblemDiagnostic } from "./types";
 import type { KeepAliveWatch } from "./chat-keep-alive";
 import { keepAliveWatchesFromPanes } from "./chat-keep-alive";
 import { ChatKeepAlive } from "./chat-keep-alive-view";
@@ -1396,15 +1398,21 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   },
   {
     section: "usage-limits",
-    label: "Budgets & warnings",
-    detail: "Provider allowance, spend, and local guardrails",
+    label: "Token budget",
+    detail: "Set a daily token budget for the selected provider",
     keywords: "usage limits daily budget cap tokens",
   },
   {
     section: "usage-limits",
-    label: "Provider spend",
-    detail: "Provider-owned billing and allowance controls",
-    keywords: "cost budget billing usage",
+    label: "Recorded tokens",
+    detail: "Review input, output, and cached tokens recorded by Gyro",
+    keywords: "tokens input output cached usage history",
+  },
+  {
+    section: "usage-limits",
+    label: "Provider-reported allowances",
+    detail: "Remaining plan allowance and reset windows",
+    keywords: "provider cost billing usage limits",
   },
   {
     section: "usage-limits",
@@ -13648,6 +13656,7 @@ function WorkbenchPaneContent({
   browserOverlayOccluded = false,
   onSelectOutputChannel,
   onRunTestTask,
+  onSendProblemToChat,
 }: {
   terminalSessionNavigation?: boolean;
   terminalPanelActions?: ReactNode;
@@ -13723,6 +13732,7 @@ function WorkbenchPaneContent({
   ) => void;
   onSelectOutputChannel?: (channelId: string) => void;
   onRunTestTask?: (taskId: string) => void;
+  onSendProblemToChat?: (diagnostic: ProblemDiagnostic) => void;
 }) {
   if (activePaneTab === "diff") {
     return (
@@ -13770,11 +13780,12 @@ function WorkbenchPaneContent({
       <section className="gyro-problems-pane" aria-label="Problems">
         <header>
           <CircleDashed size={15} />
-          <span>{ide?.diagnostics.length ?? 0} problems</span>
+          <span>{ide?.diagnostics.length ?? 0} {ide?.diagnostics.length === 1 ? "problem" : "problems"}</span>
         </header>
         <div className="gyro-problems-list">
           {(ide?.diagnostics ?? []).length > 0 ? (
             ide?.diagnostics.map((diagnostic) => (
+              <div className="gyro-problem-entry" key={diagnostic.id}>
               <button
                 className={`gyro-problem-row is-${diagnostic.severity}`}
                 draggable
@@ -13798,11 +13809,17 @@ function WorkbenchPaneContent({
                   {diagnostic.source ? ` · ${diagnostic.source}` : ""}
                 </span>
               </button>
+              {onSendProblemToChat ? <button
+                className="gyro-secondary-button"
+                type="button"
+                aria-label={`Send problem to chat: ${diagnostic.message}`}
+                onClick={() => onSendProblemToChat(diagnostic)}
+              >Send to chat</button> : null}
+              </div>
             ))
           ) : (
             <div className="gyro-panel-empty">
-              No diagnostics yet. Language server status will appear here when
-              configured.
+              No problems reported. Run a build or test task, or connect a language server.
             </div>
           )}
         </div>
@@ -14109,6 +14126,7 @@ type WorkspaceToolPanelProps = {
   browserOverlayOccluded?: boolean;
   onSelectOutputChannel?: (channelId: string) => void;
   onRunTestTask?: (taskId: string) => void;
+  onSendProblemToChat?: (diagnostic: ProblemDiagnostic) => void;
 };
 
 export function WorkspaceToolPanel({
@@ -14178,6 +14196,7 @@ export function WorkspaceToolPanel({
   onBrowserHostBoundsChange,
   onSelectOutputChannel,
   onRunTestTask,
+  onSendProblemToChat,
 }: WorkspaceToolPanelProps) {
   const [isResizing, setIsResizing] = useState(false);
   const [isLauncherOpen, setIsLauncherOpen] = useState(false);
@@ -14454,6 +14473,7 @@ export function WorkspaceToolPanel({
         onBrowserDeviceChange={onBrowserDeviceChange}
         onBrowserForward={onBrowserForward}
         onRunTestTask={onRunTestTask}
+        onSendProblemToChat={onSendProblemToChat}
         onSelectOutputChannel={onSelectOutputChannel}
         onBrowserHostBoundsChange={onBrowserHostBoundsChange}
         onBrowserNavigate={onBrowserNavigate}
@@ -19719,14 +19739,13 @@ export function SettingsSurface({
                   id="provider-accounts"
                   label="Connected providers"
                   summary={`${connectedRemoteProviders.length} connected`}
+                  collapsible={false}
                 >
                   {connectedCliProviders.length > 0 ? (
-                    <SettingsMore label="Provider allowances">
-                      <ConnectedProviderAllowances
-                        providers={connectedCliProviders}
-                        usageByProvider={providerUsageByProvider}
-                      />
-                    </SettingsMore>
+                    <ConnectedProviderAllowances
+                      providers={connectedCliProviders}
+                      usageByProvider={providerUsageByProvider}
+                    />
                   ) : null}
                   <div
                     className="gyro-provider-connect-help"
@@ -19939,24 +19958,18 @@ export function SettingsSurface({
             <SettingsSection
               icon={Gauge}
               title="Usage & limits"
-              description="Understand usage and set sensible limits."
+              description="Track provider allowances and the tokens you use in Gyro."
             >
-              <SettingsGroup
-                id="provider-usage"
-                label="Provider-reported allowances"
-                description="Only windows actually reported by your provider are shown."
-              >
-                {usageProvider ? (
-                  <div className="gyro-usage-dashboard">
+              <UsageSettingsPages
+                providerControl={
+                  usageProvider ? (
                     <label className="gyro-usage-provider-select">
                       <span>Provider</span>
                       <SettingsSelect
                         aria-label="Usage provider"
                         value={usageProvider.id}
                         onChange={(event) =>
-                          onUsageProviderChange?.(
-                            event.target.value as ProviderId,
-                          )
+                          onUsageProviderChange?.(event.target.value as ProviderId)
                         }
                       >
                         {providerConfigs.map((provider) => (
@@ -19972,237 +19985,272 @@ export function SettingsSurface({
                         ))}
                       </SettingsSelect>
                     </label>
-                    <div className="gyro-usage-toolbar">
-                      <div>
-                        <strong>
-                          {usageProvider.id === "openai" ||
-                          usageProvider.id === "anthropic" ||
-                          usageProvider.id === "xai" ||
-                          usageProvider.id === "kimi"
-                            ? `${usageProvider.displayName} plan windows`
-                            : `${usageProvider.displayName} spend`}
-                        </strong>
-                        <span>
+                  ) : null
+                }
+                usage={
+                  <>
+                    <SettingsGroup
+                      id="provider-usage"
+                      label="Provider-reported allowances"
+                      description="Your remaining plan allowance and reset times."
+                      collapsible={false}
+                    >
+                      {usageProvider ? (
+                        <div className="gyro-usage-dashboard">
+                          <div className="gyro-usage-toolbar">
+                            <div>
+                              <strong>{usageProvider.displayName}</strong>
+                              <span>
+                                {providerUsage?.status === "available" &&
+                                providerUsage.windows.length > 0
+                                  ? providerUsage.fetchedAt
+                                    ? `Updated ${new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date(providerUsage.fetchedAt))}${providerUsage.stale ? " · stale" : ""} · allowance remaining`
+                                    : "Allowance remaining in each plan window"
+                                  : providerUsage?.status === "loading"
+                                    ? "Checking with the provider…"
+                                    : usageProvider.id === "openai" ||
+                                        usageProvider.id === "anthropic" ||
+                                        usageProvider.id === "xai" ||
+                                        usageProvider.id === "kimi"
+                                      ? usageProvider.id === "xai"
+                                        ? "Refresh to load Grok Build weekly credit usage"
+                                        : "Plan windows appear after the first chat or refresh"
+                                      : "This provider does not report plan windows. View recorded usage in Tokens."}
+                              </span>
+                            </div>
+                            <div className="gyro-usage-toolbar-actions">
+                              {hasProviderUsageWindows ? (
+                                <SettingsSegmented
+                                  label="Usage visualization"
+                                  value={usageVisualization}
+                                  options={[
+                                    { label: "Bars", value: "bars" },
+                                    { label: "Wheels", value: "wheels" },
+                                  ]}
+                                  onChange={(value) =>
+                                    onUsageVisualizationChange?.(value)
+                                  }
+                                />
+                              ) : null}
+                              <button
+                                aria-label="Refresh provider usage"
+                                className="gyro-secondary-button"
+                                disabled={providerUsage?.status === "loading"}
+                                onClick={() =>
+                                  onRefreshProviderUsage?.(usageProvider.id)
+                                }
+                                title="Refresh provider usage"
+                                type="button"
+                              >
+                                <RefreshCw
+                                  className={
+                                    providerUsage?.status === "loading"
+                                      ? "is-spinning"
+                                      : ""
+                                  }
+                                  size={14}
+                                />
+                                Refresh
+                              </button>
+                            </div>
+                          </div>
                           {providerUsage?.status === "available" &&
-                          providerUsage.windows.length > 0
-                            ? providerUsage.fetchedAt
-                              ? `Updated ${new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date(providerUsage.fetchedAt))}${providerUsage.stale ? " · stale" : ""} · % of window spent`
-                              : "Percent of each plan window spent"
-                            : providerUsage?.status === "loading"
-                              ? "Checking with the provider…"
-                              : usageProvider.id === "openai" ||
-                                  usageProvider.id === "anthropic" ||
-                                  usageProvider.id === "xai" ||
-                                  usageProvider.id === "kimi"
-                                ? usageProvider.id === "xai"
-                                  ? "Refresh to load Grok Build weekly credit usage"
-                                  : "Plan windows appear after the first chat or refresh"
-                                : "No plan window API on this provider — local spend measured by Gyro is below"}
-                        </span>
-                      </div>
-                      <div className="gyro-usage-toolbar-actions">
-                        {hasProviderUsageWindows ? (
-                          <SettingsSegmented
-                            label="Usage visualization"
-                            value={usageVisualization}
-                            options={[
-                              { label: "Bars", value: "bars" },
-                              { label: "Wheels", value: "wheels" },
-                            ]}
-                            onChange={(value) =>
-                              onUsageVisualizationChange?.(value)
-                            }
-                          />
-                        ) : null}
-                        <button
-                          aria-label="Refresh provider usage"
-                          className="gyro-icon-button is-subtle"
-                          disabled={providerUsage?.status === "loading"}
-                          onClick={() =>
-                            onRefreshProviderUsage?.(usageProvider.id)
-                          }
-                          title="Refresh provider usage"
-                          type="button"
-                        >
-                          <RefreshCw
-                            className={
-                              providerUsage?.status === "loading"
-                                ? "is-spinning"
-                                : ""
-                            }
-                            size={14}
-                          />
-                        </button>
-                      </div>
-                    </div>
-                    {providerUsage?.status === "available" &&
-                    providerUsage.stale &&
-                    providerUsage.error ? (
-                      <p className="gyro-usage-stale-note" role="status">
-                        {providerUsage.error}
-                      </p>
-                    ) : null}
-                    {providerUsage?.status === "available" &&
-                    providerUsage.windows.length > 0 ? (
-                      <div className="gyro-usage-cards">
-                        {/* Show every window the provider (or ledger) reported —
-                        five-hour, weekly, weekly-opus, etc. — not only two slots. */}
-                        {[...providerUsage.windows]
-                          .sort((left, right) => {
-                            const order = ["five-hour", "weekly"];
-                            const leftRank = order.indexOf(left.id);
-                            const rightRank = order.indexOf(right.id);
-                            return (
-                              (leftRank === -1 ? order.length : leftRank) -
-                              (rightRank === -1 ? order.length : rightRank)
-                            );
-                          })
-                          .map((window) => (
+                          providerUsage.stale &&
+                          providerUsage.error ? (
+                            <p className="gyro-usage-stale-note" role="status">
+                              {providerUsage.error}
+                            </p>
+                          ) : null}
+                          {providerUsage?.status === "available" &&
+                          providerUsage.windows.length > 0 ? (
+                            <div className="gyro-usage-cards">
+                              {/* Show every window the provider (or ledger) reported —
+                                five-hour, weekly, weekly-opus, etc. — not only two slots. */}
+                              {[...providerUsage.windows]
+                                .sort((left, right) => {
+                                  const order = ["five-hour", "weekly"];
+                                  const leftRank = order.indexOf(left.id);
+                                  const rightRank = order.indexOf(right.id);
+                                  return (
+                                    (leftRank === -1 ? order.length : leftRank) -
+                                    (rightRank === -1 ? order.length : rightRank)
+                                  );
+                                })
+                                .map((window) => (
+                                  <UsageCard
+                                    key={window.id}
+                                    visualization={usageVisualization}
+                                    window={window}
+                                  />
+                                ))}
+                            </div>
+                          ) : providerUsage?.status === "loading" ||
+                            providerUsage?.status === "error" ? (
+                            <div className="gyro-usage-empty" role="status">
+                              <Gauge size={22} />
+                              <div>
+                                <strong>
+                                  {providerUsage.status === "loading"
+                                    ? "Loading provider allowance…"
+                                    : "Provider allowance could not be loaded"}
+                                </strong>
+                                <span>
+                                  {providerUsage.error ??
+                                    "Connect or refresh this provider to load plan usage."}
+                                </span>
+                              </div>
+                              <button
+                                className="gyro-secondary-button"
+                                disabled={providerUsage.status === "loading"}
+                                onClick={() =>
+                                  onRefreshProviderUsage?.(usageProvider.id)
+                                }
+                                type="button"
+                              >
+                                <RefreshCw size={14} />
+                                Refresh
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="gyro-usage-empty" role="status">
+                              <Gauge size={22} />
+                              <div>
+                                <strong>Allowance not reported</strong>
+                                <span>
+                                  This provider has not returned an allowance.
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="gyro-usage-empty">
+                          <Gauge size={22} />
+                          <div>
+                            <strong>No providers configured</strong>
+                            <span>Connect a provider to inspect reported usage.</span>
+                          </div>
+                        </div>
+                      )}
+                    </SettingsGroup>
+
+                    <SettingsGroup
+                      id="usage-controls"
+                      label="Warnings & run controls"
+                      collapsible={false}
+                    >
+                      <SettingsRow
+                        label="Daily pace warning"
+                        detail="Warn when today’s usage reaches about one seventh (14%) of the weekly allowance."
+                      >
+                        <SettingsSwitch
+                          checked={dailyPaceWarning}
+                          label="Daily pace warning"
+                          onChange={(enabled) => onDailyPaceWarningChange?.(enabled)}
+                        />
+                      </SettingsRow>
+                      <SettingsRow
+                        label="Pause provider runs"
+                        detail={
+                          usageSafety?.pause.active
+                            ? usagePauseDetail(usageSafety)
+                            : "Hold every provider run until you resume. Automations included."
+                        }
+                      >
+                        <SettingsSwitch
+                          checked={Boolean(usageSafety?.pause.active)}
+                          label="Pause provider runs"
+                          onChange={(checked) => onUsagePauseChange?.(checked)}
+                        />
+                      </SettingsRow>
+                    </SettingsGroup>
+                    <p className="gyro-usage-footnote">
+                      Billing and plan limits are managed by your provider.
+                    </p>
+                  </>
+                }
+                tokens={
+                  <>
+                    <TokenUsageSummary
+                      ledger={
+                        providerLedger?.providerId === usageProvider?.id
+                          ? providerLedger
+                          : undefined
+                      }
+                    />
+                    <SettingsGroup
+                      id="local-usage"
+                      label="Local usage windows"
+                      description="Local budgets or reference levels, separate from provider allowances."
+                      collapsible={false}
+                    >
+                      {localUsageWindows.length ? (
+                        <div className="gyro-usage-cards">
+                          {localUsageWindows.map((window) => (
                             <UsageCard
                               key={window.id}
-                              visualization={usageVisualization}
-                              window={window}
+                              resetCaption={`${window.detail}${window.isEstimated ? " · partly estimated" : ""}`}
+                              visualization="bars"
+                              window={{
+                                id: window.id,
+                                label: `${window.id === "five-hour" ? "5-hour" : "Weekly"} ${window.hasBudget ? "budget" : "reference"} · local`,
+                                usedPercent: window.percent,
+                              }}
                             />
                           ))}
-                      </div>
-                    ) : providerUsage?.status === "loading" ||
-                      providerUsage?.status === "error" ? (
-                      <div className="gyro-usage-empty" role="status">
-                        <Gauge size={22} />
-                        <div>
-                          <strong>
-                            {providerUsage.status === "loading"
-                              ? "Loading provider allowance…"
-                              : "Provider allowance could not be loaded"}
-                          </strong>
-                          <span>
-                            {providerUsage.error ??
-                              "Connect or refresh this provider to load plan usage."}
-                          </span>
                         </div>
-                        <button
-                          className="gyro-secondary-button"
-                          disabled={providerUsage.status === "loading"}
-                          onClick={() =>
-                            onRefreshProviderUsage?.(usageProvider.id)
+                      ) : (
+                        <SettingsEmptyState
+                          icon={<Gauge size={24} />}
+                          title="No usage recorded yet"
+                          description="Local usage appears here after your first run."
+                        />
+                      )}
+                    </SettingsGroup>
+
+                    <SettingsGroup
+                      id="usage-limits"
+                      label="Token budget"
+                      collapsible={false}
+                    >
+                      <SettingsRow
+                        label={
+                          usageProvider
+                            ? `${usageProvider.displayName} daily budget`
+                            : "Daily budget"
+                        }
+                        detail={
+                          providerLedger?.budget
+                            ? "Holds council runs and automations at 10% left and stops the provider when observed usage reaches the token budget. An in-flight request can exceed it; this is not an invoice limit."
+                            : "Set an observed token budget instead of the default reference. In-flight requests can exceed it; provider billing is separate."
+                        }
+                      >
+                        <SettingsSelect
+                          aria-label="Daily token budget"
+                          className="gyro-settings-select"
+                          disabled={!usageProvider}
+                          onChange={(event) =>
+                            usageProvider &&
+                            onProviderBudgetChange?.(
+                              usageProvider.id,
+                              Number(event.target.value),
+                            )
                           }
-                          type="button"
+                          value={String(providerLedger?.budget?.maxTokens ?? 0)}
                         >
-                          <RefreshCw size={14} />
-                          Refresh
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="gyro-usage-empty" role="status">
-                        <Gauge size={22} />
-                        <div>
-                          <strong>Allowance not reported</strong>
-                          <span>
-                            This provider has not returned an allowance.
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="gyro-usage-empty">
-                    <Gauge size={22} />
-                    <div>
-                      <strong>No providers configured</strong>
-                      <span>Connect a provider to inspect reported usage.</span>
-                    </div>
-                  </div>
-                )}
-              </SettingsGroup>
-              <SettingsGroup
-                id="local-usage"
-                label="Local usage"
-                description="Locally observed tokens, not a provider invoice."
-              >
-                {localUsageWindows.length ? (
-                  <div className="gyro-usage-cards">
-                    {localUsageWindows.map((window) => (
-                      <UsageCard
-                        key={window.id}
-                        resetCaption={`${window.detail}${window.isEstimated ? " · partly estimated" : ""}`}
-                        visualization="bars"
-                        window={{
-                          id: window.id,
-                          label: `${window.id === "five-hour" ? "5-hour" : "Weekly"} ${window.hasBudget ? "budget" : "reference"} · local`,
-                          usedPercent: window.percent,
-                        }}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <SettingsEmptyState icon={<Gauge size={24} />} title="No usage recorded yet" description="Local usage appears here after your first run." />
-                )}
-              </SettingsGroup>
-              <SettingsGroup id="usage-limits" label="Budgets & warnings">
-                <SettingsRow
-                  label={
-                    usageProvider
-                      ? `${usageProvider.displayName} daily budget`
-                      : "Daily budget"
-                  }
-                  detail={
-                    providerLedger?.budget
-                      ? "Holds council runs and automations at 10% left and stops the provider when observed usage reaches the token budget. An in-flight request can exceed it; this is not an invoice limit."
-                      : "Set an observed token budget instead of the default reference. In-flight requests can exceed it; provider billing is separate."
-                  }
-                >
-                  <SettingsSelect
-                    aria-label="Daily token budget"
-                    className="gyro-settings-select"
-                    disabled={!usageProvider}
-                    onChange={(event) =>
-                      usageProvider &&
-                      onProviderBudgetChange?.(
-                        usageProvider.id,
-                        Number(event.target.value),
-                      )
-                    }
-                    value={String(providerLedger?.budget?.maxTokens ?? 0)}
-                  >
-                    {budgetOptions(providerLedger?.budget?.maxTokens).map(
-                      (option) => (
-                        <option key={option.value} value={String(option.value)}>
-                          {option.label}
-                        </option>
-                      ),
-                    )}
-                  </SettingsSelect>
-                </SettingsRow>
-                <SettingsRow
-                  label="Daily pace warning"
-                  detail="Warn when today’s usage reaches about one seventh (14%) of the weekly allowance."
-                >
-                  <SettingsSwitch
-                    checked={dailyPaceWarning}
-                    label="Daily pace warning"
-                    onChange={(enabled) => onDailyPaceWarningChange?.(enabled)}
-                  />
-                </SettingsRow>
-                <SettingsRow
-                  label="Pause provider runs"
-                  detail={
-                    usageSafety?.pause.active
-                      ? usagePauseDetail(usageSafety)
-                      : "Hold every provider run until you resume. Automations included."
-                  }
-                >
-                  <SettingsSwitch
-                    checked={Boolean(usageSafety?.pause.active)}
-                    label="Pause provider runs"
-                    onChange={(checked) => onUsagePauseChange?.(checked)}
-                  />
-                </SettingsRow>
-                <SettingsRow
-                  label="Provider spend"
-                  value="Manual"
-                  detail="Provider billing and allowance controls remain provider-owned."
-                />
-              </SettingsGroup>
+                          {budgetOptions(providerLedger?.budget?.maxTokens).map(
+                            (option) => (
+                              <option key={option.value} value={String(option.value)}>
+                                {option.label}
+                              </option>
+                            ),
+                          )}
+                        </SettingsSelect>
+                      </SettingsRow>
+                    </SettingsGroup>
+                  </>
+                }
+              />
             </SettingsSection>
           ) : null}
 

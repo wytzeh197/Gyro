@@ -153,6 +153,7 @@ fn a_refused_git_command_is_reported_rather_than_passed_over() {
     // Nothing said, and no exit to read: the termination is the account.
     assert_eq!(
         git_action_error(&IdeCommandOutput {
+            diagnostics: Vec::new(),
             status: "timed-out".into(),
             exit_code: None,
             source_truncated: false,

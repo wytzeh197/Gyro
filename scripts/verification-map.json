@@ -1,18 +1,47 @@
 {
-  "check-command-failure-browser.mjs": { "kind": "behavioral" },
-  "check-companion-redesign.mjs": { "kind": "behavioral" },
-  "check-settings-redesign.mjs": { "kind": "behavioral" },
-  "check-chat-render-snapshot.mjs": { "kind": "behavioral" },
-  "check-chat-styles.mjs": { "kind": "source-text", "reason": "Checks stylesheet ownership and cascade constraints after chat CSS extraction." },
-  "check-code-reviews-browser.mjs": { "kind": "behavioral" },
-  "check-project-memory-browser.mjs": { "kind": "behavioral" },
-  "check-workflows-browser.mjs": { "kind": "behavioral" },
-  "check-browser-annotations.mjs": { "kind": "behavioral" },
-  "check-browser-annotations-ui.mjs": { "kind": "behavioral" },
-  "check-git-readiness.mjs": { "kind": "behavioral" },
-  "check-git-readiness-browser.mjs": { "kind": "behavioral" },
-  "check-plan-live-browser.mjs": { "kind": "behavioral" },
-  "check-sidebar-design-browser.mjs": { "kind": "behavioral" },
+  "check-command-failure-browser.mjs": {
+    "kind": "behavioral"
+  },
+  "check-companion-redesign.mjs": {
+    "kind": "behavioral"
+  },
+  "check-settings-redesign.mjs": {
+    "kind": "behavioral"
+  },
+  "check-chat-render-snapshot.mjs": {
+    "kind": "behavioral"
+  },
+  "check-chat-styles.mjs": {
+    "kind": "source-text",
+    "reason": "Checks stylesheet ownership and cascade constraints after chat CSS extraction."
+  },
+  "check-code-reviews-browser.mjs": {
+    "kind": "behavioral"
+  },
+  "check-project-memory-browser.mjs": {
+    "kind": "behavioral"
+  },
+  "check-workflows-browser.mjs": {
+    "kind": "behavioral"
+  },
+  "check-browser-annotations.mjs": {
+    "kind": "behavioral"
+  },
+  "check-browser-annotations-ui.mjs": {
+    "kind": "behavioral"
+  },
+  "check-git-readiness.mjs": {
+    "kind": "behavioral"
+  },
+  "check-git-readiness-browser.mjs": {
+    "kind": "behavioral"
+  },
+  "check-plan-live-browser.mjs": {
+    "kind": "behavioral"
+  },
+  "check-sidebar-design-browser.mjs": {
+    "kind": "behavioral"
+  },
   "check-resource-scheduling.mjs": {
     "kind": "behavioral",
     "note": "Executes the production usage, editor and explorer hooks with controlled visibility and cached IPC readings. Protects stable polling, foreground catch-up, idle timers and manager cleanup; does not measure native CPU or RAM."
@@ -545,5 +574,61 @@
   "check-efficiency-run-manifest.mjs": {
     "kind": "behavioral",
     "note": "Executes source-manifest capture and verifies that tracked, untracked, changed and deleted inputs alter provenance."
+  },
+  "check-remote-access-browser.mjs": {
+    "kind": "behavioral",
+    "note": "Exercises production remote workspace and SSH settings with simulated transport in Chromium."
+  },
+  "check-chat-environment-overlay.mjs": {
+    "kind": "behavioral",
+    "note": "Exercises Environment geometry, keyboard opening, dismissal and focus in production chat fixtures."
+  },
+  "check-terminal-launch-selection.mjs": {
+    "kind": "behavioral",
+    "note": "Exercises native CLI preset selection and terminal launch state."
+  },
+  "check-cloud-v3-transfers.test.mjs": {
+    "kind": "behavioral",
+    "note": "Executes transfer progress, cancellation and retry state transitions."
+  },
+  "check-task-completion.mjs": {
+    "kind": "behavioral",
+    "note": "Executes completion evidence, scope and freshness decisions."
+  },
+  "check-workflow-starters.mjs": {
+    "kind": "behavioral",
+    "note": "Executes workflow starter bindings, dependencies and verification requirements."
+  },
+  "check-cloud-v3-settings.test.mjs": {
+    "kind": "behavioral",
+    "note": "Executes Cloud result validation, upload checks and entitlement presentation."
+  },
+  "check-efficiency-diagnostics.mjs": {
+    "kind": "behavioral",
+    "note": "Executes paired report accounting, missing-value coverage and pilot preparation safeguards."
+  },
+  "check-usage-settings-browser.mjs": {
+    "kind": "behavioral",
+    "note": "Exercises production Usage tabs, filtering, disclosure and keyboard behavior in Chromium."
+  },
+  "check-remote-media-client.mjs": {
+    "kind": "behavioral",
+    "note": "Executes remote attachment forwarding and media boundaries."
+  },
+  "check-remote-access-client.mjs": {
+    "kind": "behavioral",
+    "note": "Executes remote subscriptions, catch-up, stale reads, reconnect and routing."
+  },
+  "check-problem-drag-browser.mjs": {
+    "kind": "behavioral",
+    "note": "Exercises diagnostic attachment delivery, split-pane isolation and file navigation."
+  },
+  "check-problem-drag.mjs": {
+    "kind": "behavioral",
+    "note": "Executes diagnostic and plan problem payload validation and media isolation."
+  },
+  "check-cloud-v3-contract.mjs": {
+    "kind": "source-text",
+    "reason": "Compares the checked-in public contract, disabled-by-default feature configuration and native wire version constants."
   }
 }

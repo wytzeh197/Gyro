@@ -233,6 +233,12 @@ export function createPreviewPorts() {
                 id: "openai",
                 displayName: "Fixture provider",
                 models: ["gpt-6.1", "gpt-6"],
+                modelDetails: [
+                  { id: "gpt-6.1", displayName: "Host GPT 6.1", contextWindowTokens: 300000 },
+                  { id: "gpt-6", displayName: "Host GPT 6", contextWindowTokens: 500000,
+                    supportedReasoningEfforts: ["high", "max"], defaultReasoningEffort: "max" },
+                  { id: "not-selectable", displayName: "Metadata without inventory" },
+                ],
                 defaultModelId: "gpt-6.1",
                 runtimeStatus: "ready",
               },

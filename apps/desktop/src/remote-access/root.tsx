@@ -188,6 +188,9 @@ export function RemoteWorkspaceRoot({
       catalogs,
     ],
   );
+  // Cached catalogs preserve recovery state, but only reachable hosts belong
+  // in navigation and new-chat project choices.
+  const availableCatalogs = catalogs.filter((catalog) => catalog.online);
   const settings = (
     <Suspense fallback={fallback()}>
       <Settings />
@@ -200,7 +203,7 @@ export function RemoteWorkspaceRoot({
           settings,
           selectLocal,
           syncProjects,
-          projectChoices: catalogs.flatMap(({ host, projects }) =>
+          projectChoices: availableCatalogs.flatMap(({ host, projects }) =>
             projects.map(({ project }) => ({
               key: JSON.stringify([host.id, project.id]),
               hostId: host.id,
@@ -214,7 +217,7 @@ export function RemoteWorkspaceRoot({
             ? JSON.stringify([selection.hostId, selection.projectId])
             : undefined,
           selectProject: (key, draft) => {
-            for (const catalog of catalogs) {
+            for (const catalog of availableCatalogs) {
               const project = catalog.projects.find(
                 ({ project }) =>
                   JSON.stringify([catalog.host.id, project.id]) === key,
@@ -239,7 +242,7 @@ export function RemoteWorkspaceRoot({
               : undefined,
           projects: (
             <RemoteNavigation
-              catalogs={catalogs}
+              catalogs={availableCatalogs}
               selection={selection}
               onSelect={selectRemote}
             />

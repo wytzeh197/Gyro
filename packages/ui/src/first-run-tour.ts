@@ -11,6 +11,10 @@ import { popoverViewportRect } from "./composer-popover-bounds";
 export const TOUR_VERSION = 1;
 
 /** Versioned so a re-release of the tour can supersede the old record. */
+/** Editable first task; choosing it never submits a prompt or approves an edit. */
+export const FIRST_TASK_PROMPT =
+  "Help me make one small, useful change in this project. First inspect the project instructions and existing tests, then propose a specific change and how to verify it. Wait for my approval before editing. After the approved change, run the relevant checks, show the diff, and report any failed or unrun checks.";
+
 export const TOUR_STORAGE_KEY = "gyro.first-run-tour";
 
 export type TourAnchorId =

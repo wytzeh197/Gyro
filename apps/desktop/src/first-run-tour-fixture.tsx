@@ -326,6 +326,11 @@ function Fixture() {
       ) : (
         <FirstRunTour
           destination={destination}
+          onStartFirstTask={query.has("firstTask") ? (prompt) => {
+            document.documentElement.dataset.firstTaskPrompt = prompt;
+            setDestination("workspace");
+            setDraft(prompt);
+          } : undefined}
           onNavigate={setDestination}
           onOpenSettings={openSettings}
           providerConfigured={providerConfigured}

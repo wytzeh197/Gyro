@@ -16,6 +16,8 @@ const compiled = await build({
         taskRowTitle,
         taskShowsCommandLine,
       } from "./packages/ui/src/workspace-sidebar.tsx";
+      export { createIdeTaskStatusUpdater } from "./apps/desktop/src/ide-task-status.ts";
+      export { workbenchReducer, createInitialWorkbenchState } from "./packages/ui/src/workbench-state.ts";
       export {
         mergeDiscoveredTaskRuns,
         rememberTaskRun,
@@ -40,6 +42,7 @@ new Function("require", "module", "exports", compiled.outputFiles[0].text)(
   module.exports,
 );
 const {
+  createIdeTaskStatusUpdater, workbenchReducer, createInitialWorkbenchState,
   groupedRunTasks,
   matchingRunPackage,
   mergeDiscoveredTaskRuns,
@@ -228,3 +231,29 @@ const sanitized = sanitizeTaskRunRecords({
 });
 assert.equal(sanitized["/repo"]["package:test"], undefined);
 assert.equal(sanitized["/repo"]["package:check"].durationMs, 10);
+
+// A late task or LSP publication may update only its own diagnostics.
+{
+  const make = (id, path, source) => ({ id, path, source, message: "Broken", severity: "error", startLineNumber: 2, startColumn: 3 });
+  const lsp = make("lsp", "/repo/a.ts", "ts");
+  const otherTask = make("other", "/repo/a.ts", "task:build");
+  const otherRoot = make("foreign", "/other/a.ts", "task:test");
+  let state = createInitialWorkbenchState();
+  state = workbenchReducer(state, { type: "ide-set-diagnostics", diagnostics: [lsp, otherTask, otherRoot] });
+  state = workbenchReducer(state, { type: "ide-set-task-diagnostics", taskId: "test", workspacePath: "/repo", diagnostics: [make("new", "/repo/a.ts", "task:test"), make("escape", "/outside/a.ts", "task:test")] });
+  assert.deepEqual(state.ide.diagnostics.map(p => p.id), ["lsp", "other", "foreign", "new"]);
+  state = workbenchReducer(state, { type: "ide-publish-lsp-diagnostics", paths: ["/repo/a.ts"], diagnostics: [] });
+  assert.deepEqual(state.ide.diagnostics.map(p => p.id), ["other", "foreign", "new"], "LSP clears only its own findings");
+  state = workbenchReducer(state, { type: "ide-set-task-diagnostics", taskId: "test", workspacePath: "/repo", diagnostics: [] });
+  assert.deepEqual(state.ide.diagnostics.map(p => p.id), ["other", "foreign"], "rerunning clears only the same task in the same workspace");
+}
+
+{
+  const actions = [];
+  const update = createIdeTaskStatusUpdater({ task:task({id:"test",group:"test"}), root:"/repo", startedAt:Date.now()-100, commandLine:"test", testTree:[{id:"suite",label:"Suite",status:"unknown",children:[{id:"other",label:"Other",status:"passed"}]}], dispatch:action=>actions.push(action) });
+  update("failed", "failed");
+  assert.equal(actions[0].status, "failed");
+  assert.ok(actions[0].durationMs >= 100);
+  assert.deepEqual(actions[1].tests[0].children.map(t=>t.id), ["other", "test"]);
+  assert.equal(actions[1].tests[0].status, "failed");
+}

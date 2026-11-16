@@ -145,12 +145,19 @@ impl Node {
                     };
                     let peer = connection.remote_id().to_string();
                     let trusted = admission.trusts(&peer);
-                    let pool = if trusted { &admission.trusted } else { &admission.guests };
+                    let pool = if trusted {
+                        &admission.trusted
+                    } else {
+                        &admission.guests
+                    };
                     let Ok(permit) = pool.clone().try_acquire_owned() else {
                         connection.close(2u32.into(), b"host busy");
                         return;
                     };
-                    serve(connection, peer, trusted, permit, handler, admission, events).await;
+                    serve(
+                        connection, peer, trusted, permit, handler, admission, events,
+                    )
+                    .await;
                 });
             }
         });
@@ -233,10 +240,7 @@ impl Node {
         let c = tokio::time::timeout(CONNECT_TIMEOUT, self.endpoint.connect(address, ALPN))
             .await
             .context("Host connection timed out")??;
-        self.connections
-            .lock()
-            .await
-            .insert(peer.into(), c.clone());
+        self.connections.lock().await.insert(peer.into(), c.clone());
         Ok(c)
     }
     async fn evict(&self, peer: &str, stale: &Connection) {
@@ -776,7 +780,10 @@ mod tests {
         };
         // An unpaired identity still reaches the handler, which only lets it pair.
         client.request(&host.id(), hello()).await.unwrap();
-        assert_eq!(host.admission.guests.available_permits(), GUEST_CONNECTIONS - 1);
+        assert_eq!(
+            host.admission.guests.available_permits(),
+            GUEST_CONNECTIONS - 1
+        );
         approved.store(true, Ordering::SeqCst);
         client.request(&host.id(), hello()).await.unwrap();
         assert_eq!(host.admission.guests.available_permits(), GUEST_CONNECTIONS);

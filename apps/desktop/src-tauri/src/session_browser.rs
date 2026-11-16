@@ -584,10 +584,15 @@ impl SessionBrowserManager {
             guard.check()?;
             let snapshot = self.with_resource_mut(&resource, |slot| Self::snapshot_locked(slot))?;
             if !follow_navigation && snapshot.navigation_id != initial.navigation_id {
-                return Err("browser navigation changed while waiting for the observation document".into());
+                return Err(
+                    "browser navigation changed while waiting for the observation document".into(),
+                );
             }
             if let Some(error) = &snapshot.navigation_error {
-                return Err(format!("browser navigation {}: {}", error.kind, error.message));
+                return Err(format!(
+                    "browser navigation {}: {}",
+                    error.kind, error.message
+                ));
             }
             if !snapshot.document_committed {
                 std::thread::sleep(Duration::from_millis(25));

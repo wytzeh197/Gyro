@@ -19,9 +19,16 @@ const EFFORTS: [&str; 6] = ["low", "medium", "high", "xhigh", "max", "ultra"];
 /// release: the runner asks the catalog before its own bundled tables, so a
 /// new model's reasoning levels and context window arrive with the catalog
 /// rather than with the next app update.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct CatalogModelProfile {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_reasoning_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub supported_reasoning_efforts: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub context_window_tokens: Option<u64>,
 }
 
@@ -211,7 +218,8 @@ fn parse_profiles(raw: &str, bucket: u8) -> Result<Profiles, String> {
         if !seen.insert(key.clone()) {
             return Err(invalid("duplicate model"));
         }
-        catalog_text(field("displayName"), 120).ok_or_else(|| invalid("displayName"))?;
+        let display_name =
+            catalog_text(field("displayName"), 120).ok_or_else(|| invalid("displayName"))?;
         let min_revision = catalog_integer(field("minClientRevision"), 1, 1_000_000)
             .ok_or_else(|| invalid("minClientRevision"))?;
         for (key, max) in [("description", 600), ("insertBefore", 200)] {
@@ -257,6 +265,10 @@ fn parse_profiles(raw: &str, bucket: u8) -> Result<Profiles, String> {
             key,
             min_revision,
             CatalogModelProfile {
+                display_name: Some(display_name.to_string()),
+                default_reasoning_effort: field("defaultReasoningEffort")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
                 supported_reasoning_efforts: efforts,
                 context_window_tokens: context_window,
             },
@@ -366,7 +378,7 @@ mod tests {
         let profiles = parse_profiles(
             &document(
                 r#"{"providerId":"openai","id":"GPT-9","displayName":"GPT-9","minClientRevision":2,
-                "contextWindowTokens":400000,"supportedReasoningEfforts":["low","ultra"]},
+                "contextWindowTokens":400000,"supportedReasoningEfforts":["low","ultra"],"defaultReasoningEffort":"ultra"},
                {"providerId":"xai","id":"grok-9","displayName":"Grok 9","minClientRevision":1}"#,
             ),
             0,
@@ -375,14 +387,26 @@ mod tests {
         assert_eq!(
             profiles[&("openai".into(), "gpt-9".into())],
             CatalogModelProfile {
+                display_name: Some("GPT-9".into()),
+                default_reasoning_effort: Some("ultra".into()),
                 supported_reasoning_efforts: Some(vec!["low".into(), "ultra".into()]),
                 context_window_tokens: Some(400_000),
             }
         );
         assert_eq!(
             profiles[&("xai".into(), "grok-9".into())],
-            CatalogModelProfile::default()
+            CatalogModelProfile {
+                display_name: Some("Grok 9".into()),
+                ..Default::default()
+            }
         );
+        let metadata = serde_json::to_value(&profiles[&("openai".into(), "gpt-9".into())]).unwrap();
+        assert_eq!(metadata["displayName"], "GPT-9");
+        assert_eq!(metadata["contextWindowTokens"], 400_000);
+        assert_eq!(metadata["defaultReasoningEffort"], "ultra");
+        let sparse = serde_json::to_value(&profiles[&("xai".into(), "grok-9".into())]).unwrap();
+        assert!(sparse.get("contextWindowTokens").is_none());
+        assert!(sparse.get("supportedReasoningEfforts").is_none());
     }
 
     #[test]

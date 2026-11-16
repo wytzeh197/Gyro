@@ -1,3 +1,4 @@
+import { createIdeTaskStatusUpdater } from "./ide-task-status";
 import { useRemoteWorkspaceSlots } from "../../../packages/ui/src/remote-access-context";
 import { CloudV3Settings, cloudV3Enabled } from "./cloud-v3-settings";
 import { CloudV3Navigation } from "./cloud-v3-navigation";
@@ -5174,6 +5175,7 @@ export function App() {
     [commandProfiles, workbench.terminalPanes],
   );
 
+  const activeIdeTaskRuns = useRef(new Set<string>());
   const runIdeTask = useCallback(
     async (task: TaskDefinition) => {
       const root = workspaceActionRoot;
@@ -5189,65 +5191,29 @@ export function App() {
         );
         return;
       }
+      const runKey = JSON.stringify([root, task.id]);
+      if (activeIdeTaskRuns.current.has(runKey)) return;
+      activeIdeTaskRuns.current.add(runKey);
       const channelId = task.outputChannelId ?? `task-${task.id}`;
       const startedAt = Date.now();
       const commandLine = [task.command, ...task.args].join(" ");
-      const setTaskStatus = (
-        status: TaskDefinition["status"],
-        testStatus?: "running" | "passed" | "failed",
-      ) => {
-        const finished =
-          status === "done" || status === "failed" || status === "cancelled";
-        dispatchWorkbench({
-          type: "ide-set-task-status",
-          taskId: task.id,
-          status,
-          lastRunAt: new Date().toISOString(),
-          workspacePath: root,
-          commandLine,
-          durationMs:
-            finished && task.group !== "dev" && status !== "cancelled"
-              ? Date.now() - startedAt
-              : undefined,
-        });
-        if (task.group === "test" && testStatus) {
-          // Update the run test in place. Replacing the tree with only the
-          // tests that ran hid every other discovered test after one run.
-          const suite = workbench.ide.testTree[0];
-          const children = suite?.children ?? [];
-          const result = {
-            id: task.id,
-            label: task.label,
-            status: testStatus,
-          } as const;
-          const nextChildren = children.some((item) => item.id === task.id)
-            ? children.map((item) => (item.id === task.id ? result : item))
-            : [...children, result];
-          dispatchWorkbench({
-            type: "ide-set-test-tree",
-            tests: [
-              {
-                id: suite?.id ?? "workspace-tests",
-                label: suite?.label ?? "Workspace tests",
-                status: nextChildren.some((item) => item.status === "failed")
-                  ? "failed"
-                  : nextChildren.some((item) => item.status === "running")
-                    ? "running"
-                    : testStatus,
-                children: nextChildren,
-              },
-              ...workbench.ide.testTree.slice(1),
-            ],
-          });
-        }
-      };
+      const setTaskStatus = createIdeTaskStatusUpdater({
+        task, root, startedAt, commandLine,
+        testTree: workbench.ide.testTree, dispatch: dispatchWorkbench,
+      });
+      dispatchWorkbench({
+        type: "ide-set-task-diagnostics", workspacePath: root,
+        taskId: task.id, diagnostics: [],
+      });
       setTaskStatus("running", task.group === "test" ? "running" : undefined);
       // Dev servers and watchers run in a live PTY. They remain interactive,
       // render ANSI output correctly, and are not cut short by task timeouts.
       if (task.group === "dev") {
-        const started = await launchIdeDevTask(task, root);
-        if (!started) {
-          setTaskStatus("failed");
+        try {
+          const started = await launchIdeDevTask(task, root);
+          if (!started) setTaskStatus("failed");
+        } finally {
+          activeIdeTaskRuns.current.delete(runKey);
         }
         return;
       }
@@ -5272,6 +5238,7 @@ export function App() {
           lines: ["Preview task completed."],
         });
         setTaskStatus("done", task.group === "test" ? "passed" : undefined);
+        activeIdeTaskRuns.current.delete(runKey);
         return;
       }
       try {
@@ -5293,6 +5260,10 @@ export function App() {
           channelId,
           lines: [output.stdout, output.stderr].filter(Boolean),
         });
+        dispatchWorkbench({
+          type: "ide-set-task-diagnostics", workspacePath: root,
+          taskId: task.id, diagnostics: output.diagnostics ?? [],
+        });
         setTaskStatus(
           output.status === "done"
             ? "done"
@@ -5312,6 +5283,8 @@ export function App() {
           lines: [String(error)],
         });
         setTaskStatus("failed", task.group === "test" ? "failed" : undefined);
+      } finally {
+        activeIdeTaskRuns.current.delete(runKey);
       }
     },
     [
@@ -14071,13 +14044,9 @@ export function App() {
         ),
       );
       dispatchWorkbench({
-        type: "ide-set-diagnostics",
-        diagnostics: [
-          ...workbench.ide.diagnostics.filter(
-            (diagnostic) => !publishedPaths.has(diagnostic.path),
-          ),
-          ...diagnostics,
-        ],
+        type: "ide-publish-lsp-diagnostics",
+        paths: [...publishedPaths].filter((path): path is string => Boolean(path)),
+        diagnostics,
       });
     },
   });
@@ -17536,6 +17505,10 @@ export function App() {
 
   const renderWorkspaceToolPanel = (isPrimary = false) => (
     <WorkspaceToolPanel
+      onSendProblemToChat={(diagnostic) => {
+        attachDroppedProblem({ diagnostic, workspacePath: workspaceActionRoot });
+        dispatchWorkbench({ type: "select-workspace-layout", layout: "thread" });
+      }}
       activePaneTab={workbench.activePaneTab}
       activeProfileId={activeProfileId}
       browserPreview={browserPreview}
@@ -20290,6 +20263,16 @@ export function App() {
                       {appChrome}
                       <FirstRunTour
                         destination={activeDestination}
+                        onStartFirstTask={async (initialDraft) => {
+                          const selected = isUserSelectedWorkspacePath(workspaceActionRoot)
+                            ? workspaceActionRoot : await openWorkspace();
+                          if (!selected) return;
+                          startNewChat({
+                            workspacePath: selected, initialDraft,
+                            draftKey: `first-task:${crypto.randomUUID()}`,
+                            preserveOpenPanes: true,
+                          });
+                        }}
                         onActiveChange={setIsFirstRunTourActive}
                         providerConfigured={workbench.providerStatuses.some(
                           (provider) =>
