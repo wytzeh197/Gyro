@@ -11,6 +11,9 @@ jobs:
     # Keep browser/source checks off the capacity-constrained ARM pool.
     # Native ARM coverage remains in Rust and Tauri; releases also use this Intel image.
     runs-on: macos-15-intel
+    env:
+      # Standalone launch guards must use the runner's installed browser too.
+      GYRO_CAPTURE_BROWSER: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
