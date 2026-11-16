@@ -11,7 +11,7 @@ use gyro_remote::{
 };
 use serde_json::{json, Value};
 use std::{path::Path, sync::Arc, time::Duration};
-use tauri::Manager;
+use tauri::{Listener, Manager};
 use uuid::Uuid;
 
 fn write(session: &str, content: &str, hash: &str) -> Operation {
@@ -285,6 +285,10 @@ pub(super) async fn run(
     let project_b = projects.iter().find(|p| p.path == b).unwrap();
     let project_c = projects.iter().find(|p| p.path == c).unwrap();
     let mut sessions = Vec::new();
+    let (created_sender, mut created_events) = tokio::sync::mpsc::unbounded_channel();
+    let created_listener = app.listen_any("gyro://session-created", move |event| {
+        let _ = created_sender.send(event.payload().to_string());
+    });
     for project in [project_a, project_b, project_c] {
         let created = call(
             client,
@@ -298,11 +302,17 @@ pub(super) async fn run(
             None,
         )
         .await?;
+        let notification = tokio::time::timeout(Duration::from_secs(2), created_events.recv())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Host sidebar received no session-created event"))?;
+        let notification: Value = serde_json::from_str(&notification)?;
+        assert_eq!(notification, created["session"]);
         sessions.push((
             created["session"]["id"].as_str().unwrap().to_string(),
             created["control"]["generation"].as_u64().unwrap(),
         ));
     }
+    app.unlisten(created_listener);
     let (session_a, lease_a) = &sessions[0];
     let (session_c, lease_c) = &sessions[2];
     // Parent/child sessions address the identical file with different relative

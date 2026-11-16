@@ -11,9 +11,7 @@ use gyro_remote::{
 };
 use serde::Serialize;
 use serde_json::{json, Value};
-#[cfg(debug_assertions)]
-use tauri::Emitter;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 pub(super) fn value<T: Serialize>(value: T) -> Result<Value, String> {
     serde_json::to_value(value).map_err(err)
@@ -101,6 +99,9 @@ pub(super) fn execute(runtime: &Runtime, peer: &str, request: &Request) -> Resul
                 peer,
                 false,
             )?;
+            // Remote creation writes the same store as the host desktop, but
+            // bypasses its create-chat flow. Tell the host sidebar about the chat.
+            let _ = runtime.app.emit("gyro://session-created", &session);
             Ok(json!({"session":session,"control":control}))
         }
         Operation::RenameSession { session_id, title } => {

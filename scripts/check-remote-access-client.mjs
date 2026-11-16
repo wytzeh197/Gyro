@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { RemoteHostClient } from "../apps/desktop/src/remote-access/client.ts";
+import { reconcileRemoteHistory } from "../apps/desktop/src/remote-access/history.ts";
 import {
   emptyView,
   readView,
@@ -308,6 +309,49 @@ assert.equal(
   "ran",
 );
 
+// A command's live and durable IDs differ. Repeated host history reads must
+// update the same visible row, never duplicate it or reset its disclosure.
+const liveCommand = {
+  id: "live-command",
+  sessionId: "remote-session",
+  turnId: "remote-turn",
+  createdAt: "2026-11-16T10:00:00Z",
+  kind: "system-event",
+  message: "Running command",
+  payload: {
+    kind: "provider-activity", activityId: "command-1", activityKind: "command",
+    label: "Running command", detail: "pnpm typecheck", status: "running",
+    timelineSequence: 5,
+  },
+};
+const savedCommand = {
+  ...liveCommand, id: "saved-command", message: "Ran command",
+  createdAt: "2026-11-16T10:00:01Z",
+  payload: { ...liveCommand.payload, label: "Ran command", status: "done", timelineSequence: 1 },
+};
+let transcript = reconcileRemoteHistory([liveCommand], [savedCommand], [liveCommand]);
+assert.equal(transcript.length, 1, "live and durable command copies render once");
+assert.equal(transcript[0].id, liveCommand.id, "host refresh preserves the visible row identity");
+assert.equal(transcript[0].payload.status, "done", "durable completion wins over an older live frame");
+assert.equal(transcript[0].payload.timelineSequence, 5, "refresh preserves the command's place in the conversation");
+assert.equal(savedCommand.id, "saved-command", "host pagination IDs stay unmodified");
+assert.equal(
+  reconcileRemoteHistory(transcript, [structuredClone(savedCommand)], [liveCommand]),
+  transcript,
+  "an unchanged host refresh does not rerender the transcript",
+);
+const stale = { ...savedCommand, payload: { ...savedCommand.payload, status: "running" } };
+assert.equal(reconcileRemoteHistory(transcript, [stale])[0].payload.status, "done",
+  "a delayed running snapshot cannot reopen completed work");
+const otherSession = { ...savedCommand, sessionId: "another-session" };
+assert.equal(reconcileRemoteHistory(transcript, [otherSession])[0].id, savedCommand.id,
+  "row identities never cross session boundaries");
+const earlier = { ...savedCommand, id: "older-command", turnId: "older-turn",
+  createdAt: "2026-11-15T10:00:00Z" };
+const expanded = reconcileRemoteHistory(transcript, [earlier, savedCommand]);
+assert.deepEqual(expanded.map(event => event.id), ["older-command", "live-command"],
+  "loading earlier history retains the current row identity");
+
 console.log(
-  "Remote client checks passed: pending submit outcomes, routing, leases, stale events, ordered input, uncertain input, draft isolation, storage recovery and ordered live catch-up.",
+  "Remote client checks passed: history reconciliation, stable command rows, unchanged refreshes, pending submit outcomes, routing, leases, stale events, ordered input, uncertain input, draft isolation, storage recovery and ordered live catch-up.",
 );

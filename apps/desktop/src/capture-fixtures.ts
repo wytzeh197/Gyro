@@ -1417,6 +1417,13 @@ const invoke: Invoke = (command, args) => {
     captureListeners.delete(Number(args?.eventId));
     return null;
   }
+  if (command === "plugin:event|emit") {
+    for (const [id, event] of captureListeners) {
+      if (event === args?.event)
+        callbacks.get(id)?.({ event, id, payload: args?.payload });
+    }
+    return null;
+  }
   if (command.startsWith("plugin:event|")) return 0;
   if (command === "warm_desktop_shell") {
     return {

@@ -576,6 +576,46 @@ export function createPreviewPorts() {
     streamText(text: string, sessionId = "existing-chat") {
       emitFrame(sessionId, { phase: "delta", textDelta: text });
     },
+    startHostCommand(sessionId = "existing-chat", activityId = "host-command") {
+      emitFrame(sessionId, {
+        phase: "activity",
+        activityId,
+        activityKind: "command",
+        activityLabel: "Running host command",
+        activityDetail: "pnpm typecheck",
+        activityStatus: "running",
+      });
+    },
+    finishHostCommand(sessionId = "existing-chat", activityId = "host-command") {
+      emitFrame(sessionId, {
+        phase: "activity",
+        activityId,
+        activityKind: "command",
+        activityLabel: "Ran host command",
+        activityDetail: "pnpm typecheck",
+        activityStatus: "done",
+      });
+      // Durable activity has its own event ID, as on the native host.
+      histories.set(sessionId, [
+        ...(histories.get(sessionId) ?? []),
+        {
+          id: `saved-command-${sessionId}-${activityId}`,
+          sessionId,
+          turnId: `live-${sessionId}`,
+          kind: "system-event",
+          createdAt: new Date().toISOString(),
+          message: "Ran host command",
+          payload: {
+            kind: "provider-activity",
+            activityId,
+            activityKind: "command",
+            label: "Ran host command",
+            detail: "pnpm typecheck",
+            status: "done",
+          },
+        },
+      ]);
+    },
     setOnline(value: boolean) {
       online = value;
     },

@@ -7,11 +7,9 @@ import type {
 } from "@gyro-dev/ui";
 import { applyProviderChatStreamEvent } from "../app-state";
 import { createProviderStreamDispatcher } from "../provider-stream-dispatcher";
-import {
-  mergePersistedAndOptimisticEvents,
-  applyProviderChatStreamPresentation,
-} from "../provider-stream-events";
+import { applyProviderChatStreamPresentation } from "../provider-stream-events";
 import { mergeSessionHistoryPages } from "../session-event-order";
+import { reconcileRemoteHistory } from "./history";
 import { RemoteHostClient } from "./client";
 import { clearRemoteAttachments } from "./attachments";
 import { useRemoteAccess } from "./context";
@@ -78,6 +76,7 @@ export function useRemoteWorkspace(
   // refreshes in place instead of flashing a loading state.
   const [toolsLoadedFor, setToolsLoadedFor] = useState<string>();
   const historyRevisions = useRef(new Map<string, string>());
+  const persistedHistory = useRef<SessionEvent[]>([]);
   const terminalCache = useRef(new Map<string, TerminalSnapshot>());
   const generation = useRef(0);
   const earlierLoaded = useRef(false);
@@ -239,17 +238,18 @@ export function useRemoteWorkspace(
             };
           });
       }
-      setEvents((previous) =>
-        mergePersistedAndOptimisticEvents(
-          mergeSessionHistoryPages(
-            previous.filter((e) => e.sessionId === selected.sessionId),
-            history.events,
-          ),
-          snapshot.running || beforeStream !== streamRevision.current
-            ? optimistic.current.get(selected.sessionId!)
-            : undefined,
-        ),
+      // Never feed the rendered live rows back into the durable history.
+      // Their IDs differ from saved activity IDs and would duplicate each call.
+      persistedHistory.current = mergeSessionHistoryPages(
+        persistedHistory.current,
+        history.events,
       );
+      const persisted = persistedHistory.current;
+      const live =
+        snapshot.running || beforeStream !== streamRevision.current
+          ? optimistic.current.get(selected.sessionId!)
+          : undefined;
+      setEvents((previous) => reconcileRemoteHistory(previous, persisted, live));
       if (!snapshot.running && beforeStream === streamRevision.current)
         optimistic.current.delete(selected.sessionId);
     } catch (reason) {
@@ -277,6 +277,7 @@ export function useRemoteWorkspace(
     // clears the persisted events below, so re-fetch the selected chat's body
     // instead of accepting an empty "unchanged" response from the host.
     historyRevisions.current.clear();
+    persistedHistory.current = [];
     setEvents(optimistic.current.get(sessionId ?? "") ?? []);
     setData((previous) => ({
       ...previous,
@@ -563,6 +564,10 @@ export function useRemoteWorkspace(
       });
     if (result?.accepted) {
       clearRemoteAttachments(hostId, sessionId, attachments.map((attachment) => attachment.id));
+      persistedHistory.current = mergeSessionHistoryPages(
+        persistedHistory.current,
+        [result.event],
+      );
       setEvents((previous) =>
         mergeSessionHistoryPages(previous, [result.event]),
       );
@@ -586,7 +591,11 @@ export function useRemoteWorkspace(
     return Boolean(result?.accepted);
   }
   async function loadEarlier() {
-    const first = events.find((event) => event.kind !== "session-created");
+    // UI event IDs remain stable across live/saved reconciliation; the host
+    // pagination cursor must always use its original durable event ID.
+    const first = persistedHistory.current.find(
+      (event) => event.kind !== "session-created",
+    );
     if (!sessionId || !first) return;
     const issued = generation.current;
     const page = await run<History>({
@@ -601,7 +610,18 @@ export function useRemoteWorkspace(
       viewRef.current.sessionId === sessionId
     ) {
       earlierLoaded.current = true;
-      setEvents((previous) => mergeSessionHistoryPages(page.events, previous));
+      persistedHistory.current = mergeSessionHistoryPages(
+        page.events,
+        persistedHistory.current,
+      );
+      const persisted = persistedHistory.current;
+      setEvents((previous) =>
+        reconcileRemoteHistory(
+          previous,
+          persisted,
+          optimistic.current.get(sessionId),
+        ),
+      );
       setData((previous) => ({ ...previous, history: page }));
     }
   }

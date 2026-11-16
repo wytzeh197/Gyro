@@ -1421,7 +1421,10 @@ fn real_binary_setup_and_handoff_recover_stale_app_sockets() {
 test "$2" = 'model_provider="openai"' || exit 20
 shift 2
 while [ "$1" = "-c" ]; do
- case "$2" in features.multi_agent=false|features.image_generation=false|features.fast_mode=true|service_tier=\"default\") shift 2 ;; *) exit 21 ;; esac
+ case "$2" in
+ features.multi_agent=false|features.image_generation=false|features.fast_mode=true|service_tier=\"default\"|"sqlite_home=\"$CODEX_HOME\""|"log_dir=\"$CODEX_HOME/log\"") shift 2 ;;
+ *) exit 21 ;;
+ esac
 done
 test "$1" = "app-server" || exit 21
 test "$2" = "--stdio" || exit 22

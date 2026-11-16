@@ -338,6 +338,7 @@ import {
   SYSTEM_ACCESS_STATUS_STORAGE_KEY,
 } from "./system-access-state";
 import { isTauriRuntime } from "./tauri-runtime";
+import { useSessionCreatedEvents } from "./use-session-created-events";
 import {
   readTerminalAttachmentSource,
   rememberTerminalAttachmentSource,
@@ -3629,6 +3630,8 @@ export function App() {
       unlistenProviderApproval?.();
     };
   }, [setEventsForSession]);
+
+  useSessionCreatedEvents(setSessions);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;

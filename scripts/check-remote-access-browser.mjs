@@ -1059,6 +1059,71 @@ try {
   );
   await pause(150);
   await shot("workspace-light-900.png");
+
+  // Exercise completion and multiple durable refreshes in a long remote chat.
+  await evaluate(`(() => {
+    const f = window.gyroRemoteFixture, id = 'scroll-chat';
+    f.sessions.push({...f.sessions[0], id, title:'Scroll regression', updatedAt:new Date().toISOString()});
+    f.histories.set(id, Array.from({length:18}, (_,i)=>({
+      id:'scroll-history-'+i, sessionId:id, kind:'assistant-message',
+      createdAt:'2026-11-13T09:00:00Z', message:'Earlier host output '+i+'\\n\\nA paragraph that stays in place while the host runs commands.', payload:{}
+    })));
+    f.startHostRun(id);
+  })()`);
+  await until(
+    () => evaluate("[...document.querySelectorAll('.gyro-sidebar button')].some(b=>b.textContent.includes('Scroll regression'))"),
+    "scroll regression chat discovered",
+  );
+  await evaluate("[...document.querySelectorAll('.gyro-sidebar button')].find(b=>b.textContent.includes('Scroll regression')).click()");
+  await until(
+    () => evaluate("document.querySelector('.gyro-remote-chat')?.innerText.includes('Started on the Mac Mini.')"),
+    "scroll regression chat catches up",
+  );
+  await evaluate("window.gyroRemoteFixture.finishHostCommand('scroll-chat')");
+  await until(
+    () => evaluate("[...document.querySelectorAll('.gyro-remote-chat .gyro-run-segment-toggle')].length===2"),
+    "completed command has a summary",
+  );
+  await pause(400);
+  const following = await evaluate(`new Promise(resolve => {
+    const t=document.querySelector('.gyro-remote-chat .gyro-chat-transcript');
+    const row=[...t.querySelectorAll('.gyro-run-segment-toggle')].at(-1);
+    row.click();
+    setTimeout(()=>{
+      const start=performance.now(), top=t.scrollTop, samples=[];
+      const tick=()=>{
+        samples.push({top:t.scrollTop, gap:t.scrollHeight-t.clientHeight-t.scrollTop});
+        if(performance.now()-start<3200)requestAnimationFrame(tick);
+        else resolve({top, samples, sameRow:row.isConnected, expanded:row.getAttribute('aria-expanded'),
+          commands:[...t.querySelectorAll('.gyro-run-segment-toggle')].reduce((n,b)=>n+Number(b.textContent.match(/Ran (\\d+) command/)?.[1]??0),0)});
+      };
+      requestAnimationFrame(tick);
+    },200);
+  })`);
+  assert.ok(following.sameRow && following.expanded === "true",
+    "saved host history preserves the expanded command row");
+  assert.equal(following.commands, 2, "live and saved copies count each command once");
+  assert.ok(following.samples.every(s=>Math.abs(s.top-following.top)<=1 && Math.abs(s.gap)<=1),
+    "following stays at the bottom without bouncing across host refreshes");
+
+  const reading = await evaluate(`new Promise(resolve => {
+    const t=document.querySelector('.gyro-remote-chat .gyro-chat-transcript');
+    t.dispatchEvent(new WheelEvent('wheel',{deltaY:-160,bubbles:true}));
+    t.scrollTop-=160;
+    t.dispatchEvent(new Event('scroll',{bubbles:true}));
+    const top=t.scrollTop, start=performance.now(), samples=[];
+    window.gyroRemoteFixture.startHostCommand('scroll-chat','reader-command');
+    setTimeout(()=>window.gyroRemoteFixture.finishHostCommand('scroll-chat','reader-command'),300);
+    const tick=()=>{
+      samples.push(t.scrollTop);
+      if(performance.now()-start<3500)requestAnimationFrame(tick);
+      else resolve({top,samples});
+    };
+    requestAnimationFrame(tick);
+  })`);
+  assert.ok(reading.samples.every(top=>Math.abs(top-reading.top)<=1),
+    "reading earlier output stays still through command completion and history refresh");
+  console.log("Remote scroll: stable command identity, no duplicate rows, bottom following and manual reading passed.");
   assert.deepEqual(errors, [], "no browser exceptions");
   await writeFile(
     join(artifacts, "result.json"),
@@ -1083,6 +1148,7 @@ try {
           "existing-session",
           "automatic-device-control",
           "host-started-live-text-and-commands",
+          "remote-command-scroll-stability",
           "catch-up-after-switching",
           "durable-progress-restored-with-history-revisions",
           "host-context-and-plan-usage",
