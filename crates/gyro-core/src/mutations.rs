@@ -218,6 +218,22 @@ pub struct ProviderMutationRecoveryLock {
     _file: fs::File,
 }
 
+#[cfg(unix)]
+impl Drop for ProviderMutationRecoveryLock {
+    fn drop(&mut self) {
+        // A concurrent fork can inherit the open file description until exec.
+        // Release the owner's lease even while that child retains a copy.
+        loop {
+            if unsafe { libc::flock(self._file.as_raw_fd(), libc::LOCK_UN) } == 0 {
+                break;
+            }
+            if std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+                break;
+            }
+        }
+    }
+}
+
 pub fn review_mutation_proposal(proposal: MutationProposal) -> Result<MutationReview> {
     let original = read_original_content(&proposal)?;
     let diff = summarize_text_diff(&original, &proposal.content);
@@ -2002,6 +2018,28 @@ fn sync_provider_mutation_parents(transaction: &PreparedProviderMutationTransact
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn mutation_lock_releases_while_an_inherited_descriptor_remains_open() {
+        let temp = tempfile::tempdir().unwrap();
+        let lock = acquire_provider_mutation_recovery_lock(temp.path())
+            .unwrap()
+            .unwrap();
+        // A duplicate shares the open file description, just as a child does
+        // between fork and exec. It must not extend the owner's lease.
+        let inherited = lock._file.try_clone().unwrap();
+        assert!(acquire_provider_mutation_recovery_lock(temp.path())
+            .unwrap()
+            .is_none());
+        drop(lock);
+        let next = acquire_provider_mutation_recovery_lock(temp.path()).unwrap();
+        assert!(
+            next.is_some(),
+            "inherited descriptor retained the released lock"
+        );
+        drop(inherited);
+    }
 
     #[test]
     #[cfg(unix)]

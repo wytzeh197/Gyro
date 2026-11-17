@@ -135,7 +135,26 @@ remain unchanged. Both corrected checks passed locally; settings verified 73
 rendered layouts and 10 interaction checks. Logs:
 `/tmp/gyro-v015-environment-cleanup-fix.log` and
 `/tmp/gyro-v015-settings-cleanup-fix.log`.
-A fresh complete CI run is required before merge and tagging.
+The complete [PR run 44109675798](https://github.com/wytzeh197/Gyro/actions/runs/44109675798)
+then passed on `f542a397`. The duplicate push run had been canceled, which
+still blocked the required checks. Its retry passed Node but GitHub canceled
+both queued native jobs after failing to acquire ARM runners. Retrying only
+those jobs acquired runners; the Tauri job passed the Rust suite, while the
+separate Rust job exposed an intermittent deleted-session recovery failure.
+
+The recovery-lock guard previously relied on closing its file descriptor.
+A concurrent helper-process fork can inherit that open file description until
+exec, keeping the lock held after the owner drops it. Recovery's nonblocking
+lock attempt then skips the journal. A deterministic regression duplicates
+the descriptor to model inheritance: it fails before the fix with
+`inherited descriptor retained the released lock`. The guard now explicitly
+unlocks on drop, retrying interrupted unlocks, matching the existing workflow
+checkout lease. The original recovery assertion remains unchanged. This
+explains a possible skip; the hosted failure did not log the recovery report.
+The fixed full core suite passed locally: 1,172 passed, eight ignored, zero
+failed, including the deterministic regression and original deleted-session
+recovery assertion (`/tmp/gyro-v015-recovery-lock-fixed-tests.log`). Fresh
+hosted CI is required before merge/tagging.
 
 ## Required before publication
 
