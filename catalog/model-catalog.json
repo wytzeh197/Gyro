@@ -1,6 +1,6 @@
 {
   "schema": "gyro.model-catalog.v1",
-  "revision": "2026-11-10.1",
+  "revision": "2026-11-17.1",
   "enabled": true,
   "rolloutPercentage": 100,
   "models": [
@@ -20,6 +20,28 @@
         "max",
         "ultra"
       ],
+      "defaultReasoningEffort": "low"
+    },
+    {
+      "providerId": "openai",
+      "id": "gpt-6.2-astra",
+      "displayName": "GPT-6.2 Astra",
+      "description": "Codex CLI. Handles complex, demanding work.",
+      "minClientRevision": 2,
+      "insertBefore": "gpt-6.1-sol",
+      "contextWindowTokens": 272000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+      "defaultReasoningEffort": "low"
+    },
+    {
+      "providerId": "openai",
+      "id": "gpt-6.2-sol",
+      "displayName": "GPT-6.2 Sol",
+      "description": "Codex CLI. Workhorse model for coding and everyday work.",
+      "minClientRevision": 2,
+      "insertBefore": "gpt-6.1-sol",
+      "contextWindowTokens": 500000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
       "defaultReasoningEffort": "low"
     },
     {
