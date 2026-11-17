@@ -1,7 +1,8 @@
 # v0.1.5 launch readiness — 17 November 2026
 
 Status: source preparation and available local verification complete. Native
-OS mouse and distribution acceptance remain outstanding; this candidate is
+OS mouse acceptance subsequently passed on hosted CI. Distribution acceptance
+and a complete passing source CI run remain outstanding; this candidate is
 not cleared by local verification alone for public launch. The user has now
 authorized committing, pushing and publishing; artifact acceptance still needs
 to be established by the release workflow and acceptance checks.
@@ -36,7 +37,8 @@ The final debug app bundle and native smoke checks use the isolated candidate.
 The final bundle reused the already verified, unchanged production frontend
 through a temporary build-command override; signing settings were preserved.
 
-The 25 changed/new candidate files (excluding this report) match byte-for-byte.
+The initial 25 launch-prep files (excluding this report) matched byte-for-byte
+between the working checkout and the tested snapshot.
 `/tmp/gyro-v015-source-manifest.txt` lists their hashes. Its SHA-256 is
 `1c2f1e45cb1fe62c3f6b4c860747ec5979ffc072804dffa260c22975f8b49c4b`.
 
@@ -105,12 +107,27 @@ Before logs: `/tmp/gyro-v015-rust-clean-tests.log`,
 The unchanged regression passes in the final runtime suite. No test limit was
 raised or assertion removed.
 
+## Hosted CI follow-through
+
+Launch preparation was committed and pushed as `0c93392e`. In
+[PR CI run 44094950418](https://github.com/wytzeh197/Gyro/actions/runs/44094950418),
+both the Rust job and the full Tauri job passed. This establishes hosted native
+OS mouse, language-server and isolated Keychain fixture acceptance in addition
+to the local results above. The Node job passed types, the complete test suite,
+172 rendering states and the entire launch-browser suite, then failed in the
+separate Canvas browser check while awaiting a revised iframe's content.
+
+The Canvas check captured the iframe execution context immediately after a
+React click and could keep polling that retired context after the revision
+replaced the frame. The follow-up reacquires the frame on every content poll.
+All original content, isolation and draft assertions and the 20-second timeout
+are preserved. The corrected complete Canvas browser check passed locally
+(`/tmp/gyro-v015-canvas-frame-fix.log`). This follow-up changes only the test
+harness and this report; application code and release metadata are unchanged.
+A fresh complete CI run is required before merge and tagging.
+
 ## Required before publication
 
-- Complete the native OS mouse smoke on a desktop that satisfies the
-  foreground-window precondition. The guard was preserved, and the full
-  native smoke command is not marked as passing. An idle-desktop retry was
-  offered; no response was received during the remaining checks.
 
 1. Review and commit the candidate, obtain passing CI and merge into `main`.
    Tag the exact merged commit as `v0.1.5` only after approval. The release

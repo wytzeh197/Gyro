@@ -119,12 +119,16 @@ try {
       })
     ).executionContextId;
   }
-  let context = await until(frameContext);
-  await until(() =>
-    evaluate(
-      "document.querySelector('#count')?.textContent === '0 of 3 complete'",
-      context,
-    ),
+  async function waitForFrame(expression) {
+    // A revision may replace the iframe after the click returns. Reacquire its
+    // world on each poll instead of repeatedly querying a retired context.
+    return until(async () => {
+      const candidate = await frameContext();
+      return (await evaluate(expression, candidate)) ? candidate : undefined;
+    });
+  }
+  let context = await waitForFrame(
+    "document.querySelector('#count')?.textContent === '0 of 3 complete'",
   );
   await evaluate("document.querySelector('#finish').click()", context);
   assert.equal(
@@ -160,12 +164,8 @@ try {
     "Network fetch is blocked",
   );
   await click("Revise UI piece");
-  context = await until(frameContext);
-  await until(() =>
-    evaluate(
-      "document.querySelector('h1')?.textContent === 'Make it yours.'",
-      context,
-    ),
+  context = await waitForFrame(
+    "document.querySelector('h1')?.textContent === 'Make it yours.'",
   );
   assert.equal(
     await evaluate(
@@ -190,12 +190,8 @@ try {
     `const input=document.querySelector('textarea[aria-label="Project card content"]'); const setter=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set; setter.call(input,input.value.replace('Make it yours.','My edited UI')); input.dispatchEvent(new Event('input',{bubbles:true}));`,
   );
   await click("Preview");
-  context = await until(frameContext);
-  await until(() =>
-    evaluate(
-      "document.querySelector('h1')?.textContent === 'My edited UI'",
-      context,
-    ),
+  context = await waitForFrame(
+    "document.querySelector('h1')?.textContent === 'My edited UI'",
   );
   await click("Build UI piece");
   // React's discrete-event update can commit after Runtime.evaluate returns.
@@ -225,12 +221,8 @@ try {
     true,
   );
   await click("Use model version");
-  context = await until(frameContext);
-  await until(() =>
-    evaluate(
-      "document.querySelector('h1')?.textContent === 'Ready for the next step.'",
-      context,
-    ),
+  context = await waitForFrame(
+    "document.querySelector('h1')?.textContent === 'Ready for the next step.'",
   );
   await evaluate(
     `const select=document.querySelector('select[aria-label="Preview width"]'); select.value='375'; select.dispatchEvent(new Event('change',{bubbles:true}));`,
