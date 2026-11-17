@@ -319,7 +319,7 @@ pub(crate) fn prepare_chat_attachment_blocking(
                 .display()
                 .to_string();
             let (content_hash, size) =
-                hash_file_streaming(&source, Some(MAX_CHAT_WORKSPACE_ATTACHMENT_BYTES))?;
+                hash_workspace_file(&workspace, &source, MAX_CHAT_WORKSPACE_ATTACHMENT_BYTES)?;
             if size == 0 {
                 return Err("attachment file is empty or unreadable".into());
             }
@@ -628,7 +628,35 @@ pub(crate) fn hash_file_streaming(
     path: &Path,
     max_bytes: Option<u64>,
 ) -> Result<(String, u64), String> {
-    let mut file = fs::File::open(path).map_err(to_string)?;
+    let mut options = fs::File::options();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    hash_attachment_file(options.open(path).map_err(to_string)?, max_bytes)
+}
+
+fn hash_workspace_file(root: &Path, path: &Path, max_bytes: u64) -> Result<(String, u64), String> {
+    let parent =
+        gyro_core::workspace_write::WorkspaceWriteParent::open(root, path).map_err(to_string)?;
+    let result = hash_attachment_file(parent.open_read().map_err(to_string)?, Some(max_bytes))?;
+    parent.verify().map_err(to_string)?;
+    Ok(result)
+}
+
+fn hash_attachment_file(
+    mut file: fs::File,
+    max_bytes: Option<u64>,
+) -> Result<(String, u64), String> {
+    let metadata = file.metadata().map_err(to_string)?;
+    if !metadata.is_file() {
+        return Err("attachment is not a regular file".into());
+    }
+    if max_bytes.is_some_and(|limit| metadata.len() > limit) {
+        return Err("attachment exceeds the allowed size".into());
+    }
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     let mut total = 0_u64;
@@ -646,4 +674,42 @@ pub(crate) fn hash_file_streaming(
         hasher.update(&buffer[..count]);
     }
     Ok((format!("{:x}", hasher.finalize()), total))
+}
+
+#[cfg(all(test, unix))]
+mod hash_read_tests {
+    #[test]
+    fn hashing_refuses_a_replaced_final_symlink() {
+        let temp = tempfile::tempdir().unwrap();
+        let original = temp.path().join("image");
+        let replacement = temp.path().join("other");
+        std::fs::write(&replacement, b"outside sentinel").unwrap();
+        std::os::unix::fs::symlink(&replacement, &original).unwrap();
+        assert!(super::hash_file_streaming(&original, Some(1024)).is_err());
+    }
+
+    #[test]
+    fn workspace_hash_refuses_parent_redirection_and_fifo() {
+        use std::os::unix::ffi::OsStrExt;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::create_dir(root.join("outside")).unwrap();
+        let selected = root.join("src/file");
+        std::fs::write(&selected, b"approved").unwrap();
+        assert_eq!(
+            super::hash_workspace_file(&root, &selected, 8).unwrap().1,
+            8
+        );
+        assert!(super::hash_workspace_file(&root, &selected, 7).is_err());
+        std::fs::write(root.join("outside/file"), b"other").unwrap();
+        std::fs::rename(root.join("src"), root.join("old")).unwrap();
+        std::os::unix::fs::symlink(root.join("outside"), root.join("src")).unwrap();
+        assert!(super::hash_workspace_file(&root, &selected, 1024).is_err());
+        let fifo = root.join("fifo");
+        let name = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        assert!(super::hash_file_streaming(&fifo, Some(1024)).is_err());
+        assert!(super::hash_workspace_file(&root, &fifo, 1024).is_err());
+    }
 }

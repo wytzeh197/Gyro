@@ -6,6 +6,18 @@ import type { ResolvedTheme, TerminalPane } from "@gyro-dev/ui";
 import { terminalOutputUpdate } from "./terminal-output";
 import { isTauriRuntime } from "./tauri-runtime";
 
+function terminalTypography(host: HTMLElement) {
+  // Read resolved properties: custom font-size tokens contain calc(), which
+  // cannot be passed directly to xterm's numeric options.
+  const style = getComputedStyle(host);
+  const fontSize = Number.parseFloat(style.fontSize);
+  return {
+    fontFamily: style.fontFamily,
+    fontSize,
+    lineHeight: Number.parseFloat(style.lineHeight) / fontSize,
+  };
+}
+
 export function LiveTerminalPaneBody({
   isActive,
   onBell,
@@ -20,7 +32,11 @@ export function LiveTerminalPaneBody({
   isActive: boolean;
   onBell: (paneId: string) => void;
   onReconnect: (paneId: string) => void;
-  onResize: (paneId: string, cols: number, rows: number) => void;
+  onResize: (
+    paneId: string,
+    cols: number,
+    rows: number,
+  ) => void | boolean | Promise<void | boolean>;
   onSelect: (paneId: string) => void;
   /** Attach the selected output to the chat. */
   onSendSelection?: (paneId: string, selection: string) => void;
@@ -35,10 +51,15 @@ export function LiveTerminalPaneBody({
   const wasActiveRef = useRef(isActive);
   const [selectionText, setSelectionText] = useState("");
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const mountRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTermInstance | null>(null);
   const fitAddonRef = useRef<FitAddonInstance | null>(null);
   const paneOutputRef = useRef(pane.output ?? "");
   const renderedOutputRef = useRef("");
+  const renderedCursorRef = useRef(pane.outputCursor);
+  const cursorRef = useRef(pane.outputCursor);
+  cursorRef.current = pane.outputCursor;
+  const scheduleFitRef = useRef<() => void>();
   const resizeFrameRef = useRef<number | undefined>();
   const lastSizeRef = useRef("");
   const statusRef = useRef(pane.status);
@@ -67,10 +88,16 @@ export function LiveTerminalPaneBody({
     let disposeTerminal: (() => void) | undefined;
 
     void Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")])
-      .then(([{ Terminal }, { FitAddon }]) => {
+      .then(async ([{ Terminal }, { FitAddon }]) => {
         if (disposed || !hostRef.current) {
           return;
         }
+        const typography = terminalTypography(host);
+        // Load the bundled face before xterm measures its character cells.
+        await document.fonts.load(
+          `${typography.fontSize}px ${typography.fontFamily}`,
+        );
+        if (disposed || !hostRef.current) return;
 
         const terminal = new Terminal({
           allowTransparency: true,
@@ -78,10 +105,7 @@ export function LiveTerminalPaneBody({
           // Browser preview fixtures are plain text; native output is a raw PTY stream.
           convertEol: !isTauriRuntime(),
           drawBoldTextInBrightColors: true,
-          fontFamily:
-            "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
-          fontSize: 12 * appearanceRef.current.scale,
-          lineHeight: 1.2,
+          ...terminalTypography(host),
           macOptionIsMeta: true,
           minimumContrastRatio: 4.5,
           rightClickSelectsWord: true,
@@ -91,7 +115,8 @@ export function LiveTerminalPaneBody({
         });
         const fitAddon = new FitAddon();
         terminal.loadAddon(fitAddon);
-        terminal.open(hostRef.current);
+        if (!mountRef.current) return;
+        terminal.open(mountRef.current);
         terminalRef.current = terminal;
         fitAddonRef.current = fitAddon;
 
@@ -105,7 +130,10 @@ export function LiveTerminalPaneBody({
         const dataDisposable = terminal.onData((data) => {
           // Replaying a finished PTY can generate terminal protocol replies.
           // Neither those replies nor keystrokes belong to an exited process.
-          if (statusRef.current !== "running" && statusRef.current !== "waiting") {
+          if (
+            statusRef.current !== "running" &&
+            statusRef.current !== "waiting"
+          ) {
             return;
           }
           onWriteRef.current(pane.id, data);
@@ -117,7 +145,15 @@ export function LiveTerminalPaneBody({
           setSelectionText(terminal.getSelection());
         });
 
-        const fitAndReport = () => {
+        let resizeInFlight = false;
+        let retryTimer: number | undefined;
+        const clearTerminal = (event: Event) => {
+          event.preventDefault();
+          terminal.clear();
+        };
+        host.addEventListener("gyro-terminal-clear", clearTerminal);
+        const fitAndReport = async () => {
+          if (disposed) return;
           try {
             const hostEl = hostRef.current;
             // Fitting at 0×0 is what scatters TUI apps across the window.
@@ -134,8 +170,8 @@ export function LiveTerminalPaneBody({
             if (cols < 2 || rows < 2) {
               return;
             }
-            const sizeKey = `${cols}x${rows}`;
-            if (sizeKey === lastSizeRef.current) {
+            const sizeKey = `${cursorRef.current?.generation ?? ""}:${cols}x${rows}`;
+            if (resizeInFlight || sizeKey === lastSizeRef.current || disposed) {
               return;
             }
             // Tell the PTY for live sessions so full-screen CLIs (Claude Code)
@@ -144,8 +180,20 @@ export function LiveTerminalPaneBody({
               statusRef.current === "running" ||
               statusRef.current === "waiting"
             ) {
-              lastSizeRef.current = sizeKey;
-              onResizeRef.current(pane.id, cols, rows);
+              resizeInFlight = true;
+              try {
+                const accepted = await onResizeRef.current(pane.id, cols, rows);
+                if (accepted !== false && !disposed)
+                  lastSizeRef.current = sizeKey;
+              } catch {
+                // Creation may still be pending; retry without caching a failure.
+              } finally {
+                resizeInFlight = false;
+                if (!disposed) {
+                  window.clearTimeout(retryTimer);
+                  retryTimer = window.setTimeout(scheduleFit, 200);
+                }
+              }
             }
           } catch {
             // The terminal can be hidden during route transitions; the next resize fixes it.
@@ -153,6 +201,7 @@ export function LiveTerminalPaneBody({
         };
 
         const scheduleFit = () => {
+          if (disposed) return;
           if (resizeFrameRef.current) {
             window.cancelAnimationFrame(resizeFrameRef.current);
           }
@@ -162,13 +211,15 @@ export function LiveTerminalPaneBody({
           });
         };
 
+        scheduleFitRef.current = scheduleFit;
         const resizeObserver = new ResizeObserver(scheduleFit);
-        resizeObserver.observe(hostRef.current);
+        resizeObserver.observe(mountRef.current);
         // Fit before replaying cursor-addressed output; xterm defaults to 80×24.
         fitAndReport();
         const initialOutput = paneOutputRef.current;
         terminal.write(initialOutput);
         renderedOutputRef.current = initialOutput;
+        renderedCursorRef.current = cursorRef.current;
         scheduleFit();
         // Panel height often animates open after mount; refit shortly after.
         const lateFit = window.setTimeout(scheduleFit, 120);
@@ -176,6 +227,8 @@ export function LiveTerminalPaneBody({
 
         disposeTerminal = () => {
           resizeObserver.disconnect();
+          window.clearTimeout(retryTimer);
+          host.removeEventListener("gyro-terminal-clear", clearTerminal);
           window.clearTimeout(lateFit);
           window.clearTimeout(lateFit2);
           if (resizeFrameRef.current) {
@@ -200,6 +253,8 @@ export function LiveTerminalPaneBody({
       fitAddonRef.current = null;
       renderedOutputRef.current = "";
       lastSizeRef.current = "";
+      scheduleFitRef.current = undefined;
+      renderedCursorRef.current = undefined;
     };
   }, [pane.id]);
 
@@ -210,18 +265,28 @@ export function LiveTerminalPaneBody({
     }
     const nextOutput = pane.output ?? "";
     const previousOutput = renderedOutputRef.current;
-    if (nextOutput === previousOutput) {
+    if (
+      nextOutput === previousOutput &&
+      pane.outputCursor?.generation === renderedCursorRef.current?.generation &&
+      pane.outputCursor?.end === renderedCursorRef.current?.end
+    ) {
       return;
     }
-    const update = terminalOutputUpdate(previousOutput, nextOutput);
+    const update = terminalOutputUpdate(
+      previousOutput,
+      nextOutput,
+      renderedCursorRef.current,
+      pane.outputCursor,
+    );
     if (update.reset) terminal.reset();
     terminal.write(update.data);
     renderedOutputRef.current = nextOutput;
-  }, [pane.output]);
+    renderedCursorRef.current = pane.outputCursor;
+  }, [pane.output, pane.outputCursor]);
 
   useEffect(() => {
-    if (terminalRef.current) {
-      terminalRef.current.options.fontSize = 12 * scale;
+    if (terminalRef.current && hostRef.current) {
+      terminalRef.current.options = terminalTypography(hostRef.current);
       terminalRef.current.options.cursorBlink = !reduceMotion;
     }
     // Selecting this pane is the user asking for the keyboard; a PTY status
@@ -235,39 +300,17 @@ export function LiveTerminalPaneBody({
       terminalRef.current?.focus();
     }
     wasActiveRef.current = isActive;
-    // Also report dimensions when a stopped pane gets a new live process.
-    const timer = window.setTimeout(() => {
-      try {
-        const host = hostRef.current;
-        const fitAddon = fitAddonRef.current;
-        const terminal = terminalRef.current;
-        if (
-          !host ||
-          !fitAddon ||
-          !terminal ||
-          host.clientWidth < 24 ||
-          host.clientHeight < 24
-        ) {
-          return;
-        }
-        fitAddon.fit();
-        if (
-          terminal.cols >= 2 &&
-          terminal.rows >= 2 &&
-          (statusRef.current === "running" || statusRef.current === "waiting")
-        ) {
-          const sizeKey = `${terminal.cols}x${terminal.rows}`;
-          if (sizeKey !== lastSizeRef.current) {
-            lastSizeRef.current = sizeKey;
-            onResizeRef.current(pane.id, terminal.cols, terminal.rows);
-          }
-        }
-      } catch {
-        // ignore fit races during unmount
-      }
-    }, 80);
-    return () => window.clearTimeout(timer);
-  }, [isActive, pane.id, pane.status, scale, reduceMotion]);
+    // A new process needs a resize even at unchanged geometry.
+    lastSizeRef.current = "";
+    scheduleFitRef.current?.();
+  }, [
+    isActive,
+    pane.id,
+    pane.status,
+    pane.outputCursor?.generation,
+    scale,
+    reduceMotion,
+  ]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -286,23 +329,23 @@ export function LiveTerminalPaneBody({
       ) : null}
       <div
         aria-label="Terminal input"
+        data-terminal-id={pane.id}
         className="gyro-xterm-host"
         onClick={(event) => {
           event.stopPropagation();
           onSelect(pane.id);
-          if (
-            statusRef.current === "restored" ||
-            statusRef.current === "failed"
-          ) {
-            onReconnect(pane.id);
-            return;
-          }
           terminalRef.current?.focus();
+        }}
+        onFocus={(event) => {
+          if (event.target === event.currentTarget)
+            terminalRef.current?.focus();
         }}
         ref={hostRef}
         role="textbox"
         tabIndex={0}
-      />
+      >
+        <div className="gyro-xterm-mount" ref={mountRef} />
+      </div>
       {onSendSelection && selectionText.trim() ? (
         <button
           className="gyro-terminal-send-selection"
@@ -319,9 +362,13 @@ export function LiveTerminalPaneBody({
           Send selection to chat
         </button>
       ) : null}
-      {pane.status === "restored" ? (
+      {pane.status === "restored" || pane.status === "failed" ? (
         <div className="gyro-terminal-recovery" role="status">
-          <span>Previous output · process is no longer running</span>
+          <span>
+            {pane.status === "failed"
+              ? "Process failed"
+              : "Previous output · process is no longer running"}
+          </span>
           <button
             className="gyro-terminal-reconnect"
             onClick={(event) => {

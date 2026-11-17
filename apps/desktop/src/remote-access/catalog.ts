@@ -27,13 +27,15 @@ export function useRemoteCatalog(ports: NativePorts, peers: Peer[]) {
   const peersRef = useRef(peers);
   peersRef.current = peers;
   const peerKey = peers
-    .map((p) => `${p.id}:${p.role}`)
+    .map((p) => JSON.stringify([p.id, p.role, p.name]))
     .sort()
     .join(",");
   const refreshRef = useRef<() => Promise<void>>(async () => {});
   useEffect(() => {
     let disposed = false;
     let inFlight = false;
+    let queuedAll = false;
+    const queuedHosts = new Set<string>();
     const hosts = peersRef.current;
     const ids = new Set(hosts.map((h) => h.id));
     for (const [id, client] of clients.current)
@@ -49,12 +51,17 @@ export function useRemoteCatalog(ports: NativePorts, peers: Peer[]) {
         loading: true,
       })),
     );
-    const refresh = async () => {
-      if (inFlight || disposed) return;
+    const refresh = async (hostIds?: ReadonlySet<string>) => {
+      if (disposed) return;
+      if (inFlight) {
+        if (hostIds) for (const host of hostIds) queuedHosts.add(host);
+        else queuedAll = true;
+        return;
+      }
       inFlight = true;
       try {
         await Promise.all(
-          hosts.map(async (host) => {
+          hosts.filter((host) => !hostIds || hostIds.has(host.id)).map(async (host) => {
             let client = clients.current.get(host.id);
             if (!client) {
               client = new RemoteHostClient(host.id, ports);
@@ -65,7 +72,7 @@ export function useRemoteCatalog(ports: NativePorts, peers: Peer[]) {
               const shared = await client.request<Project[]>({
                 op: "projects",
               });
-              const projects = await Promise.all(
+              const results = await Promise.allSettled(
                 shared.map(async (project) => ({
                   project,
                   sessions: await client!.request<
@@ -80,7 +87,12 @@ export function useRemoteCatalog(ports: NativePorts, peers: Peer[]) {
                 setCatalogs((old) =>
                   old.map((c) =>
                     c.host.id === host.id
-                      ? { host, projects, online: true, loading: false }
+                      ? {
+                          host, online: true, loading: false,
+                          projects: results.map((result, index) => result.status === "fulfilled"
+                            ? result.value : c.projects.find((p) => p.project.id === shared[index]!.id) ?? { project: shared[index]!, sessions: [] }),
+                          error: results.some((r) => r.status === "rejected") ? "Some projects could not be refreshed. Showing their last known sessions." : undefined,
+                        }
                       : c,
                   ),
                 );
@@ -103,14 +115,36 @@ export function useRemoteCatalog(ports: NativePorts, peers: Peer[]) {
         );
       } finally {
         inFlight = false;
+        if (!disposed && (queuedAll || queuedHosts.size)) {
+          const scope = queuedAll ? undefined : new Set(queuedHosts);
+          queuedAll = false;
+          queuedHosts.clear();
+          void refresh(scope);
+        }
       }
     };
     refreshRef.current = refresh;
     void refresh();
-    const timer = setInterval(() => void refresh(), 2500);
+    const timer = setInterval(() => void refresh(), 10_000);
+    let eventTimer: ReturnType<typeof setTimeout> | undefined;
+    const changedHosts = new Set<string>();
+    let unlisten: (() => void) | undefined;
+    if (ports.listen) void ports.listen<{ hostId: string; event: { topic: string; payload?: { phase?: string } } }>("gyro://remote-host-event", ({ payload }) => {
+      if (payload.event.topic !== "refresh" && !(payload.event.topic === "provider" &&
+        ["started", "completed", "failed", "cancelled"].includes(payload.event.payload?.phase ?? ""))) return;
+      clearTimeout(eventTimer);
+      changedHosts.add(payload.hostId);
+      eventTimer = setTimeout(() => {
+        const scope = new Set(changedHosts);
+        changedHosts.clear();
+        void refresh(scope);
+      }, 250);
+    }).then((stop) => { if (disposed) stop(); else unlisten = stop; }).catch(() => {});
     return () => {
       disposed = true;
       clearInterval(timer);
+      clearTimeout(eventTimer);
+      unlisten?.();
     };
   }, [peerKey, ports]);
   useEffect(

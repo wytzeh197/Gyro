@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 // Structural guards inspect domain modules after extraction, while architecture
 // limits continue to measure each physical file independently.
 const companions = {
-  "apps/desktop/src/App.tsx": ["app-state.tsx"],
+  "apps/desktop/src/App.tsx": ["app-state.tsx", "use-provider-capability-events.ts"],
   "packages/ui/src/surfaces.tsx": ["workspace-sidebar.tsx"],
   "packages/ui/src/styles.css": ["settings-polish.css", "chat.css"],
   "apps/desktop/src-tauri/src/lib.rs": ["tests.rs"],

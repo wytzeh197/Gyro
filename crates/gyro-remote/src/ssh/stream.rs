@@ -379,7 +379,7 @@ where
             let mut watch = watch.lock().await;
             let Some(request) = watch.as_ref() else { continue; };
             let session = request.operation.session_id().unwrap_or_default();
-            let relevant = match &event { Ok(e) => e.session_id == session || e.topic == "revoked", Err(_) => true };
+            let relevant = match &event { Ok(e) => (e.session_id == session && e.visible_to(&watch_peer)) || e.topic == "revoked", Err(_) => true };
             if !relevant { continue; }
             let revoked = matches!(&event, Ok(e) if e.topic == "scopeRevoked" || (e.topic == "revoked" && e.payload.as_str() == Some(&watch_peer)));
             if revoked || watch_handler(watch_peer.clone(), request.clone()).await.error.is_some() {

@@ -1,3 +1,19 @@
+import { useProviderCapabilityEvents } from "./use-provider-capability-events";
+import { refreshOpenEditorBuffers } from "./refresh-open-editor-buffers";
+import { ConfigRecoveryDialog } from "./config-recovery-dialog";
+import { mergeTerminalOutput } from "./terminal-output";
+import { clearFocusedTerminal } from "./terminal-shortcuts";
+import {
+  createChatSendLifecycle,
+  waitForChatConfigSave,
+} from "./chat-send-lifecycle";
+import {
+  mergeCompletedChatSession,
+  forgetChatResourcePayloads,
+  forgetChatSessionResources,
+  type ChatResourcePayload,
+  readChatSessionList,
+} from "./chat-session-updates";
 import { createIdeTaskStatusUpdater } from "./ide-task-status";
 import { useRemoteWorkspaceSlots } from "../../../packages/ui/src/remote-access-context";
 import { CloudV3Settings, cloudV3Enabled } from "./cloud-v3-settings";
@@ -93,7 +109,6 @@ import {
   gitOutputDetail,
   GitSyncResult,
   GYRO_PROPOSE_EDIT_TOOL,
-  ideAiToolCallFromActivity,
   IdeCommandOutput,
   isPlainShellTerminal,
   isProviderStop,
@@ -224,6 +239,7 @@ import {
 import { isComposerCliUpdating } from "./cli-update-scope";
 import { canonicalFileUri, filePathFromUri } from "./editor/document-uri";
 import { hasEditRecovery, writeEditRecovery } from "./editor/edit-recovery";
+import { persistDurableEditRecovery } from "./editor/durable-edit-recovery";
 import { useLanguageSessions } from "./editor/use-language-sessions";
 import {
   editorBufferFromFile,
@@ -595,7 +611,6 @@ import {
   limitOptimisticSessionEvents,
   limitSessionEventsForUi,
   MAX_CHAT_EVENT_RENDER_COUNT,
-  mergeLiveCapabilityEvent,
   mergePersistedAndOptimisticEvents,
   mergeProviderResponseEvents,
   preserveDeliveredResponses,
@@ -616,10 +631,18 @@ export function App() {
   const remoteSlots = useRemoteWorkspaceSlots();
   const remoteWorkspaceVisible = useRef(false);
   remoteWorkspaceVisible.current = Boolean(remoteSlots.content);
-  const quitConfirmation = useQuitConfirmation();
   const [workbench, dispatchWorkbench] = useMeasuredWorkbenchReducer(
     loadInitialWorkbenchState,
   );
+  const quitConfirmation = useQuitConfirmation(async () => {
+    let saved;
+    do {
+      saved = editorBuffersRef.current;
+      await persistDurableEditRecovery(saved);
+    } while (saved !== editorBuffersRef.current);
+    pendingWorkbenchPersistRef.current = persistableWorkbenchState(workbench);
+    flushPersistedWorkbenchState(pendingWorkbenchPersistRef, onAppearancePersisted);
+  });
   const continueCloudChatRef = useRef<(context: string) => Promise<boolean>>();
   const cloudConnection = useCloudConnection(
     workbench.preferences,
@@ -656,8 +679,13 @@ export function App() {
       return continueCloudChatRef.current(context);
     },
   );
-  const { appearanceSaveStatus, onAppearancePersisted, retryAppearanceSave } =
+  const { appearanceSaveStatus, onAppearancePersisted: reportAppearancePersisted, retryAppearanceSave } =
     useAppearanceSaveFeedback(workbench.preferences);
+  const [workbenchSaveError, setWorkbenchSaveError] = useState(false);
+  const onAppearancePersisted = useCallback((preferences: WorkbenchState["preferences"], saved: boolean) => {
+    reportAppearancePersisted(preferences, saved);
+    setWorkbenchSaveError(!saved);
+  }, [reportAppearancePersisted]);
   const { resolvedTheme, reduceMotion, appearance } = useWorkbenchAppearance(
     workbench.preferences,
   );
@@ -694,7 +722,7 @@ export function App() {
   const [browserResourcesBySessionId, setBrowserResourcesBySessionId] =
     useState<Record<string, ChatBrowserResource>>({});
   const [capabilityResourceDataByCallId, setCapabilityResourceDataByCallId] =
-    useState<Record<string, unknown>>({});
+    useState<Record<string, ChatResourcePayload>>({});
   const [chatGrid, reduceChatGrid] = useReducer(
     chatGridReducer,
     undefined,
@@ -775,6 +803,7 @@ export function App() {
   const [selectedWorkspaceRoot, setSelectedWorkspaceRoot] = useState<string>();
   const [workspaceConfigurationFile, setWorkspaceConfigurationFile] =
     useState<string>();
+  const workspaceConfigurationHash = useRef<string>();
   const [editorRevealTarget, setEditorRevealTarget] =
     useState<EditorRevealTarget>();
   const [selectedFileContent, setSelectedFileContent] =
@@ -837,6 +866,8 @@ export function App() {
   ] = useState<string>();
   const [config, setConfig] = useState<GyroConfig>(loadPreviewConfig);
   const [configLoaded, setConfigLoaded] = useState(false);
+  const [configError, setConfigError] = useState(false);
+  const configRefreshGenerationRef = useRef(0);
   const configRef = useRef(config);
   const [notificationPermission, setNotificationPermission] =
     useState<NotificationPermissionState>("prompt");
@@ -865,6 +896,7 @@ export function App() {
     Partial<Record<ProviderId, ProviderLedgerSummary>>
   >({});
   const configSaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const chatSendLifecycleRef = useRef(createChatSendLifecycle());
   const providerStreamBatchRef = useRef(new Map<string, ProviderStreamBatch>());
   const providerStreamOrderRef = useRef<ProviderStreamOrderState>(new Map());
   const providerStreamFlushTimerRef = useRef<number>();
@@ -2153,7 +2185,7 @@ export function App() {
     () =>
       workbench.terminalPanes
         .filter(
-          (pane) => pane.status === "running" || pane.status === "waiting",
+          (pane) => pane.status === "running" || pane.status === "waiting" || ((pane.status === "done" || pane.status === "failed") && pane.outputComplete === false),
         )
         .map((pane) => pane.id),
     [workbench.terminalPanes],
@@ -2185,6 +2217,10 @@ export function App() {
     },
     [],
   );
+
+  useEffect(() => {
+    if (workbenchSaveError) notify("command-failed", "Settings were not saved", "Changes remain in memory. Open Settings to retry before closing Gyro.");
+  }, [workbenchSaveError, notify]);
 
   useEffect(() => {
     for (const notification of workbench.notifications) {
@@ -2342,11 +2378,12 @@ export function App() {
     resumeUsage,
   } = useUsageActions({ notify, refreshUsageSafety, setProviderLedgerById });
   const recoveryNoticeShownRef = useRef(false);
+  const initialRecoveredEditorCount = useRef(
+    Object.values(workbench.ide.buffers).filter(editorBufferHasUnsavedChanges).length,
+  );
   useEffect(() => {
     if (recoveryNoticeShownRef.current) return;
-    const recovered = Object.values(workbench.ide.buffers).filter(
-      (buffer) => buffer.status === "dirty",
-    ).length;
+    const recovered = initialRecoveredEditorCount.current;
     if (recovered === 0) return;
     recoveryNoticeShownRef.current = true;
     notify(
@@ -2809,7 +2846,7 @@ export function App() {
     }
     try {
       const nextSessions = withoutSideChatSessions(
-        await invoke<Session[]>("list_sessions"),
+        await readChatSessionList(() => invoke<Session[]>("list_sessions")),
         sideChatSessionIdsRef.current,
       );
       const nextVisibleSessions = visibleSessionsForProjects(
@@ -2817,6 +2854,7 @@ export function App() {
         removedProjectPaths,
       );
       sessionsLoadedRef.current = true;
+      dispatchWorkbench({ type: "resolve-notification", correlationKey: "session-list-load" });
       setSessions(nextSessions);
       setActiveSessionId((current) => {
         if (current || suppressSessionAutoSelectRef.current) {
@@ -2831,10 +2869,11 @@ export function App() {
       setWorkspacePath(
         (current) => current ?? nextVisibleSessions[0]?.workspacePath,
       );
-    } catch {
-      // A failed read cannot invalidate durable sessions or their open panes.
+    } catch (error) {
+      // Failed reads must not authorize pruning restored panes from an empty list.
+      notify("command-failed", "Could not load chats", String(error), "session-list-load");
     }
-  }, [removedProjectPaths]);
+  }, [notify, removedProjectPaths]);
 
   const readSessionEvents = useCallback(
     async (sessionId: string) => {
@@ -3110,325 +3149,25 @@ export function App() {
     }
   }, [setEventsForSession]);
 
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-    let isMounted = true;
-    let unlistenCapability: (() => void) | undefined;
-    let unlistenResource: (() => void) | undefined;
-    void listen<SessionEvent>("gyro://provider-capability-event", (event) => {
-      if (!isMounted) return;
-      // Paint earlier narration before placing a call from the separate
-      // capability channel, just as we do for provider activity frames.
-      flushProviderStreamBatches();
-      const capabilityEvent = event.payload;
-      const mergeEvent = (items: SessionEvent[]) =>
-        limitSessionEventsForUi(
-          mergeLiveCapabilityEvent(items, capabilityEvent),
-        );
-      optimisticEventsRef.current.set(
-        capabilityEvent.sessionId,
-        limitOptimisticSessionEvents(
-          mergeEvent(
-            optimisticEventsRef.current.get(capabilityEvent.sessionId) ?? [],
-          ),
-        ),
-      );
-      setEventsForSession(capabilityEvent.sessionId, (current) =>
-        mergeEvent(current),
-      );
-      const activity = capabilityActivityFromSessionEvent(capabilityEvent);
-      if (activity) {
-        setCapabilityRunsBySessionId((current) => ({
-          ...current,
-          [activity.sessionId]: {
-            ...(current[activity.sessionId] ?? {}),
-            [activity.callId]: activity,
-          },
-        }));
-        // Mirror the call into the Workspace AI view so tool use is visible
-        // where the work is happening, without switching the sidebar to it.
-        dispatchWorkbench({
-          type: "ide-record-ai-tool-call",
-          toolCall: ideAiToolCallFromActivity(activity),
-        });
-      }
-    }).then((unlisten) => {
-      if (!isMounted) unlisten();
-      else unlistenCapability = unlisten;
-    });
-    void listen<ProviderCapabilityResourceEvent>(
-      "gyro://provider-capability-resource",
-      (event) => {
-        if (!isMounted) return;
-        const payload = event.payload;
-        liveCapabilityResourceIdsRef.current.add(payload.resource.id);
-        setCapabilityResourceDataByCallId((current) => ({
-          ...current,
-          [payload.callId]: payload.data,
-        }));
-        const isActiveModelWorkspace =
-          activeSessionIdRef.current === payload.sessionId;
-        // The model reports where it is working; only "follow" lets that
-        // report move the user. Everything else populates state in place and
-        // surfaces it through the ambient strip and badges.
-        const shouldFollow =
-          isActiveModelWorkspace && modelFollowRef.current === "follow";
-        const recordFocus = (
-          focus: Omit<ModelFocus, "sessionId" | "callId" | "updatedAt">,
-        ) => {
-          dispatchWorkbench({
-            type: "set-model-focus",
-            focus: {
-              ...focus,
-              sessionId: payload.sessionId,
-              callId: payload.callId,
-              updatedAt: new Date().toISOString(),
-            },
-          });
-        };
-        if (payload.resource.kind === "terminal") {
-          const snapshot = terminalSnapshotFromCapabilityData(payload.data);
-          recordFocus({
-            kind: "terminal",
-            label: payload.resource.label,
-            detail: snapshot?.command,
-            paneTab: "terminal",
-            paneId: snapshot?.paneId,
-            resourceId: payload.resource.id,
-          });
-          if (snapshot) {
-            const pane = terminalPaneFromSnapshot(snapshot, "local");
-            dispatchWorkbench({
-              type: "upsert-background-terminal-pane",
-              pane: {
-                ...pane,
-                owner: {
-                  kind: "model",
-                  sessionId: payload.sessionId,
-                  turnId: payload.turnId,
-                  callId: payload.callId,
-                },
-              },
-            });
-            // Follow is the one mode where the app moves with the model, and
-            // only for the chat on screen. Selecting the pane is what makes
-            // the model's terminal join the strip; nothing else does, so the
-            // user's own terminals stay uncluttered.
-            if (shouldFollow) {
-              dispatchWorkbench({
-                type: "select-terminal-pane",
-                paneId: snapshot.paneId,
-              });
-              dispatchWorkbench({ type: "open-tool-panel", tab: "terminal" });
-            }
-            terminalOutputRevisionRef.current[snapshot.paneId] =
-              snapshot.outputRevision;
-            const stoppedBy = stringFromRecord(
-              recordFromUnknown(payload.data),
-              "stoppedBy",
-            );
-            if (stoppedBy === "model") {
-              const existing = terminalPanesRef.current.find(
-                (item) => item.id === snapshot.paneId,
-              );
-              if (existing?.keepAlive) {
-                dispatchWorkbench({
-                  type: "set-terminal-pane-keep-alive",
-                  paneId: snapshot.paneId,
-                  keepAlive: {
-                    ...existing.keepAlive,
-                    phase: "stopped",
-                    stopOrigin: "model",
-                  },
-                });
-              }
-            }
-          }
-        }
-        if (payload.resource.kind === "browser") {
-          const data = recordFromUnknown(payload.data);
-          const capture = recordFromUnknown(data?.capture);
-          const session = sessionsRef.current.find(
-            (item) => item.id === payload.sessionId,
-          );
-          const url = stringFromRecord(data, "url") ?? payload.resource.label;
-          const capturePath = stringFromRecord(capture, "path");
-          recordFocus({
-            kind: "browser",
-            label: payload.resource.label,
-            detail: url,
-            paneTab: "browser",
-          });
-          if (session && url) {
-            setBrowserResourcesBySessionId((current) => ({
-              ...current,
-              [payload.sessionId]: {
-                id: payload.resource.id,
-                sessionId: payload.sessionId,
-                projectPath: session.workspacePath,
-                url,
-                status: "completed",
-                label: payload.resource.label,
-                latestCapturePath: capturePath,
-              },
-            }));
-          }
-          // Surface agent screenshots in the Live/Capture toggle + preview card.
-          if (capturePath) {
-            const width = numberFromUnknown(capture?.width) ?? 0;
-            const height = numberFromUnknown(capture?.height) ?? 0;
-            const filename =
-              stringFromRecord(capture, "filename") ??
-              capturePath.split(/[/\\]/).pop() ??
-              "browser-capture.png";
-            dispatchWorkbench({
-              type: "browser-session",
-              sessionId: payload.sessionId,
-              action: {
-                type: "browser-capture-success",
-                capture: {
-                  path: capturePath,
-                  filename,
-                  width,
-                  height,
-                  createdAt:
-                    stringFromRecord(capture, "createdAt") ??
-                    new Date().toISOString(),
-                  src: isTauriRuntime()
-                    ? convertFileSrc(capturePath)
-                    : capturePath,
-                  sourceUrl: url,
-                },
-              },
-            });
-          }
-        }
-        if (payload.resource.kind === "ide") {
-          const data = recordFromUnknown(payload.data);
-          const panel = stringFromRecord(data, "panel");
-          if (
-            panel === "diff" ||
-            panel === "terminal" ||
-            panel === "browser" ||
-            panel === "problems" ||
-            panel === "test-results" ||
-            panel === "output"
-          ) {
-            recordFocus({
-              kind: "ide",
-              label: payload.resource.label,
-              paneTab: panel,
-            });
-            if (
-              shouldFollow &&
-              !(panel === "browser" && isSplitChatViewRef.current)
-            ) {
-              dispatchWorkbench({ type: "open-tool-panel", tab: panel });
-            }
-          } else {
-            const path = stringFromRecord(data, "path");
-            if (path) {
-              const line = typeof data?.line === "number" ? data.line : 1;
-              const column = typeof data?.column === "number" ? data.column : 1;
-              recordFocus({
-                kind: "ide",
-                label: workspaceName(path),
-                detail: path,
-                path,
-                line: Math.max(1, line),
-                column: Math.max(1, column),
-              });
-              // File access stays in the background unless the user explicitly
-              // enables Follow model for the active session.
-              if (shouldFollow) {
-                dispatchWorkbench({
-                  type: "ide-open-tab",
-                  tab: {
-                    path,
-                    title: workspaceName(path),
-                    dirty: false,
-                    preview: true,
-                  },
-                });
-                setEditorRevealTarget({
-                  path,
-                  lineNumber: Math.max(1, line),
-                  column: Math.max(1, column),
-                  nonce: Date.now(),
-                });
-                setSelectedFile(path);
-                dispatchWorkbench({
-                  type: "select-workspace-layout",
-                  layout: "code",
-                });
-              }
-            }
-          }
-        }
-        if (payload.resource.kind === "output") {
-          const data = recordFromUnknown(payload.data);
-          const kind = stringFromRecord(data, "kind");
-          const paneTab = kind === "test" ? "test-results" : "output";
-          recordFocus({
-            kind: "output",
-            label: payload.resource.label,
-            detail: kind === "test" ? "Tests" : "Task output",
-            paneTab,
-            resourceId: payload.resource.id,
-          });
-          if (isActiveModelWorkspace) {
-            dispatchWorkbench({
-              type: "ide-upsert-output-channel",
-              channel: {
-                id: payload.resource.id,
-                label: payload.resource.label,
-                kind: kind === "test" ? "test" : "task",
-                lines: [
-                  stringFromRecord(data, "stdout"),
-                  stringFromRecord(data, "stderr"),
-                ].filter((line): line is string => Boolean(line)),
-                updatedAt: new Date().toISOString(),
-              },
-            });
-          }
-          if (shouldFollow) {
-            dispatchWorkbench({ type: "open-tool-panel", tab: paneTab });
-          }
-        }
-        if (payload.resource.kind === "proposal") {
-          recordFocus({
-            kind: "proposal",
-            label: payload.resource.label,
-            detail: "Proposed change",
-            paneTab: "diff",
-          });
-          if (shouldFollow) {
-            dispatchWorkbench({ type: "open-tool-panel", tab: "diff" });
-          }
-        }
-        if (payload.resource.kind === "workspace") {
-          const folder = stringFromRecord(
-            recordFromUnknown(payload.data),
-            "path",
-          );
-          // The user asked this chat to open the folder and approved the call.
-          // If they have since moved to another chat, opening a project would
-          // pull them out of it, so the call only reports what it validated.
-          if (folder && isActiveModelWorkspace) {
-            void openWorkspaceFolderRef.current?.(folder);
-          }
-        }
-      },
-    ).then((unlisten) => {
-      if (!isMounted) unlisten();
-      else unlistenResource = unlisten;
-    });
-    return () => {
-      isMounted = false;
-      unlistenCapability?.();
-      unlistenResource?.();
-    };
-  }, [flushProviderStreamBatches, setEventsForSession]);
+  useProviderCapabilityEvents({
+    flushProviderStreamBatches,
+    optimisticEventsRef,
+    setEventsForSession,
+    setCapabilityRunsBySessionId,
+    dispatchWorkbench,
+    liveCapabilityResourceIdsRef,
+    setCapabilityResourceDataByCallId,
+    activeSessionIdRef,
+    modelFollowRef,
+    terminalPanesRef,
+    terminalOutputRevisionRef,
+    sessionsRef,
+    setBrowserResourcesBySessionId,
+    isSplitChatViewRef,
+    setEditorRevealTarget,
+    setSelectedFile,
+    openWorkspaceFolderRef,
+  });
 
   const scheduleProviderStreamFlush = useCallback(() => {
     if (providerStreamFlushTimerRef.current !== undefined) {
@@ -3670,7 +3409,7 @@ export function App() {
       if (updatedSession) {
         setSessions((current) =>
           current.map((session) =>
-            session.id === updatedSession.id ? updatedSession : session,
+            session.id === updatedSession.id ? mergeCompletedChatSession(session, updatedSession) : session,
           ),
         );
       }
@@ -3889,6 +3628,7 @@ export function App() {
       setActiveProfileId("shell");
       return;
     }
+    const generation = ++configRefreshGenerationRef.current;
     try {
       restoreModelCatalog();
       const [nextConfig, capabilityManifest] = await Promise.all([
@@ -3897,9 +3637,11 @@ export function App() {
           "list_provider_capability_support",
         ).catch(() => []),
       ]);
+      if (generation !== configRefreshGenerationRef.current) return;
       applyProviderCapabilityManifest(capabilityManifest);
       const resolvedConfig = withCouncilConfig(nextConfig);
       setConfig(resolvedConfig);
+      setConfigError(false);
       setConfigLoaded(true);
       setActiveProfileId(nextConfig.commandProfiles[0]?.id ?? "shell");
       const ollama = providersForConfig(resolvedConfig).find(
@@ -3912,6 +3654,7 @@ export function App() {
           baseUrl: ollama.baseUrl,
         })
           .then((discovery) => {
+            if (generation !== configRefreshGenerationRef.current) return;
             const models = discovery.models.map((model) => ({
               id: model.id,
               displayName: model.displayName,
@@ -3919,39 +3662,43 @@ export function App() {
               contextWindowTokens: model.contextWindowTokens,
               supportsTools: model.supportsTools,
             }));
-            setConfig((current) => ({
-              ...current,
-              modelProviders: providersForConfig(current).map((provider) =>
-                provider.id === "ollama" && provider.baseUrl === ollama.baseUrl
-                  ? {
-                      ...provider,
-                      baseUrl: discovery.baseUrl,
-                      models,
-                      defaultModelId:
-                        provider.defaultModelId &&
-                        models.some(
-                          (model) => model.id === provider.defaultModelId,
-                        )
-                          ? provider.defaultModelId
-                          : models[0]?.id,
-                      selectedModelId:
-                        provider.selectedModelId &&
-                        models.some(
-                          (model) => model.id === provider.selectedModelId,
-                        )
-                          ? provider.selectedModelId
-                          : models[0]?.id,
-                    }
-                  : provider,
-              ),
-            }));
+            setConfig((current) => {
+              if (generation !== configRefreshGenerationRef.current)
+                return current;
+              return {
+                ...current,
+                modelProviders: providersForConfig(current).map((provider) =>
+                  provider.id === "ollama" && provider.baseUrl === ollama.baseUrl
+                    ? {
+                        ...provider,
+                        baseUrl: discovery.baseUrl,
+                        models,
+                        defaultModelId:
+                          provider.defaultModelId &&
+                          models.some(
+                            (model) => model.id === provider.defaultModelId,
+                          )
+                            ? provider.defaultModelId
+                            : models[0]?.id,
+                        selectedModelId:
+                          provider.selectedModelId &&
+                          models.some(
+                            (model) => model.id === provider.selectedModelId,
+                          )
+                            ? provider.selectedModelId
+                            : models[0]?.id,
+                      }
+                    : provider,
+                ),
+              };
+            });
           })
           .catch(() => undefined);
       }
     } catch {
-      setConfig(withCouncilConfig(EMPTY_CONFIG));
-      setConfigLoaded(true);
-      setActiveProfileId("shell");
+      if (generation !== configRefreshGenerationRef.current) return;
+      setConfigError(true);
+      setConfigLoaded(false);
     }
   }, []);
 
@@ -4520,7 +4267,7 @@ export function App() {
       const requestId = workspaceSearchRequestRef.current + 1;
       workspaceSearchRequestRef.current = requestId;
       dispatchWorkbench({ type: "ide-set-search-results", query, results: [] });
-      if (workspaceRoots.length === 0 || !query.query.trim()) {
+      if (workspaceRoots.length === 0 || !query.query) {
         dispatchWorkbench({
           type: "ide-set-search-results",
           query,
@@ -4927,6 +4674,11 @@ export function App() {
     ],
   );
 
+  const liveEditorEvidenceRef = useRef(liveEditorEvidence);
+  liveEditorEvidenceRef.current = liveEditorEvidence;
+  const liveEditorSourcesRef = useRef({ buffers: workbench.ide.buffers, selection: workbench.ide.selection, tabs: workbench.ide.tabs });
+  liveEditorSourcesRef.current = { buffers: workbench.ide.buffers, selection: workbench.ide.selection, tabs: workbench.ide.tabs };
+
   // The snapshot is rebuilt on editor changes. It lists every open tab and
   // holds unsaved text that fits in the evidence limit, so pushes are
   // coalesced. The first change of a burst goes out at once, sustained
@@ -5156,6 +4908,8 @@ export function App() {
               ? snapshot.status
               : `${snapshot.status} (${snapshot.exitCode})`,
           output: snapshot.output ?? "",
+          outputCursor: snapshot.outputCursor,
+          outputComplete: snapshot.outputComplete,
           status: terminalStatusFromSnapshot(snapshot.status),
           hasForegroundJob: snapshot.hasForegroundJob ?? undefined,
         });
@@ -5848,9 +5602,10 @@ export function App() {
   useEffect(() => {
     workspacePathChanged.current = (change) => {
       if (change.action === "deleted") {
+        const dirty = selectedFile && editorBufferHasUnsavedChanges(editorBuffersRef.current[selectedFile]);
         dispatchWorkbench({ type: "ide-delete-path", path: change.path });
-        disposeEditorModels([change.path]);
-        if (selectedFile && editorPathMatches(selectedFile, change.path)) {
+        // Model lifetime follows the reducer's retained dirty tabs/buffers.
+        if (!dirty && selectedFile && editorPathMatches(selectedFile, change.path)) {
           setSelectedFile(undefined);
         }
         return;
@@ -6720,7 +6475,7 @@ export function App() {
   // Edits made outside Gyro — another editor, a terminal, a rebase — never
   // reach the file-edit refresh, so re-read while the panel is on screen.
   useEffect(() => {
-    if (!workspaceActionRoot || !isSourceControlVisible) {
+    if (!workspaceActionRoot || workbench.activeDestination !== "workspace") {
       return;
     }
     refreshIdeSourceControl(workspaceActionRoot);
@@ -6729,7 +6484,7 @@ export function App() {
       refreshIdeSourceControl(workspaceActionRoot);
     }, 5_000);
     return () => window.clearInterval(timer);
-  }, [refreshIdeSourceControl, isSourceControlVisible, workspaceActionRoot]);
+  }, [refreshIdeSourceControl, workbench.activeDestination, workspaceActionRoot]);
   useEffect(() => {
     if (!workspaceActionRoot || !isSourceControlVisible) return;
     // Pick up newly pushed workflows and recover from transient failures even
@@ -7300,6 +7055,11 @@ export function App() {
   const removeWorkspaceFolder = useCallback(
     (path: string) => {
       if (!activeWorkspaceRoot) return;
+      if (Object.values(editorBuffersRef.current).some(buffer =>
+        editorPathMatches(buffer.path, path) && editorBufferHasUnsavedChanges(buffer))) {
+        notify("command-failed", "Folder has unsaved changes", "Save or close its edited files before removing the folder.");
+        return;
+      }
       if (
         normalizeProjectPath(path) === normalizeProjectPath(activeWorkspaceRoot)
       ) {
@@ -7369,6 +7129,7 @@ export function App() {
     try {
       let filePath: string;
       let content: string;
+      let contentHash: string | undefined;
       if (!isTauriRuntime()) {
         filePath = "/preview/Gyro.gyro-workspace.json";
         content = JSON.stringify({
@@ -7397,6 +7158,7 @@ export function App() {
           },
         );
         content = file.content;
+        contentHash = file.contentHash;
       }
       const parsedFile = parseGyroWorkspaceFile(content, filePath);
       const primary = parsedFile.folders[0]?.path;
@@ -7437,6 +7199,7 @@ export function App() {
         }
       }
       setWorkspaceConfigurationFile(filePath);
+      workspaceConfigurationHash.current = contentHash;
       await activateWorkspacePath(primary, "Workspace file opened");
     } catch (error) {
       notify(
@@ -7484,13 +7247,15 @@ export function App() {
         folderSettingsByPath: workbench.preferences.workspaceSettingsByFolder,
       });
       if (isTauriRuntime()) {
-        await invoke("write_workspace_file", {
+        const written = await invoke<WorkspaceFileContent>("write_workspace_file", {
           request: {
             workspacePath: parentDirectory(filePath),
             path: filePath,
             content,
+            expectedHash: workspaceConfigurationHash.current,
           },
         });
+        workspaceConfigurationHash.current = written.contentHash;
       }
       setWorkspaceConfigurationFile(filePath);
       notify("tests-passed", "Workspace file saved", filePath);
@@ -8365,6 +8130,7 @@ export function App() {
           liveCapabilityResourceIdsRef.current.delete(activity.resource.id);
         }
       }
+      setCapabilityResourceDataByCallId((current) => forgetChatSessionResources(current, sessionId));
       setCapabilityRunsBySessionId((current) => {
         if (!current[sessionId]) return current;
         const next = { ...current };
@@ -8665,7 +8431,7 @@ export function App() {
         // Ask for governance when the profile supports it. If the backend
         // cannot honour it the pane still opens, but ungoverned and labelled
         // as such — a pane must never look protected when it is not.
-        // A command override runs through `zsh -lc`, not the agent binary, so
+        // A command override runs through `zsh -ilc`, not the agent binary, so
         // it never carries the profile's governance.
         const wantsGovernance =
           !commandOverride &&
@@ -8680,7 +8446,7 @@ export function App() {
             },
           );
         } catch (governanceError) {
-          if (!wantsGovernance) {
+          if (!wantsGovernance || String(governanceError).includes("terminal launch cancelled")) {
             throw governanceError;
           }
           notify(
@@ -8707,6 +8473,8 @@ export function App() {
               ? snapshot.status
               : `${snapshot.status} (${snapshot.exitCode})`,
           output: snapshot.output ?? "",
+          outputCursor: snapshot.outputCursor,
+          outputComplete: snapshot.outputComplete,
           status,
           hasForegroundJob: snapshot.hasForegroundJob ?? undefined,
           governedSessionId: snapshot.governedSessionId ?? undefined,
@@ -9015,6 +8783,8 @@ export function App() {
               ? progress.status
               : `${progress.status} (${progress.exitCode})`,
           output: progress.output ?? "",
+          outputCursor: progress.outputCursor,
+          outputComplete: progress.outputComplete,
           status: terminalStatusFromSnapshot(progress.status),
           hasForegroundJob: progress.hasForegroundJob ?? undefined,
         });
@@ -9350,6 +9120,8 @@ export function App() {
               ? snapshot.status
               : `${snapshot.status} (${snapshot.exitCode})`,
           output: snapshot.output ?? "",
+          outputCursor: snapshot.outputCursor,
+          outputComplete: snapshot.outputComplete,
           status: terminalStatusFromSnapshot(snapshot.status),
           hasForegroundJob: snapshot.hasForegroundJob ?? undefined,
         });
@@ -11381,707 +11153,1057 @@ export function App() {
         );
         return outcome;
       }
-      // Fix the mode at the click, before pending media or provider checks can
-      // await. A later chip change belongs to the following draft.
-      const draftModeKey = overrideContext?.draftModeKey ?? activeDraftKey;
-      const draftModeRevision =
-        overrideContext?.draftModeRevision ??
-        chatDraftModeRevisionsRef.current[draftModeKey] ??
-        0;
-      const selectedMode = chatDraftModesRef.current[draftModeKey] ?? "normal";
-      const turnMode =
-        overrideContext?.mode ??
-        (COUNCIL_COMING_SOON && selectedMode === "council"
-          ? "normal"
-          : selectedMode);
-      const consumeSelectedMode =
-        overrideContext?.consumeDraftMode ??
-        (overrideContext?.mode === undefined && !overrideContext?.preserveDraft);
-      const message = normalizeChatMessage(overrideMessage ?? activeChatDraft);
-      const draftAttachments =
-        overrideContext?.attachments ?? activeChatAttachments;
-      const requestedSessionId = overrideContext?.sessionId ?? activeSessionId;
-      if (
-        requestedSessionId &&
-        message.length <= MAX_CHAT_MESSAGE_CHARS &&
-        (message || draftAttachments.length > 0)
-      ) {
-        chatAutoRetry.cancelSession(requestedSessionId);
-        if (
-          !overrideContext?.retryTurnId &&
-          !overrideContext?.retryDispatchGuard
-        ) {
-          retryDispatchRef.current.cancelSession(requestedSessionId);
-        }
-      }
-      if (overrideContext?.retryDispatchGuard?.() === false) return outcome;
-      // An image dropped a moment ago may still be uploading.
-      let turnAttachments = draftAttachments;
+      const preparation = chatSendLifecycleRef.current.reserve(
+        overrideContext?.sessionId ??
+          activeSessionId ??
+          `draft:${overrideContext?.draftModeKey ?? activeDraftKey}`,
+      );
+      if (!preparation) return { ...outcome, reason: "busy" };
       try {
-        if (draftAttachments.some((item) => item.pending)) {
-          turnAttachments = await settlePendingMedia(draftAttachments);
+        // Fix the mode at the click, before pending media or provider checks can
+        // await. A later chip change belongs to the following draft.
+        const draftModeKey = overrideContext?.draftModeKey ?? activeDraftKey;
+        const draftModeRevision =
+          overrideContext?.draftModeRevision ??
+          chatDraftModeRevisionsRef.current[draftModeKey] ??
+          0;
+        const selectedMode = chatDraftModesRef.current[draftModeKey] ?? "normal";
+        const turnMode =
+          overrideContext?.mode ??
+          (COUNCIL_COMING_SOON && selectedMode === "council"
+            ? "normal"
+            : selectedMode);
+        const consumeSelectedMode =
+          overrideContext?.consumeDraftMode ??
+          (overrideContext?.mode === undefined &&
+            !overrideContext?.preserveDraft);
+        const message = normalizeChatMessage(overrideMessage ?? activeChatDraft);
+        const draftAttachments =
+          overrideContext?.attachments ?? activeChatAttachments;
+        const requestedSessionId = overrideContext?.sessionId ?? activeSessionId;
+        if (
+          requestedSessionId &&
+          message.length <= MAX_CHAT_MESSAGE_CHARS &&
+          (message || draftAttachments.length > 0)
+        ) {
+          chatAutoRetry.cancelSession(requestedSessionId);
+          if (
+            !overrideContext?.retryTurnId &&
+            !overrideContext?.retryDispatchGuard
+          ) {
+            retryDispatchRef.current.cancelSession(requestedSessionId);
+          }
         }
-      } catch (error) {
-        notify("command-failed", "Attachment upload failed", String(error));
-        return outcome;
-      }
-      if (overrideContext?.retryDispatchGuard?.() === false) return outcome;
-      // Plan is a read-only turn, not a goal run. Keep the saved goal on the
-      // session while excluding it from this request (including queued sends).
-      const turnGoal = turnMode === "plan" ? undefined : (
-        overrideContext && "goal" in overrideContext
-          ? overrideContext.goal
-          : activeSessionGoal
-      );
-      const turnPlan =
-        overrideContext && "plan" in overrideContext
-          ? (overrideContext.plan ?? { title: "Plan", items: [] })
-          : activeSessionPlan;
-      const previewSessionId =
-        isTauriRuntime() && isPreviewSessionId(requestedSessionId)
-          ? requestedSessionId
-          : undefined;
-      const targetSessionId = previewSessionId ? undefined : requestedSessionId;
-      outcome.sessionId = targetSessionId;
-      const targetSession = requestedSessionId
-        ? sessions.find((session) => session.id === requestedSessionId)
-        : undefined;
-      const targetSessionHasTranscriptEvents = targetSessionId
-        ? (sessionEventsById[targetSessionId] ?? []).some(
-            (event) =>
-              event.kind === "user-message" || event.kind === "assistant-message",
-          )
-        : activeSessionHasTranscriptEvents;
-      const isBackgroundSend = Boolean(
-        targetSessionId && targetSessionId !== activeSessionId,
-      );
-      const sessionModel = {
-        ...selectedSessionModelFromConfig(config),
-        // Prefer the model bound to this session or draft pane over the global
-        // picker — required so split-screen chats keep independent models.
-        ...(requestedSessionId
-          ? sessionModelSelectionFromSession(targetSession)
-          : chatDraftModels[activeDraftKey]),
-        ...overrideContext?.sessionModel,
-      };
-      const selectedProvider = providersForConfig(config).find(
-        (provider) => provider.id === sessionModel.providerId,
-      );
-      if (
-        !requestedSessionId &&
-        sessionModel.providerId &&
-        (!selectedProvider ||
-          !selectedProvider.enabled ||
-          !isProviderRuntimeUsable(
-            selectedProvider,
-            workbench.providerStatuses.find(
-              (item) => item.id === selectedProvider.id,
-            ),
-          ) ||
-          !getProviderModel(selectedProvider, sessionModel.modelId))
-      ) {
-        notify(
-          "command-failed",
-          "Choose an available model",
-          "The model saved for this draft is unavailable. Connect its provider or choose another model.",
-        );
-        return outcome;
-      }
-      const requireCommandApproval =
-        overrideContext?.requireCommandApproval ?? config.requireCommandApproval;
-      const requireFileEditApproval =
-        overrideContext?.requireFileEditApproval ??
-        config.requireFileEditApproval;
-      const fullAccess =
-        overrideContext?.fullAccess ?? Boolean(config.fullAccess);
-      // A chat belongs to the project of the pane it was typed in. The global
-      // workspace can move (Code layout, sidebar) while an already-focused
-      // draft keeps its own project, so never let it pick the project here.
-      const chatWorkspacePath =
-        overrideContext?.workspacePath ??
-        targetSession?.workspacePath ??
-        (!requestedSessionId && activeChatPane?.kind === "draft"
-          ? activeChatPane.workspacePath
-          : workspacePath);
-      const turnWorkspaceContext =
-        overrideContext?.workspaceContext ??
-        (workspaceContextSnapshot &&
-        chatWorkspacePath &&
-        normalizeProjectPath(workspaceContextSnapshot.workspaceKey) ===
-          normalizeProjectPath(chatWorkspacePath)
-          ? workspaceContextSnapshot
-          : undefined);
-      if (message === "") {
-        return outcome;
-      }
-      if (isBranchLoading) {
-        notify(
-          "command-failed",
-          "Branch is switching",
-          "Wait for the selected branch to finish checking out before sending.",
-        );
-        return outcome;
-      }
-      if (chatMessageLength(message) > MAX_CHAT_MESSAGE_CHARS) {
-        notify(
-          "command-failed",
-          "Message too long",
-          `Keep chat messages under ${MAX_CHAT_MESSAGE_CHARS.toLocaleString()} characters.`,
-        );
-        return outcome;
-      }
-      if (!targetSessionId && isStartingFirstTurn) {
-        return outcome;
-      }
-      // Sending from the goal composer sets the goal and starts on it in one
-      // step. A new chat saves it once the session exists (below).
-      const newGoal = overrideContext?.goal;
-      if (
-        targetSessionId &&
-        newGoal?.text &&
-        isTauriRuntime() &&
-        (targetSessionId !== activeSessionId ||
-          newGoal.text !== activeSessionGoal?.text ||
-          activeSessionGoal?.status !== "active")
-      ) {
+        preparation.check();
+        if (overrideContext?.retryDispatchGuard?.() === false) return outcome;
+        // An image dropped a moment ago may still be uploading.
+        let turnAttachments = draftAttachments;
         try {
-          await invoke<SessionEvent>("append_chat_context_event", {
-            sessionId: targetSessionId,
-            eventKind: "goal-updated",
-            message: "",
-            payload: { action: "set", text: newGoal.text, status: "active" },
-          });
-          void refreshEvents(targetSessionId);
+          if (draftAttachments.some((item) => item.pending)) {
+            turnAttachments = await settlePendingMedia(draftAttachments);
+          }
         } catch (error) {
-          notify("command-failed", "Goal not saved", String(error));
+          notify("command-failed", "Attachment upload failed", String(error));
+          return outcome;
         }
-      }
-      if (targetSessionId && sendingSessionIdsRef.current.has(targetSessionId)) {
-        // Recovery keeps the original turn. The dispatch controller waits for
-        // a finishing invoke; it must never fall into the normal send queue.
+        preparation.check();
+        if (overrideContext?.retryDispatchGuard?.() === false) return outcome;
+        // Plan is a read-only turn, not a goal run. Keep the saved goal on the
+        // session while excluding it from this request (including queued sends).
+        const turnGoal =
+          turnMode === "plan"
+            ? undefined
+            : overrideContext && "goal" in overrideContext
+              ? overrideContext.goal
+              : activeSessionGoal;
+        const turnPlan =
+          overrideContext && "plan" in overrideContext
+            ? (overrideContext.plan ?? { title: "Plan", items: [] })
+            : activeSessionPlan;
+        const previewSessionId =
+          isTauriRuntime() && isPreviewSessionId(requestedSessionId)
+            ? requestedSessionId
+            : undefined;
+        const targetSessionId = previewSessionId ? undefined : requestedSessionId;
+        outcome.sessionId = targetSessionId;
+        const targetSession = requestedSessionId
+          ? sessions.find((session) => session.id === requestedSessionId)
+          : undefined;
+        const targetSessionHasTranscriptEvents = targetSessionId
+          ? (sessionEventsById[targetSessionId] ?? []).some(
+              (event) =>
+                event.kind === "user-message" ||
+                event.kind === "assistant-message",
+            )
+          : activeSessionHasTranscriptEvents;
+        const isBackgroundSend = Boolean(
+          targetSessionId && targetSessionId !== activeSessionId,
+        );
+        const sessionModel = {
+          ...selectedSessionModelFromConfig(config),
+          // Prefer the model bound to this session or draft pane over the global
+          // picker — required so split-screen chats keep independent models.
+          ...(requestedSessionId
+            ? sessionModelSelectionFromSession(targetSession)
+            : chatDraftModels[activeDraftKey]),
+          ...overrideContext?.sessionModel,
+        };
+        const selectedProvider = providersForConfig(config).find(
+          (provider) => provider.id === sessionModel.providerId,
+        );
         if (
-          overrideContext?.retryTurnId ||
-          overrideContext?.retryDispatchGuard ||
-          overrideContext?.queuedDelivery
-        )
-          return { ...outcome, reason: "busy" };
-        if (
-          (chatMessageQueues[targetSessionId]?.length ?? 0) >=
-          MAX_QUEUED_CHAT_MESSAGES_PER_SESSION
+          !requestedSessionId &&
+          sessionModel.providerId &&
+          (!selectedProvider ||
+            !selectedProvider.enabled ||
+            !isProviderRuntimeUsable(
+              selectedProvider,
+              workbench.providerStatuses.find(
+                (item) => item.id === selectedProvider.id,
+              ),
+            ) ||
+            !getProviderModel(selectedProvider, sessionModel.modelId))
         ) {
           notify(
             "command-failed",
-            "Queue full",
-            `Finish or remove a queued message before adding more than ${MAX_QUEUED_CHAT_MESSAGES_PER_SESSION}.`,
+            "Choose an available model",
+            "The model saved for this draft is unavailable. Connect its provider or choose another model.",
           );
           return outcome;
         }
-        const queuedMessageCount = Object.values(chatMessageQueues).reduce(
-          (total, queued) => total + queued.length,
-          0,
-        );
-        if (queuedMessageCount >= MAX_QUEUED_CHAT_MESSAGES_TOTAL) {
+        const requireCommandApproval =
+          overrideContext?.requireCommandApproval ??
+          config.requireCommandApproval;
+        const requireFileEditApproval =
+          overrideContext?.requireFileEditApproval ??
+          config.requireFileEditApproval;
+        const fullAccess =
+          overrideContext?.fullAccess ?? Boolean(config.fullAccess);
+        // A chat belongs to the project of the pane it was typed in. The global
+        // workspace can move (Code layout, sidebar) while an already-focused
+        // draft keeps its own project, so never let it pick the project here.
+        const chatWorkspacePath =
+          overrideContext?.workspacePath ??
+          targetSession?.workspacePath ??
+          (!requestedSessionId && activeChatPane?.kind === "draft"
+            ? activeChatPane.workspacePath
+            : workspacePath);
+        const turnWorkspaceContext =
+          overrideContext?.workspaceContext ??
+          (workspaceContextSnapshot &&
+          chatWorkspacePath &&
+          normalizeProjectPath(workspaceContextSnapshot.workspaceKey) ===
+            normalizeProjectPath(chatWorkspacePath)
+            ? workspaceContextSnapshot
+            : undefined);
+        if (message === "") {
+          return outcome;
+        }
+        if (isBranchLoading) {
           notify(
             "command-failed",
-            "Queue capacity reached",
-            "Finish or remove a queued message in another chat before adding more.",
+            "Branch is switching",
+            "Wait for the selected branch to finish checking out before sending.",
           );
           return outcome;
         }
-        const queuedMessage: QueuedChatMessage = {
-          deliveryAttempts: 0,
-          id: `queued-${createTurnId()}`,
-          message,
-          status: "waiting",
-          context: {
-            attachments: turnAttachments.map((attachment) => ({
-              ...attachment,
-            })),
-            goal: turnGoal ? { ...turnGoal } : undefined,
-            mode: turnMode,
-            plan: {
-              ...turnPlan,
-              items: turnPlan.items.map((item) => ({ ...item })),
-            },
-            sessionModel: { ...sessionModel },
-            requireCommandApproval,
-            requireFileEditApproval,
-            fullAccess,
-            sessionId: targetSessionId,
-            turnId: createTurnId(),
-            workspacePath: chatWorkspacePath,
-            workspaceContext: turnWorkspaceContext,
-          },
-        };
-        setChatMessageQueues((current) => {
-          const queued = current[targetSessionId] ?? [];
-          const totalQueued = Object.values(current).reduce(
-            (total, messages) => total + messages.length,
-            0,
+        if (chatMessageLength(message) > MAX_CHAT_MESSAGE_CHARS) {
+          notify(
+            "command-failed",
+            "Message too long",
+            `Keep chat messages under ${MAX_CHAT_MESSAGE_CHARS.toLocaleString()} characters.`,
           );
-          if (
-            queued.length >= MAX_QUEUED_CHAT_MESSAGES_PER_SESSION ||
-            totalQueued >= MAX_QUEUED_CHAT_MESSAGES_TOTAL
-          ) {
-            return current;
+          return outcome;
+        }
+        if (!targetSessionId && isStartingFirstTurn) {
+          return outcome;
+        }
+        // Sending from the goal composer sets the goal and starts on it in one
+        // step. A new chat saves it once the session exists (below).
+        const newGoal = overrideContext?.goal;
+        if (
+          targetSessionId &&
+          newGoal?.text &&
+          isTauriRuntime() &&
+          (targetSessionId !== activeSessionId ||
+            newGoal.text !== activeSessionGoal?.text ||
+            activeSessionGoal?.status !== "active")
+        ) {
+          try {
+            await invoke<SessionEvent>("append_chat_context_event", {
+              sessionId: targetSessionId,
+              eventKind: "goal-updated",
+              message: "",
+              payload: { action: "set", text: newGoal.text, status: "active" },
+            });
+            void refreshEvents(targetSessionId);
+          } catch (error) {
+            notify("command-failed", "Goal not saved", String(error));
           }
-          return {
-            ...current,
-            [targetSessionId]: [...queued, queuedMessage],
-          };
-        });
-        if (!overrideContext?.preserveDraft) {
-          resetChatDraft();
         }
-        if (consumeSelectedMode) {
-          consumeDraftMode(draftModeKey, draftModeRevision);
-        }
-        notify(
-          "terminal",
-          "Message queued",
-          "It will send when this chat's current response finishes, even after you switch chats.",
-        );
-        overrideContext?.onAccepted?.();
-        return { ...outcome, kind: "queued" };
-      }
-      const isCouncilTurn = turnMode === "council";
-      if (isCouncilTurn && !isUserSelectedWorkspacePath(chatWorkspacePath)) {
-        notify(
-          "command-failed",
-          "Choose a project",
-          "Council needs a folder before starting a chat.",
-        );
-        void openWorkspace();
-        return outcome;
-      }
-      if (!isCouncilTurn) {
-        if (targetSession?.importSource && isTauriRuntime()) {
-          const check = await invoke<ProviderHealthCheck>(
-            "check_provider_health",
-            {
-              importedSessionId: targetSession.id,
-              request: providerHealthRequest(
-                selectedProvider,
-                sessionModel.providerId,
-              ),
-            },
-          ).catch(() => undefined);
+        if (
+          targetSessionId &&
+          sendingSessionIdsRef.current.has(targetSessionId)
+        ) {
+          // Recovery keeps the original turn. The dispatch controller waits for
+          // a finishing invoke; it must never fall into the normal send queue.
           if (
-            !check ||
-            recordProviderHealthOutput(
-              sessionModel.providerId!,
-              check.output,
-              check,
-            ).connectionStatus !== "connected"
+            overrideContext?.retryTurnId ||
+            overrideContext?.retryDispatchGuard ||
+            overrideContext?.queuedDelivery
+          )
+            return { ...outcome, reason: "busy" };
+          if (
+            (chatMessageQueues[targetSessionId]?.length ?? 0) >=
+            MAX_QUEUED_CHAT_MESSAGES_PER_SESSION
           ) {
             notify(
-              "provider",
-              "Connect this chat's provider",
-              "Use Connect to sign in with this imported chat's provider data folder.",
+              "command-failed",
+              "Queue full",
+              `Finish or remove a queued message before adding more than ${MAX_QUEUED_CHAT_MESSAGES_PER_SESSION}.`,
             );
             return outcome;
           }
-        } else if (!checkProviderReadiness("chat", sessionModel.providerId))
-          return outcome;
-      }
-      if (isCouncilTurn && COUNCIL_COMING_SOON) {
-        notify(
-          "command-failed",
-          "Council is not available yet",
-          "Model Council is still in development. It will return in a later release.",
-        );
-        return outcome;
-      }
-      // Reads the normalized config rather than the raw one: a stale persisted
-      // `enabled: true` must not be able to start a run.
-      if (isCouncilTurn && !normalizedCouncilConfig(config.council).enabled) {
-        notify(
-          "command-failed",
-          "Council disabled",
-          "Enable Model Council in settings to use this mode.",
-        );
-        return outcome;
-      }
-      const councilResolution = isCouncilTurn
-        ? resolveCouncilSeatRequests(
-            config,
-            readyCouncilProviders(config, workbench.providerStatuses),
-          )
-        : null;
-      if (isCouncilTurn && councilResolution?.error) {
-        notify("command-failed", "Council not ready", councilResolution.error);
-        return outcome;
-      }
-      const retryTurnId = overrideContext?.retryTurnId;
-      const turnId = retryTurnId ?? overrideContext?.turnId ?? createTurnId();
-      outcome.turnId = turnId;
-      outcome.persisted = Boolean(retryTurnId);
-      if (targetSessionId)
-        dispatchWorkbench({
-          type: "resolve-notification",
-          correlationKey: `turn:${targetSessionId}:${turnId}`,
-        });
-      if (!isCouncilTurn) turnTiming.beginTurnTiming(turnId);
-      setTurnSourceControlBaselines((current) => {
-        if (
-          scopedIde.sourceControl.detailsLoaded === false ||
-          scopedIde.sourceControl.statsPartial
-        )
-          return current;
-        if (current[turnId]) {
-          return current;
-        }
-        return Object.fromEntries([
-          ...Object.entries(current).slice(-49),
-          [turnId, sourceControlLineStats(scopedIde.sourceControl)],
-        ]);
-      });
-      const isRetry = Boolean(targetSessionId && retryTurnId);
-      const restoreUnsentMode = (sessionKey: string) => {
-        if (
-          !consumeSelectedMode ||
-          turnMode === "normal" ||
-          persistedChatTurnIdsRef.current.has(turnId) ||
-          chatDraftModeRevisionsRef.current[draftModeKey] !==
-            draftModeRevision + 1 ||
-          (chatDraftModesRef.current[sessionKey] ?? "normal") !== "normal"
-        ) {
-          return;
-        }
-        changeChatMode(turnMode, sessionKey);
-      };
-      const shouldSuggestTitle =
-        !isRetry &&
-        (Boolean(previewSessionId) ||
-          shouldSuggestSessionTitle(
-            targetSession,
-            targetSessionHasTranscriptEvents,
-          ));
-      const provisionalTitle = shouldSuggestTitle
-        ? sessionTitleFromMessage(message)
-        : undefined;
-
-      if (!targetSessionId) {
-        setIsStartingFirstTurn(true);
-        // A first message opens the thread layout so the new chat is visible —
-        // except when it was sent from the AI view, where the chat is already
-        // on screen and switching would throw the user out of their code.
-        if (activeWorkspaceLayoutRef.current !== "code") {
-          dispatchWorkbench({
-            type: "select-workspace-layout",
-            layout: "thread",
-          });
-        }
-        dispatchWorkbench({ type: "close-tool-panel" });
-        dispatchWorkbench({ type: "set-chat-panel" });
-        const session = createPreviewSession(
-          "thread",
-          workbench.workspaceMode,
-          sessionModel,
-          chatWorkspacePath,
-          provisionalTitle,
-        );
-        const optimisticEvents = createOptimisticTurnEvents(
-          session.id,
-          message,
-          turnId,
-          selectedProvider,
-          turnAttachments,
-        );
-        if (!isTauriRuntime() && turnMode !== "normal") {
-          optimisticEvents.unshift(
-            createChatModeSessionEvent(session.id, turnMode, turnId),
+          const queuedMessageCount = Object.values(chatMessageQueues).reduce(
+            (total, queued) => total + queued.length,
+            0,
           );
-        }
-        let sendingSessionId = session.id;
-        // Annotation sends own their payload; carry the untouched composer
-        // into the session created for this previously unsent draft.
-        if (overrideContext?.preserveDraft && overrideContext.onAccepted) {
-          setChatDrafts(current => ({...current, [session.id]: current[draftModeKey] ?? ""}));
-          setChatAttachments(current => ({...current, [session.id]: current[draftModeKey] ?? []}));
-          setChatDraftModes(current => ({...current, [session.id]: current[draftModeKey] ?? "normal"}));
-        }
-        optimisticEventsRef.current.set(
-          session.id,
-          limitOptimisticSessionEvents(optimisticEvents),
-        );
-        suppressSessionAutoSelectRef.current = false;
-        setSessionSending(session.id, true);
-        if (consumeSelectedMode) {
-          consumeDraftMode(draftModeKey, draftModeRevision);
-        }
-        setWorkspacePath(session.workspacePath);
-        setFiles(
-          session.workspacePath
-            ? workspaceFilesForRoot(session.workspacePath, previewFiles)
-            : [],
-        );
-        setSessions((current) => [
-          session,
-          ...current.filter((item) => item.id !== previewSessionId),
-        ]);
-        if (previewSessionId) {
-          optimisticEventsRef.current.delete(previewSessionId);
-          setSessionEventsById((current) => {
-            const next = { ...current };
-            delete next[previewSessionId];
-            return next;
+          if (queuedMessageCount >= MAX_QUEUED_CHAT_MESSAGES_TOTAL) {
+            notify(
+              "command-failed",
+              "Queue capacity reached",
+              "Finish or remove a queued message in another chat before adding more.",
+            );
+            return outcome;
+          }
+          const queuedMessage: QueuedChatMessage = {
+            deliveryAttempts: 0,
+            id: `queued-${createTurnId()}`,
+            message,
+            status: "waiting",
+            context: {
+              attachments: turnAttachments.map((attachment) => ({
+                ...attachment,
+              })),
+              goal: turnGoal ? { ...turnGoal } : undefined,
+              mode: turnMode,
+              plan: {
+                ...turnPlan,
+                items: turnPlan.items.map((item) => ({ ...item })),
+              },
+              sessionModel: { ...sessionModel },
+              requireCommandApproval,
+              requireFileEditApproval,
+              fullAccess,
+              sessionId: targetSessionId,
+              turnId: createTurnId(),
+              workspacePath: chatWorkspacePath,
+              workspaceContext: turnWorkspaceContext,
+            },
+          };
+          setChatMessageQueues((current) => {
+            const queued = current[targetSessionId] ?? [];
+            const totalQueued = Object.values(current).reduce(
+              (total, messages) => total + messages.length,
+              0,
+            );
+            if (
+              queued.length >= MAX_QUEUED_CHAT_MESSAGES_PER_SESSION ||
+              totalQueued >= MAX_QUEUED_CHAT_MESSAGES_TOTAL
+            ) {
+              return current;
+            }
+            return {
+              ...current,
+              [targetSessionId]: [...queued, queuedMessage],
+            };
           });
-          dispatchChatGrid({
-            type: "rekey-session-pane",
-            fromSessionId: previewSessionId,
-            toSessionId: session.id,
-            workspacePath: session.workspacePath,
-          });
-        } else {
-          dispatchChatGrid({
-            type: "migrate-draft-pane",
-            draftKey: activeDraftKey,
-            sessionId: session.id,
-            workspacePath: session.workspacePath,
-          });
+          if (!overrideContext?.preserveDraft) {
+            resetChatDraft();
+          }
+          if (consumeSelectedMode) {
+            consumeDraftMode(draftModeKey, draftModeRevision);
+          }
+          notify(
+            "terminal",
+            "Message queued",
+            "It will send when this chat's current response finishes, even after you switch chats.",
+          );
+          overrideContext?.onAccepted?.();
+          return { ...outcome, kind: "queued" };
         }
-        delete draftWorkspaceModes.current[activeDraftKey];
-        setChatDraftModels((current) => {
-          if (!(activeDraftKey in current)) {
+        const isCouncilTurn = turnMode === "council";
+        if (isCouncilTurn && !isUserSelectedWorkspacePath(chatWorkspacePath)) {
+          notify(
+            "command-failed",
+            "Choose a project",
+            "Council needs a folder before starting a chat.",
+          );
+          void openWorkspace();
+          return outcome;
+        }
+        if (!isCouncilTurn) {
+          if (targetSession?.importSource && isTauriRuntime()) {
+            const check = await invoke<ProviderHealthCheck>(
+              "check_provider_health",
+              {
+                importedSessionId: targetSession.id,
+                request: providerHealthRequest(
+                  selectedProvider,
+                  sessionModel.providerId,
+                ),
+              },
+            ).catch(() => undefined);
+            if (
+              !check ||
+              recordProviderHealthOutput(
+                sessionModel.providerId!,
+                check.output,
+                check,
+              ).connectionStatus !== "connected"
+            ) {
+              notify(
+                "provider",
+                "Connect this chat's provider",
+                "Use Connect to sign in with this imported chat's provider data folder.",
+              );
+              return outcome;
+            }
+          } else if (!checkProviderReadiness("chat", sessionModel.providerId))
+            return outcome;
+        }
+        if (isCouncilTurn && COUNCIL_COMING_SOON) {
+          notify(
+            "command-failed",
+            "Council is not available yet",
+            "Model Council is still in development. It will return in a later release.",
+          );
+          return outcome;
+        }
+        // Reads the normalized config rather than the raw one: a stale persisted
+        // `enabled: true` must not be able to start a run.
+        if (isCouncilTurn && !normalizedCouncilConfig(config.council).enabled) {
+          notify(
+            "command-failed",
+            "Council disabled",
+            "Enable Model Council in settings to use this mode.",
+          );
+          return outcome;
+        }
+        const councilResolution = isCouncilTurn
+          ? resolveCouncilSeatRequests(
+              config,
+              readyCouncilProviders(config, workbench.providerStatuses),
+            )
+          : null;
+        if (isCouncilTurn && councilResolution?.error) {
+          notify("command-failed", "Council not ready", councilResolution.error);
+          return outcome;
+        }
+        const retryTurnId = overrideContext?.retryTurnId;
+        const turnId = retryTurnId ?? overrideContext?.turnId ?? createTurnId();
+        outcome.turnId = turnId;
+        outcome.persisted = Boolean(retryTurnId);
+        if (targetSessionId)
+          dispatchWorkbench({
+            type: "resolve-notification",
+            correlationKey: `turn:${targetSessionId}:${turnId}`,
+          });
+        if (!isCouncilTurn) turnTiming.beginTurnTiming(turnId);
+        setTurnSourceControlBaselines((current) => {
+          if (
+            scopedIde.sourceControl.detailsLoaded === false ||
+            scopedIde.sourceControl.statsPartial
+          )
+            return current;
+          if (current[turnId]) {
             return current;
           }
-          const next = { ...current };
-          delete next[activeDraftKey];
-          return next;
+          return Object.fromEntries([
+            ...Object.entries(current).slice(-49),
+            [turnId, sourceControlLineStats(scopedIde.sourceControl)],
+          ]);
         });
-        activeSessionIdRef.current = session.id;
-        setActiveSessionId(session.id);
-        setEventsForSession(
-          session.id,
-          limitSessionEventsForUi(optimisticEvents),
-        );
-        if (!overrideContext?.preserveDraft) {
-          resetChatDraft();
-        }
-        notify("terminal", "Message sending", "Starting chat");
+        const isRetry = Boolean(targetSessionId && retryTurnId);
+        const restoreUnsentMode = (sessionKey: string) => {
+          if (
+            !consumeSelectedMode ||
+            turnMode === "normal" ||
+            persistedChatTurnIdsRef.current.has(turnId) ||
+            chatDraftModeRevisionsRef.current[draftModeKey] !==
+              draftModeRevision + 1 ||
+            (chatDraftModesRef.current[sessionKey] ?? "normal") !== "normal"
+          ) {
+            return;
+          }
+          changeChatMode(turnMode, sessionKey);
+        };
+        const shouldSuggestTitle =
+          !isRetry &&
+          (Boolean(previewSessionId) ||
+            shouldSuggestSessionTitle(
+              targetSession,
+              targetSessionHasTranscriptEvents,
+            ));
+        const provisionalTitle = shouldSuggestTitle
+          ? sessionTitleFromMessage(message)
+          : undefined;
 
-        if (!isTauriRuntime()) {
-          updateOptimisticProviderStatus(
-            optimisticEventsRef,
-            (value) => setEventsForSession(session.id, value),
-            session.id,
-            turnId,
-            "done",
-          );
-          setSessionSending(session.id, false);
-          setIsStartingFirstTurn(false);
-          return { ...outcome, kind: "completed" };
-        }
-
-        let optimisticSessionId = session.id;
-        let didDeliverProviderResponse = false;
-        try {
-          await waitForNextPaint();
-          // The backend owns the persisted fallback and its pending state.
-          // Keep the optimistic name local until that atomic initialization.
-          const persistedSession = await createTauriThreadSession(
-            chatWorkspacePath,
+        preparation.check();
+        if (!targetSessionId) {
+          setIsStartingFirstTurn(true);
+          // A first message opens the thread layout so the new chat is visible —
+          // except when it was sent from the AI view, where the chat is already
+          // on screen and switching would throw the user out of their code.
+          if (activeWorkspaceLayoutRef.current !== "code") {
+            dispatchWorkbench({
+              type: "select-workspace-layout",
+              layout: "thread",
+            });
+          }
+          dispatchWorkbench({ type: "close-tool-panel" });
+          dispatchWorkbench({ type: "set-chat-panel" });
+          const session = createPreviewSession(
+            "thread",
             workbench.workspaceMode,
             sessionModel,
+            chatWorkspacePath,
+            provisionalTitle,
           );
-          optimisticSessionId = persistedSession.id;
-          const migratedEvents = rekeySessionEvents(
-            optimisticEvents,
-            persistedSession.id,
+          const optimisticEvents = createOptimisticTurnEvents(
+            session.id,
+            message,
+            turnId,
+            selectedProvider,
+            turnAttachments,
           );
-          optimisticEventsRef.current.delete(session.id);
-          optimisticEventsRef.current.set(
-            persistedSession.id,
-            limitOptimisticSessionEvents(migratedEvents),
-          );
-          setSessionEventsById((current) => {
-            const next = { ...current };
-            delete next[session.id];
-            next[persistedSession.id] = migratedEvents;
-            return next;
-          });
-          dispatchChatGrid({
-            type: "rekey-session-pane",
-            fromSessionId: session.id,
-            toSessionId: persistedSession.id,
-            workspacePath: persistedSession.workspacePath,
-          });
-          replaceSendingSessionId(session.id, persistedSession.id);
-          if (overrideContext?.preserveDraft && overrideContext.onAccepted) {
-            setChatDrafts(current => ({...current, [persistedSession.id]: current[session.id] ?? ""}));
-            setChatAttachments(current => ({...current, [persistedSession.id]: current[session.id] ?? []}));
-            setChatDraftModes(current => ({...current, [persistedSession.id]: current[session.id] ?? "normal"}));
+          if (!isTauriRuntime() && turnMode !== "normal") {
+            optimisticEvents.unshift(
+              createChatModeSessionEvent(session.id, turnMode, turnId),
+            );
           }
-          setChatMessageQueues((current) => {
-            const queued = current[session.id];
-            if (!queued?.length) {
+          preparation.bind(session.id);
+          let sendingSessionId = session.id;
+          // Annotation sends own their payload; carry the untouched composer
+          // into the session created for this previously unsent draft.
+          if (overrideContext?.preserveDraft && overrideContext.onAccepted) {
+            setChatDrafts((current) => ({
+              ...current,
+              [session.id]: current[draftModeKey] ?? "",
+            }));
+            setChatAttachments((current) => ({
+              ...current,
+              [session.id]: current[draftModeKey] ?? [],
+            }));
+            setChatDraftModes((current) => ({
+              ...current,
+              [session.id]: current[draftModeKey] ?? "normal",
+            }));
+          }
+          optimisticEventsRef.current.set(
+            session.id,
+            limitOptimisticSessionEvents(optimisticEvents),
+          );
+          suppressSessionAutoSelectRef.current = false;
+          setSessionSending(session.id, true);
+          if (consumeSelectedMode) {
+            consumeDraftMode(draftModeKey, draftModeRevision);
+          }
+          setWorkspacePath(session.workspacePath);
+          setFiles(
+            session.workspacePath
+              ? workspaceFilesForRoot(session.workspacePath, previewFiles)
+              : [],
+          );
+          setSessions((current) => [
+            session,
+            ...current.filter((item) => item.id !== previewSessionId),
+          ]);
+          if (previewSessionId) {
+            optimisticEventsRef.current.delete(previewSessionId);
+            setSessionEventsById((current) => {
+              const next = { ...current };
+              delete next[previewSessionId];
+              return next;
+            });
+            dispatchChatGrid({
+              type: "rekey-session-pane",
+              fromSessionId: previewSessionId,
+              toSessionId: session.id,
+              workspacePath: session.workspacePath,
+            });
+          } else {
+            dispatchChatGrid({
+              type: "migrate-draft-pane",
+              draftKey: activeDraftKey,
+              sessionId: session.id,
+              workspacePath: session.workspacePath,
+            });
+          }
+          delete draftWorkspaceModes.current[activeDraftKey];
+          setChatDraftModels((current) => {
+            if (!(activeDraftKey in current)) {
               return current;
             }
             const next = { ...current };
-            delete next[session.id];
-            next[persistedSession.id] = [
-              ...(next[persistedSession.id] ?? []),
-              ...queued,
-            ];
+            delete next[activeDraftKey];
             return next;
           });
-          sendingSessionId = persistedSession.id;
-          setSessions((current) => [
-            persistedSession,
-            ...current.filter((item) => item.id !== session.id),
-          ]);
-          setActiveSessionId((current) =>
-            current === session.id ? persistedSession.id : current,
+          activeSessionIdRef.current = session.id;
+          setActiveSessionId(session.id);
+          setEventsForSession(
+            session.id,
+            limitSessionEventsForUi(optimisticEvents),
           );
-          if (activeSessionIdRef.current === session.id) {
-            activeSessionIdRef.current = persistedSession.id;
-            setWorkspacePath(persistedSession.workspacePath);
-            setEventsForSession(
-              persistedSession.id,
-              limitSessionEventsForUi(migratedEvents),
+          if (!overrideContext?.preserveDraft) {
+            resetChatDraft();
+          }
+          notify("terminal", "Message sending", "Starting chat");
+
+          if (!isTauriRuntime()) {
+            updateOptimisticProviderStatus(
+              optimisticEventsRef,
+              (value) => setEventsForSession(session.id, value),
+              session.id,
+              turnId,
+              "done",
             );
+            setSessionSending(session.id, false);
+            setIsStartingFirstTurn(false);
+            return { ...outcome, kind: "completed" };
           }
 
-          const persistedTurnAttachments = await Promise.all(
-            turnAttachments.map(async (attachment) => {
-              const prepared = await invoke<ChatAttachment>(
-                "prepare_chat_attachment",
-                {
-                  request: {
-                    sessionId: persistedSession.id,
-                    path: attachment.path,
-                    workspacePath: persistedSession.workspacePath,
-                    kind: attachment.kind,
-                    name: attachment.name,
-                    relativePath: attachment.relativePath,
-                  },
-                },
-              );
-              const terminalSource = readTerminalAttachmentSource(attachment.id);
-              if (terminalSource) {
-                rememberTerminalAttachmentSource(prepared.id, terminalSource);
+          let optimisticSessionId = session.id;
+          let didDeliverProviderResponse = false;
+          try {
+            await waitForNextPaint();
+            preparation.check();
+            // The backend owns the persisted fallback and its pending state.
+            // Keep the optimistic name local until that atomic initialization.
+            const persistedSession = await createTauriThreadSession(
+              chatWorkspacePath,
+              workbench.workspaceMode,
+              sessionModel,
+            );
+            optimisticSessionId = persistedSession.id;
+            const migratedEvents = rekeySessionEvents(
+              optimisticEvents,
+              persistedSession.id,
+            );
+            optimisticEventsRef.current.delete(session.id);
+            optimisticEventsRef.current.set(
+              persistedSession.id,
+              limitOptimisticSessionEvents(migratedEvents),
+            );
+            setSessionEventsById((current) => {
+              const next = { ...current };
+              delete next[session.id];
+              next[persistedSession.id] = migratedEvents;
+              return next;
+            });
+            dispatchChatGrid({
+              type: "rekey-session-pane",
+              fromSessionId: session.id,
+              toSessionId: persistedSession.id,
+              workspacePath: persistedSession.workspacePath,
+            });
+            replaceSendingSessionId(session.id, persistedSession.id);
+            if (overrideContext?.preserveDraft && overrideContext.onAccepted) {
+              setChatDrafts((current) => ({
+                ...current,
+                [persistedSession.id]: current[session.id] ?? "",
+              }));
+              setChatAttachments((current) => ({
+                ...current,
+                [persistedSession.id]: current[session.id] ?? [],
+              }));
+              setChatDraftModes((current) => ({
+                ...current,
+                [persistedSession.id]: current[session.id] ?? "normal",
+              }));
+            }
+            setChatMessageQueues((current) => {
+              const queued = current[session.id];
+              if (!queued?.length) {
+                return current;
               }
-              return {
-                ...prepared,
-                previewUrl:
-                  prepared.kind === "image" || prepared.kind === "video"
-                    ? convertFileSrc(prepared.path)
-                    : undefined,
-              };
-            }),
-          );
+              const next = { ...current };
+              delete next[session.id];
+              next[persistedSession.id] = [
+                ...(next[persistedSession.id] ?? []),
+                ...queued,
+              ];
+              return next;
+            });
+            sendingSessionId = persistedSession.id;
+            preparation.bind(persistedSession.id);
+            setSessions((current) => [
+              persistedSession,
+              ...current.filter((item) => item.id !== session.id),
+            ]);
+            setActiveSessionId((current) =>
+              current === session.id ? persistedSession.id : current,
+            );
+            if (activeSessionIdRef.current === session.id) {
+              activeSessionIdRef.current = persistedSession.id;
+              setWorkspacePath(persistedSession.workspacePath);
+              setEventsForSession(
+                persistedSession.id,
+                limitSessionEventsForUi(migratedEvents),
+              );
+            }
 
-          const contextEvents: SessionEvent[] = [];
-          if (turnGoal?.text) {
-            const goalPayload = {
-              action: "set",
-              text: turnGoal.text,
-              status: turnGoal.status,
-            };
-            try {
+            preparation.check();
+            const persistedTurnAttachments = await Promise.all(
+              turnAttachments.map(async (attachment) => {
+                const prepared = await invoke<ChatAttachment>(
+                  "prepare_chat_attachment",
+                  {
+                    request: {
+                      sessionId: persistedSession.id,
+                      path: attachment.path,
+                      workspacePath: persistedSession.workspacePath,
+                      kind: attachment.kind,
+                      name: attachment.name,
+                      relativePath: attachment.relativePath,
+                    },
+                  },
+                );
+                const terminalSource = readTerminalAttachmentSource(
+                  attachment.id,
+                );
+                if (terminalSource) {
+                  rememberTerminalAttachmentSource(prepared.id, terminalSource);
+                }
+                return {
+                  ...prepared,
+                  previewUrl:
+                    prepared.kind === "image" || prepared.kind === "video"
+                      ? convertFileSrc(prepared.path)
+                      : undefined,
+                };
+              }),
+            );
+
+            const contextEvents: SessionEvent[] = [];
+            if (turnGoal?.text) {
+              const goalPayload = {
+                action: "set",
+                text: turnGoal.text,
+                status: turnGoal.status,
+              };
+              try {
+                contextEvents.push(
+                  await invoke<SessionEvent>("append_chat_context_event", {
+                    sessionId: persistedSession.id,
+                    eventKind: "goal-updated",
+                    message: `Goal set: ${turnGoal.text}`,
+                    payload: goalPayload,
+                  }),
+                );
+              } catch {
+                // Goal metadata must never prevent the first message from
+                // starting. The provider still receives the goal below, and a
+                // local event keeps the outcome visible for this chat.
+                contextEvents.push(
+                  createGoalSessionEvent(
+                    persistedSession.id,
+                    `Goal set: ${turnGoal.text}`,
+                    goalPayload,
+                  ),
+                );
+                notify(
+                  "command-failed",
+                  "Goal save failed",
+                  "Your message is still sending. Set the goal again after the response.",
+                );
+              }
+            }
+            if (turnMode === "plan" || turnMode === "council") {
               contextEvents.push(
                 await invoke<SessionEvent>("append_chat_context_event", {
                   sessionId: persistedSession.id,
-                  eventKind: "goal-updated",
-                  message: `Goal set: ${turnGoal.text}`,
-                  payload: goalPayload,
+                  eventKind: "chat-mode-changed",
+                  message: chatModeEventMessage(turnMode),
+                  payload: { mode: turnMode, turnId },
                 }),
               );
-            } catch {
-              // Goal metadata must never prevent the first message from
-              // starting. The provider still receives the goal below, and a
-              // local event keeps the outcome visible for this chat.
+            }
+            if (turnPlan.items.length) {
               contextEvents.push(
-                createGoalSessionEvent(
-                  persistedSession.id,
-                  `Goal set: ${turnGoal.text}`,
-                  goalPayload,
-                ),
-              );
-              notify(
-                "command-failed",
-                "Goal save failed",
-                "Your message is still sending. Set the goal again after the response.",
+                await invoke<SessionEvent>("append_plan_event", {
+                  sessionId: persistedSession.id,
+                  message: "Plan created",
+                  payload: {
+                    action: "replace",
+                    title: turnPlan.title,
+                    content: turnPlan.content,
+                    items: turnPlan.items,
+                  },
+                }),
               );
             }
+            if (contextEvents.length) {
+              setEvents((current) => {
+                if (
+                  !current.some(
+                    (event) => event.sessionId === persistedSession.id,
+                  )
+                ) {
+                  return current;
+                }
+                return limitSessionEventsForUi([...current, ...contextEvents]);
+              });
+            }
+
+            preparation.check();
+            await invoke<SessionEvent>("append_user_message", {
+              attachments: persistedTurnAttachments,
+              sessionId: persistedSession.id,
+              message,
+              turnId,
+            });
+            persistedChatTurnIdsRef.current.add(turnId);
+            outcome.persisted = true;
+            overrideContext?.onAccepted?.();
+            if (
+              liveEditorEvidenceRef.current &&
+              liveEditorEvidenceRef.current.workspaceKey !== persistedSession.workspacePath
+            ) {
+              await invoke("update_capability_ide_evidence", {
+                request: {
+                  workspacePath: liveEditorEvidenceRef.current.workspaceKey,
+                  diagnostics: liveEditorEvidenceRef.current.diagnostics,
+                  context: liveEditorEvidenceRef.current,
+                },
+              });
+            }
+            if (turnWorkspaceContext) {
+              await invoke("update_capability_ide_evidence", {
+                request: {
+                  workspacePath: persistedSession.workspacePath,
+                  diagnostics: turnWorkspaceContext.diagnostics,
+                  context:
+                    liveEditorEvidenceRef.current?.workspaceKey ===
+                    persistedSession.workspacePath
+                      ? liveEditorEvidenceRef.current
+                      : turnWorkspaceContext,
+                },
+              });
+            }
+            await waitForChatConfigSave(configSaveQueueRef.current, () =>
+              persistConfig(configRef.current, { notifySuccess: false }),
+            );
+            preparation.start();
+            if (isCouncilTurn && councilResolution) {
+              const councilResponse = await invoke<CouncilChatInvokeResponse>(
+                "run_council_chat",
+                {
+                  request: {
+                    sessionId: persistedSession.id,
+                    message,
+                    turnId,
+                    presetId: councilResolution.presetId,
+                    seats: councilResolution.seats,
+                    synthesizerProviderId:
+                      councilResolution.synthesizerProviderId,
+                    synthesizerProviderLabel:
+                      councilResolution.synthesizerProviderLabel,
+                    synthesizerModelId: councilResolution.synthesizerModelId,
+                    synthesizerModelLabel:
+                      councilResolution.synthesizerModelLabel,
+                    workspacePath: persistedSession.workspacePath,
+                    attachments: persistedTurnAttachments,
+                    requireCommandApproval: true,
+                    requireFileEditApproval: true,
+                  },
+                },
+              );
+              applyCouncilChatResponse(persistedSession.id, councilResponse);
+            } else {
+              const providerResponse =
+                await turnTiming.invokeTimedProviderChat<ProviderChatResponse>(
+                  "run_provider_chat",
+                  {
+                    request: {
+                      sessionId: persistedSession.id,
+                      message,
+                      turnId,
+                      providerId:
+                        sessionModel.providerId ??
+                        selectedProvider?.id ??
+                        config.selectedProviderId,
+                      providerLabel:
+                        sessionModel.providerLabel ??
+                        selectedProvider?.displayName,
+                      modelId: sessionModel.modelId,
+                      modelLabel: sessionModel.modelLabel,
+                      reasoningEffort: sessionModel.reasoningEffort,
+                      requireCommandApproval,
+                      requireFileEditApproval,
+                      fullAccess,
+                      mode: turnMode,
+                      goal: turnGoal?.text ? turnGoal : undefined,
+                      plan: turnPlan.items.length ? turnPlan : undefined,
+                      attachments: persistedTurnAttachments,
+                      suggestTitle: shouldSuggestTitle,
+                      workspacePath: persistedSession.workspacePath,
+                    },
+                  },
+                );
+              applyProviderChatResponse(persistedSession.id, providerResponse);
+              recordCompletedModelChoice(
+                persistedSession.id,
+                turnId,
+                sessionModel,
+                providerResponse,
+              );
+            }
+            didDeliverProviderResponse = true;
+            persistedChatTurnIdsRef.current.delete(turnId);
+            setPendingNewChatGoal(undefined);
+            setPendingNewChatPlan({ title: "Plan", items: [] });
+            optimisticEventsRef.current.delete(persistedSession.id);
+            // Refresh plan windows after every completed turn so Claude stream
+            // limits and ledger spend stay current for every connected model.
+            const usageProviderId =
+              sessionModel.providerId ?? selectedProvider?.id;
+            if (usageProviderId && providerSupportsUsage(usageProviderId)) {
+              void refreshProviderUsage(usageProviderId, false, true);
+            }
+            if (usageProviderId) {
+              void refreshProviderLedger(usageProviderId);
+            }
+          } catch (error) {
+            restoreUnsentMode(optimisticSessionId);
+            const errorMessage = String(error);
+            const wasCancelled = isProviderStop(errorMessage);
+            const isSteering =
+              steeringChatSessionsRef.current.has(optimisticSessionId);
+            if (
+              shouldPauseQueueAfterSendError(
+                outcome.persisted,
+                wasCancelled,
+                isSteering,
+              )
+            ) {
+              stoppedChatSessionsRef.current.add(optimisticSessionId);
+            }
+            if (!wasCancelled && providerFailureBlocksReadiness(errorMessage))
+              dispatchWorkbench({
+                type: "set-provider-readiness",
+                status: "blocked",
+                message: errorMessage,
+                providerId: sessionModel.providerId ?? selectedProvider?.id,
+              });
+            updateOptimisticProviderStatus(
+              optimisticEventsRef,
+              (value) => setEventsForSession(optimisticSessionId, value),
+              optimisticSessionId,
+              turnId,
+              wasCancelled ? "cancelled" : "failed",
+              errorMessage,
+            );
+            if (optimisticSessionId !== session.id) {
+              const refresh = refreshEvents(optimisticSessionId);
+              if (isSteering) void refresh.catch(() => {});
+              else await refresh;
+            }
+            const failureNotice = providerFailureNotice(
+              errorMessage,
+              wasCancelled,
+              optimisticSessionId !== session.id,
+            );
+            if (
+              !wasCancelled &&
+              !visibleChatSessionIdsRef.current.has(optimisticSessionId)
+            ) {
+              notify(
+                "command-failed",
+                failureNotice.title,
+                failureNotice.detail,
+                `turn:${optimisticSessionId}:${turnId}`,
+              );
+            }
+            if (wasCancelled) return { ...outcome, kind: "cancelled" };
+          } finally {
+            setSessionSending(sendingSessionId, false);
+            setIsStartingFirstTurn(false);
           }
-          if (turnMode === "plan" || turnMode === "council") {
-            contextEvents.push(
-              await invoke<SessionEvent>("append_chat_context_event", {
-                sessionId: persistedSession.id,
+          return {
+            ...outcome,
+            kind: didDeliverProviderResponse
+              ? "completed"
+              : outcome.persisted
+                ? "failed"
+                : "not-started",
+          };
+        }
+
+        const optimisticEvents = isRetry
+          ? []
+          : createOptimisticTurnEvents(
+              targetSessionId,
+              message,
+              turnId,
+              selectedProvider,
+              turnAttachments,
+            );
+        // The backend initializes automatic titles before starting the provider.
+        // A fire-and-forget rename here can overwrite the model's title later.
+        // Finish any pending model switch before appending the next user message.
+        // A normal send already has this model bound and needs no extra disk read.
+        const boundModel = sessionsRef.current.find(
+          (session) => session.id === targetSessionId,
+        );
+        if (
+          boundModel?.providerId !== sessionModel.providerId ||
+          boundModel?.providerLabel !== sessionModel.providerLabel ||
+          boundModel?.modelId !== sessionModel.modelId ||
+          boundModel?.modelLabel !== sessionModel.modelLabel ||
+          boundModel?.reasoningEffort !== sessionModel.reasoningEffort
+        ) {
+          await saveSessionModel(targetSessionId, sessionModel);
+        } else {
+          await pendingModelSave(targetSessionId);
+        }
+        await waitForChatConfigSave(configSaveQueueRef.current, () =>
+          persistConfig(configRef.current, { notifySuccess: false }),
+        );
+        preparation.check();
+        // Preparation can await media, provider health and model saves. A new
+        // send or Stop may win meanwhile, or another sender may have started.
+        if (
+          overrideContext?.retryDispatchGuard?.() === false ||
+          sendingSessionIdsRef.current.has(targetSessionId)
+        )
+          return outcome;
+        if (isRetry) {
+          const resetEvents = (items: SessionEvent[]) =>
+            resetStreamingAssistantForRetry(items, turnId);
+          optimisticEventsRef.current.set(
+            targetSessionId,
+            limitOptimisticSessionEvents(
+              resetEvents(optimisticEventsRef.current.get(targetSessionId) ?? []),
+            ),
+          );
+          setEventsForSession(targetSessionId, (current) => resetEvents(current));
+          updateOptimisticProviderStatus(
+            optimisticEventsRef,
+            (value) => setEventsForSession(targetSessionId, value),
+            targetSessionId,
+            turnId,
+            "running",
+          );
+        } else {
+          optimisticEventsRef.current.set(
+            targetSessionId,
+            limitOptimisticSessionEvents(
+              mergePersistedAndOptimisticEvents(
+                optimisticEventsRef.current.get(targetSessionId) ?? [],
+                optimisticEvents,
+              ),
+            ),
+          );
+        }
+        // A validated new send explicitly resumes this chat's pending queue.
+        stoppedChatSessionsRef.current.delete(targetSessionId);
+        setSessionSending(targetSessionId, true);
+        if (consumeSelectedMode) {
+          consumeDraftMode(draftModeKey, draftModeRevision);
+        }
+        if (!isBackgroundSend) {
+          dispatchWorkbench({ type: "set-chat-panel" });
+        }
+        if (!isRetry) {
+          setEventsForSession(targetSessionId, (current) =>
+            limitSessionEventsForUi(
+              mergePersistedAndOptimisticEvents(current, optimisticEvents),
+            ),
+          );
+          if (!overrideContext?.preserveDraft) {
+            resetChatDraft();
+          }
+        }
+        if (!isTauriRuntime()) {
+          if (!isRetry) {
+            setEventsForSession(targetSessionId, (current) =>
+              limitSessionEventsForUi([
+                ...current,
+                createChatModeSessionEvent(targetSessionId, turnMode, turnId),
+              ]),
+            );
+          }
+          updateOptimisticProviderStatus(
+            optimisticEventsRef,
+            (value) => setEventsForSession(targetSessionId, value),
+            targetSessionId,
+            turnId,
+            "done",
+          );
+          setSessionSending(targetSessionId, false);
+          notify("terminal", "Message added", "Local optimistic event");
+          return { ...outcome, kind: "completed" };
+        }
+        let didDeliverProviderResponse = false;
+        try {
+          await waitForNextPaint();
+          preparation.check();
+          if (!isRetry) {
+            const modeEvent = await invoke<SessionEvent>(
+              "append_chat_context_event",
+              {
+                sessionId: targetSessionId,
                 eventKind: "chat-mode-changed",
                 message: chatModeEventMessage(turnMode),
                 payload: { mode: turnMode, turnId },
-              }),
+              },
             );
-          }
-          if (turnPlan.items.length) {
-            contextEvents.push(
-              await invoke<SessionEvent>("append_plan_event", {
-                sessionId: persistedSession.id,
-                message: "Plan created",
-                payload: {
-                  action: "replace",
-                  title: turnPlan.title,
-                  content: turnPlan.content,
-                  items: turnPlan.items,
-                },
-              }),
+            setEventsForSession(targetSessionId, (current) =>
+              limitSessionEventsForUi([...current, modeEvent]),
             );
-          }
-          if (contextEvents.length) {
-            setEvents((current) => {
-              if (
-                !current.some((event) => event.sessionId === persistedSession.id)
-              ) {
-                return current;
-              }
-              return limitSessionEventsForUi([...current, ...contextEvents]);
+            preparation.check();
+            await invoke<SessionEvent>("append_user_message", {
+              attachments: turnAttachments,
+              sessionId: targetSessionId,
+              message,
+              turnId,
             });
+            persistedChatTurnIdsRef.current.add(turnId);
+            outcome.persisted = true;
+            overrideContext?.onAccepted?.();
           }
-
-          await invoke<SessionEvent>("append_user_message", {
-            attachments: persistedTurnAttachments,
-            sessionId: persistedSession.id,
-            message,
-            turnId,
-          });
-          persistedChatTurnIdsRef.current.add(turnId);
-          outcome.persisted = true;
-          overrideContext?.onAccepted?.();
           if (
-            liveEditorEvidence &&
-            liveEditorEvidence.workspaceKey !== persistedSession.workspacePath
+            liveEditorEvidenceRef.current &&
+            liveEditorEvidenceRef.current.workspaceKey !== chatWorkspacePath
           ) {
             await invoke("update_capability_ide_evidence", {
               request: {
-                workspacePath: liveEditorEvidence.workspaceKey,
-                diagnostics: liveEditorEvidence.diagnostics,
-                context: liveEditorEvidence,
+                workspacePath: liveEditorEvidenceRef.current.workspaceKey,
+                diagnostics: liveEditorEvidenceRef.current.diagnostics,
+                context: liveEditorEvidenceRef.current,
               },
             });
           }
           if (turnWorkspaceContext) {
             await invoke("update_capability_ide_evidence", {
               request: {
-                workspacePath: persistedSession.workspacePath,
+                workspacePath: chatWorkspacePath,
                 diagnostics: turnWorkspaceContext.diagnostics,
                 context:
-                  liveEditorEvidence?.workspaceKey ===
-                  persistedSession.workspacePath
-                    ? liveEditorEvidence
+                  liveEditorEvidenceRef.current?.workspaceKey === chatWorkspacePath
+                    ? liveEditorEvidenceRef.current
                     : turnWorkspaceContext,
               },
             });
           }
-          await configSaveQueueRef.current;
+          preparation.start();
           if (isCouncilTurn && councilResolution) {
             const councilResponse = await invoke<CouncilChatInvokeResponse>(
               "run_council_chat",
               {
                 request: {
-                  sessionId: persistedSession.id,
+                  sessionId: targetSessionId,
                   message,
                   turnId,
                   presetId: councilResolution.presetId,
@@ -12091,21 +12213,21 @@ export function App() {
                     councilResolution.synthesizerProviderLabel,
                   synthesizerModelId: councilResolution.synthesizerModelId,
                   synthesizerModelLabel: councilResolution.synthesizerModelLabel,
-                  workspacePath: persistedSession.workspacePath,
-                  attachments: persistedTurnAttachments,
+                  workspacePath: chatWorkspacePath,
+                  attachments: turnAttachments,
                   requireCommandApproval: true,
                   requireFileEditApproval: true,
                 },
               },
             );
-            applyCouncilChatResponse(persistedSession.id, councilResponse);
+            applyCouncilChatResponse(targetSessionId, councilResponse);
           } else {
             const providerResponse =
               await turnTiming.invokeTimedProviderChat<ProviderChatResponse>(
                 "run_provider_chat",
                 {
                   request: {
-                    sessionId: persistedSession.id,
+                    sessionId: targetSessionId,
                     message,
                     turnId,
                     providerId:
@@ -12123,15 +12245,15 @@ export function App() {
                     mode: turnMode,
                     goal: turnGoal?.text ? turnGoal : undefined,
                     plan: turnPlan.items.length ? turnPlan : undefined,
-                    attachments: persistedTurnAttachments,
+                    attachments: turnAttachments,
                     suggestTitle: shouldSuggestTitle,
-                    workspacePath: persistedSession.workspacePath,
+                    workspacePath: chatWorkspacePath,
                   },
                 },
               );
-            applyProviderChatResponse(persistedSession.id, providerResponse);
+            applyProviderChatResponse(targetSessionId, providerResponse);
             recordCompletedModelChoice(
-              persistedSession.id,
+              targetSessionId,
               turnId,
               sessionModel,
               providerResponse,
@@ -12139,11 +12261,7 @@ export function App() {
           }
           didDeliverProviderResponse = true;
           persistedChatTurnIdsRef.current.delete(turnId);
-          setPendingNewChatGoal(undefined);
-          setPendingNewChatPlan({ title: "Plan", items: [] });
-          optimisticEventsRef.current.delete(persistedSession.id);
-          // Refresh plan windows after every completed turn so Claude stream
-          // limits and ledger spend stay current for every connected model.
+          optimisticEventsRef.current.delete(targetSessionId);
           const usageProviderId = sessionModel.providerId ?? selectedProvider?.id;
           if (usageProviderId && providerSupportsUsage(usageProviderId)) {
             void refreshProviderUsage(usageProviderId, false, true);
@@ -12152,12 +12270,18 @@ export function App() {
             void refreshProviderLedger(usageProviderId);
           }
         } catch (error) {
-          restoreUnsentMode(optimisticSessionId);
+          restoreUnsentMode(targetSessionId);
           const errorMessage = String(error);
           const wasCancelled = isProviderStop(errorMessage);
-          const isSteering = steeringChatSessionsRef.current.has(optimisticSessionId);
-          if (shouldPauseQueueAfterSendError(outcome.persisted, wasCancelled, isSteering)) {
-            stoppedChatSessionsRef.current.add(optimisticSessionId);
+          const isSteering = steeringChatSessionsRef.current.has(targetSessionId);
+          if (
+            shouldPauseQueueAfterSendError(
+              outcome.persisted,
+              wasCancelled,
+              isSteering,
+            )
+          ) {
+            stoppedChatSessionsRef.current.add(targetSessionId);
           }
           if (!wasCancelled && providerFailureBlocksReadiness(errorMessage))
             dispatchWorkbench({
@@ -12168,37 +12292,35 @@ export function App() {
             });
           updateOptimisticProviderStatus(
             optimisticEventsRef,
-            (value) => setEventsForSession(optimisticSessionId, value),
-            optimisticSessionId,
+            (value) => setEventsForSession(targetSessionId, value),
+            targetSessionId,
             turnId,
             wasCancelled ? "cancelled" : "failed",
             errorMessage,
           );
-          if (optimisticSessionId !== session.id) {
-            const refresh = refreshEvents(optimisticSessionId);
-            if (isSteering) void refresh.catch(() => {});
-            else await refresh;
-          }
+          // Refresh the interrupted transcript without delaying an explicit Steer.
+          const refresh = refreshEvents(targetSessionId);
+          if (isSteering) void refresh.catch(() => {});
+          else await refresh;
           const failureNotice = providerFailureNotice(
             errorMessage,
             wasCancelled,
-            optimisticSessionId !== session.id,
+            !isPreviewSessionId(targetSessionId),
           );
           if (
             !wasCancelled &&
-            !visibleChatSessionIdsRef.current.has(optimisticSessionId)
+            !visibleChatSessionIdsRef.current.has(targetSessionId)
           ) {
             notify(
               "command-failed",
               failureNotice.title,
               failureNotice.detail,
-              `turn:${optimisticSessionId}:${turnId}`,
+              `turn:${targetSessionId}:${turnId}`,
             );
           }
           if (wasCancelled) return { ...outcome, kind: "cancelled" };
         } finally {
-          setSessionSending(sendingSessionId, false);
-          setIsStartingFirstTurn(false);
+          setSessionSending(targetSessionId, false);
         }
         return {
           ...outcome,
@@ -12208,286 +12330,14 @@ export function App() {
               ? "failed"
               : "not-started",
         };
-      }
-
-      const optimisticEvents = isRetry
-        ? []
-        : createOptimisticTurnEvents(
-            targetSessionId,
-            message,
-            turnId,
-            selectedProvider,
-            turnAttachments,
-          );
-      // The backend initializes automatic titles before starting the provider.
-      // A fire-and-forget rename here can overwrite the model's title later.
-      // Finish any pending model switch before appending the next user message.
-      // A normal send already has this model bound and needs no extra disk read.
-      const boundModel = sessionsRef.current.find(
-        (session) => session.id === targetSessionId,
-      );
-      if (
-        boundModel?.providerId !== sessionModel.providerId ||
-        boundModel?.providerLabel !== sessionModel.providerLabel ||
-        boundModel?.modelId !== sessionModel.modelId ||
-        boundModel?.modelLabel !== sessionModel.modelLabel ||
-        boundModel?.reasoningEffort !== sessionModel.reasoningEffort
-      ) {
-        await saveSessionModel(targetSessionId, sessionModel);
-      } else {
-        await pendingModelSave(targetSessionId);
-      }
-      await configSaveQueueRef.current;
-      // Preparation can await media, provider health and model saves. A new
-      // send or Stop may win meanwhile, or another sender may have started.
-      if (
-        overrideContext?.retryDispatchGuard?.() === false ||
-        (isRetry && sendingSessionIdsRef.current.has(targetSessionId))
-      )
-        return outcome;
-      if (isRetry) {
-        const resetEvents = (items: SessionEvent[]) =>
-          resetStreamingAssistantForRetry(items, turnId);
-        optimisticEventsRef.current.set(
-          targetSessionId,
-          limitOptimisticSessionEvents(
-            resetEvents(optimisticEventsRef.current.get(targetSessionId) ?? []),
-          ),
-        );
-        setEventsForSession(targetSessionId, (current) => resetEvents(current));
-        updateOptimisticProviderStatus(
-          optimisticEventsRef,
-          (value) => setEventsForSession(targetSessionId, value),
-          targetSessionId,
-          turnId,
-          "running",
-        );
-      } else {
-        optimisticEventsRef.current.set(
-          targetSessionId,
-          limitOptimisticSessionEvents(
-            mergePersistedAndOptimisticEvents(
-              optimisticEventsRef.current.get(targetSessionId) ?? [],
-              optimisticEvents,
-            ),
-          ),
-        );
-      }
-      // A validated new send explicitly resumes this chat's pending queue.
-      stoppedChatSessionsRef.current.delete(targetSessionId);
-      setSessionSending(targetSessionId, true);
-      if (consumeSelectedMode) {
-        consumeDraftMode(draftModeKey, draftModeRevision);
-      }
-      if (!isBackgroundSend) {
-        dispatchWorkbench({ type: "set-chat-panel" });
-      }
-      if (!isRetry) {
-        setEventsForSession(targetSessionId, (current) =>
-          limitSessionEventsForUi(
-            mergePersistedAndOptimisticEvents(current, optimisticEvents),
-          ),
-        );
-        if (!overrideContext?.preserveDraft) {
-          resetChatDraft();
-        }
-      }
-      if (!isTauriRuntime()) {
-        if (!isRetry) {
-          setEventsForSession(targetSessionId, (current) =>
-            limitSessionEventsForUi([
-              ...current,
-              createChatModeSessionEvent(targetSessionId, turnMode, turnId),
-            ]),
-          );
-        }
-        updateOptimisticProviderStatus(
-          optimisticEventsRef,
-          (value) => setEventsForSession(targetSessionId, value),
-          targetSessionId,
-          turnId,
-          "done",
-        );
-        setSessionSending(targetSessionId, false);
-        notify("terminal", "Message added", "Local optimistic event");
-        return { ...outcome, kind: "completed" };
-      }
-      let didDeliverProviderResponse = false;
-      try {
-        await waitForNextPaint();
-        if (!isRetry) {
-          const modeEvent = await invoke<SessionEvent>(
-            "append_chat_context_event",
-            {
-              sessionId: targetSessionId,
-              eventKind: "chat-mode-changed",
-              message: chatModeEventMessage(turnMode),
-              payload: { mode: turnMode, turnId },
-            },
-          );
-          setEventsForSession(targetSessionId, (current) =>
-            limitSessionEventsForUi([...current, modeEvent]),
-          );
-          await invoke<SessionEvent>("append_user_message", {
-            attachments: turnAttachments,
-            sessionId: targetSessionId,
-            message,
-            turnId,
-          });
-          persistedChatTurnIdsRef.current.add(turnId);
-          outcome.persisted = true;
-          overrideContext?.onAccepted?.();
-        }
-        if (
-          liveEditorEvidence &&
-          liveEditorEvidence.workspaceKey !== chatWorkspacePath
-        ) {
-          await invoke("update_capability_ide_evidence", {
-            request: {
-              workspacePath: liveEditorEvidence.workspaceKey,
-              diagnostics: liveEditorEvidence.diagnostics,
-              context: liveEditorEvidence,
-            },
-          });
-        }
-        if (turnWorkspaceContext) {
-          await invoke("update_capability_ide_evidence", {
-            request: {
-              workspacePath: chatWorkspacePath,
-              diagnostics: turnWorkspaceContext.diagnostics,
-              context:
-                liveEditorEvidence?.workspaceKey === chatWorkspacePath
-                  ? liveEditorEvidence
-                  : turnWorkspaceContext,
-            },
-          });
-        }
-        if (isCouncilTurn && councilResolution) {
-          const councilResponse = await invoke<CouncilChatInvokeResponse>(
-            "run_council_chat",
-            {
-              request: {
-                sessionId: targetSessionId,
-                message,
-                turnId,
-                presetId: councilResolution.presetId,
-                seats: councilResolution.seats,
-                synthesizerProviderId: councilResolution.synthesizerProviderId,
-                synthesizerProviderLabel:
-                  councilResolution.synthesizerProviderLabel,
-                synthesizerModelId: councilResolution.synthesizerModelId,
-                synthesizerModelLabel: councilResolution.synthesizerModelLabel,
-                workspacePath: chatWorkspacePath,
-                attachments: turnAttachments,
-                requireCommandApproval: true,
-                requireFileEditApproval: true,
-              },
-            },
-          );
-          applyCouncilChatResponse(targetSessionId, councilResponse);
-        } else {
-          const providerResponse =
-            await turnTiming.invokeTimedProviderChat<ProviderChatResponse>(
-              "run_provider_chat",
-              {
-                request: {
-                  sessionId: targetSessionId,
-                  message,
-                  turnId,
-                  providerId:
-                    sessionModel.providerId ??
-                    selectedProvider?.id ??
-                    config.selectedProviderId,
-                  providerLabel:
-                    sessionModel.providerLabel ?? selectedProvider?.displayName,
-                  modelId: sessionModel.modelId,
-                  modelLabel: sessionModel.modelLabel,
-                  reasoningEffort: sessionModel.reasoningEffort,
-                  requireCommandApproval,
-                  requireFileEditApproval,
-                  fullAccess,
-                  mode: turnMode,
-                  goal: turnGoal?.text ? turnGoal : undefined,
-                  plan: turnPlan.items.length ? turnPlan : undefined,
-                  attachments: turnAttachments,
-                  suggestTitle: shouldSuggestTitle,
-                  workspacePath: chatWorkspacePath,
-                },
-              },
-            );
-          applyProviderChatResponse(targetSessionId, providerResponse);
-          recordCompletedModelChoice(
-            targetSessionId,
-            turnId,
-            sessionModel,
-            providerResponse,
-          );
-        }
-        didDeliverProviderResponse = true;
-        persistedChatTurnIdsRef.current.delete(turnId);
-        optimisticEventsRef.current.delete(targetSessionId);
-        const usageProviderId = sessionModel.providerId ?? selectedProvider?.id;
-        if (usageProviderId && providerSupportsUsage(usageProviderId)) {
-          void refreshProviderUsage(usageProviderId, false, true);
-        }
-        if (usageProviderId) {
-          void refreshProviderLedger(usageProviderId);
-        }
       } catch (error) {
-        restoreUnsentMode(targetSessionId);
-        const errorMessage = String(error);
-        const wasCancelled = isProviderStop(errorMessage);
-        const isSteering = steeringChatSessionsRef.current.has(targetSessionId);
-        if (shouldPauseQueueAfterSendError(outcome.persisted, wasCancelled, isSteering)) {
-          stoppedChatSessionsRef.current.add(targetSessionId);
-        }
-        if (!wasCancelled && providerFailureBlocksReadiness(errorMessage))
-          dispatchWorkbench({
-            type: "set-provider-readiness",
-            status: "blocked",
-            message: errorMessage,
-            providerId: sessionModel.providerId ?? selectedProvider?.id,
-          });
-        updateOptimisticProviderStatus(
-          optimisticEventsRef,
-          (value) => setEventsForSession(targetSessionId, value),
-          targetSessionId,
-          turnId,
-          wasCancelled ? "cancelled" : "failed",
-          errorMessage,
-        );
-        // Refresh the interrupted transcript without delaying an explicit Steer.
-        const refresh = refreshEvents(targetSessionId);
-        if (isSteering) void refresh.catch(() => {});
-        else await refresh;
-        const failureNotice = providerFailureNotice(
-          errorMessage,
-          wasCancelled,
-          !isPreviewSessionId(targetSessionId),
-        );
-        if (
-          !wasCancelled &&
-          !visibleChatSessionIdsRef.current.has(targetSessionId)
-        ) {
-          notify(
-            "command-failed",
-            failureNotice.title,
-            failureNotice.detail,
-            `turn:${targetSessionId}:${turnId}`,
-          );
-        }
-        if (wasCancelled) return { ...outcome, kind: "cancelled" };
+        if (isProviderStop(String(error)))
+          return { ...outcome, kind: "cancelled" };
+        notify("command-failed", "Message not sent", String(error));
+        return outcome;
       } finally {
-        setSessionSending(targetSessionId, false);
+        preparation.release();
       }
-      return {
-        ...outcome,
-        kind: didDeliverProviderResponse
-          ? "completed"
-          : outcome.persisted
-            ? "failed"
-            : "not-started",
-      };
     },
     [
       activeSessionId,
@@ -12521,6 +12371,7 @@ export function App() {
       refreshEvents,
       resetChatDraft,
       pendingModelSave,
+      persistConfig,
       saveSessionModel,
       sessions,
       setSessionSending,
@@ -12979,7 +12830,7 @@ export function App() {
         const session = sessions.find((item) => item.id === event.sessionId);
         if (session) setWorkspacePath(session.workspacePath);
         if (activity.resource.kind === "terminal") {
-          const terminalData = capabilityResourceDataByCallId[activity.callId];
+          const terminalData = capabilityResourceDataByCallId[activity.callId]?.data;
           const snapshot = terminalSnapshotFromCapabilityData(terminalData);
           if (snapshot) {
             dispatchWorkbench({
@@ -13000,7 +12851,7 @@ export function App() {
           }
         } else if (activity.resource.kind === "output") {
           const outputData = recordFromUnknown(
-            capabilityResourceDataByCallId[activity.callId],
+            capabilityResourceDataByCallId[activity.callId]?.data,
           );
           const stdout = stringFromRecord(outputData, "stdout");
           const stderr = stringFromRecord(outputData, "stderr");
@@ -13027,7 +12878,7 @@ export function App() {
           const path = activity.resource.label;
           if (path && activity.resource.kind === "ide") {
             const ideData = recordFromUnknown(
-              capabilityResourceDataByCallId[activity.callId],
+              capabilityResourceDataByCallId[activity.callId]?.data,
             );
             const panel = stringFromRecord(ideData, "panel");
             if (
@@ -13096,8 +12947,11 @@ export function App() {
         })
           .then(() => {
             liveCapabilityResourceIdsRef.current.delete(resourceId);
+            setCapabilityResourceDataByCallId((current) =>
+              forgetChatResourcePayloads(current, new Set([activity.callId])),
+            );
             const terminalData =
-              capabilityResourceDataByCallId[activity.callId];
+              capabilityResourceDataByCallId[activity.callId]?.data;
             const snapshot = terminalSnapshotFromCapabilityData(terminalData);
             if (snapshot) {
               dispatchWorkbench({
@@ -13324,9 +13178,9 @@ export function App() {
   });
 
   const handleMutationApprovalAction = useCallback(
-    async (proposalId: string, decision: "approve" | "reject") => {
+    async (proposalId: string, decision: "approve" | "reject" | "preview") => {
       if (!activeSessionId || !isTauriRuntime()) {
-        return;
+        return undefined;
       }
       const approvalEvent = Object.values(sessionEventsById)
         .flat()
@@ -13336,7 +13190,36 @@ export function App() {
             proposalId,
         );
       const ownerSessionId = approvalEvent?.sessionId ?? activeSessionId;
+      if (decision === "preview") {
+        const review = await invoke<{ patch: string; proposal: { path: string; workspacePath: string } }>(
+          "preview_file_mutation_proposal", { proposalId },
+        );
+        dispatchWorkbench({
+          type: "set-diff-preview",
+          proposalId,
+          path: absoluteWorkspaceFilePath(review.proposal.workspacePath, review.proposal.path),
+          lines: review.patch.split("\n").map((line, index) => ({
+            number: index + 1,
+            kind: line.startsWith("+") && !line.startsWith("+++") ? "added" : line.startsWith("-") && !line.startsWith("---") ? "removed" : "context",
+            content: line,
+          })),
+        });
+        return { patch: review.patch };
+      }
       try {
+        const proposalRoot = stringFromRecord(recordFromUnknown(approvalEvent?.payload), "workspacePath") ?? liveEditorEvidenceRef.current?.workspaceKey;
+        if (decision === "approve" && proposalRoot) {
+          const sources = liveEditorSourcesRef.current;
+          const base = liveEditorEvidenceRef.current?.workspaceKey === proposalRoot
+            ? liveEditorEvidenceRef.current
+            : { schema: "gyro.workspace-context.v1" as const, workspaceKey: proposalRoot, revision: 0,
+                capturedAt: new Date().toISOString(), visibleTabs: [], buffers: [], diagnostics: [], testFailures: [] };
+          const evidence = workspaceContextWithLiveEditor(base, selectedFileRef.current, sources.buffers,
+            sources.selection, sources.tabs.map(tab => tab.path));
+          await invoke("update_capability_ide_evidence", { request: {
+            workspacePath: evidence.workspaceKey, diagnostics: evidence.diagnostics, context: evidence,
+          }});
+        }
         const result = await invoke<{
           proposal: { path: string; status: string };
         }>("resolve_file_mutation_proposal", {
@@ -13366,6 +13249,7 @@ export function App() {
         );
         await refreshEvents(ownerSessionId);
       }
+      return undefined;
     },
     [
       activeSession?.workspacePath,
@@ -13483,6 +13367,11 @@ export function App() {
       }
       chatAutoRetry.cancelSession(sessionId);
       retryDispatchRef.current.cancelSession(sessionId);
+      if (chatSendLifecycleRef.current.cancel(sessionId)) {
+        if (isSteering) pendingSteerStopsRef.current.delete(sessionId);
+        setQueueRetryTick((current) => current + 1);
+        return;
+      }
       void invoke("stop_provider_chat", { sessionId, waitForStop: isSteering })
         .catch((error) => {
           if (!isSteering) stoppedChatSessionsRef.current.delete(sessionId);
@@ -13578,7 +13467,7 @@ export function App() {
       }
       const event = createPlanSessionEvent(activeSessionId, message, payload);
       if (!isTauriRuntime()) {
-        setEvents((current) => [...current, event]);
+        setEventsForSession(activeSessionId, (current) => [...current, event]);
         return;
       }
       try {
@@ -13589,11 +13478,11 @@ export function App() {
         });
         await refreshEvents(activeSessionId);
       } catch {
-        setEvents((current) => [...current, event]);
+        setEventsForSession(activeSessionId, (current) => [...current, event]);
         notify("command-failed", "Plan update fallback", message);
       }
     },
-    [activeSessionId, notify, refreshEvents],
+    [activeSessionId, notify, refreshEvents, setEventsForSession],
   );
 
   const appendGoalEvent = useCallback(
@@ -14267,6 +14156,8 @@ export function App() {
             replacement,
           );
           if (!replaced || replaced.occurrences === 0) continue;
+          if (editorBufferHasUnsavedChanges(editorBuffersRef.current[path]))
+            throw new Error(`Replace stopped: ${workspaceName(path)} now has unsaved changes.`);
           const { content, occurrences } = replaced;
           const saved = await invoke<WorkspaceFileContent>(
             "write_workspace_file",
@@ -14280,16 +14171,16 @@ export function App() {
             },
           );
           replacements += occurrences;
-          if (workbench.ide.buffers[path]) {
-            dispatchWorkbench({
-              type: "ide-mark-buffer-saved",
-              path,
-              content: saved.content,
-              contentHash: saved.contentHash,
-              sizeBytes: saved.sizeBytes,
-            });
-          }
-          if (selectedFile === path) setSelectedFileContent(saved);
+          dispatchWorkbench({
+            type: "ide-replace-buffer-saved",
+            path,
+            before: file.content,
+            beforeHash: file.contentHash,
+            buffer: workspaceContentToEditorBuffer({ ...saved, path }),
+          });
+          const live = editorBuffersRef.current[path];
+          if (selectedFileRef.current === path && live?.content === file.content && live.contentHash === file.contentHash)
+            setSelectedFileContent(saved);
         }
         notify(
           "tests-passed",
@@ -14602,7 +14493,7 @@ export function App() {
     const currentPane = terminalPanesRef.current.find(
       (pane) => pane.id === snapshot.paneId,
     );
-    const output = snapshot.output ?? currentPane?.output ?? "";
+    const { output, outputCursor } = mergeTerminalOutput(currentPane?.output ?? "", currentPane?.outputCursor, snapshot.output, snapshot.outputCursor);
     terminalOutputRevisionRef.current[snapshot.paneId] =
       snapshot.outputRevision;
     dispatchWorkbench({
@@ -14616,6 +14507,8 @@ export function App() {
           ? snapshot.status
           : `${snapshot.status} (${snapshot.exitCode})`,
       output,
+      outputCursor,
+      outputComplete: snapshot.outputComplete,
       status,
       hasForegroundJob: snapshot.hasForegroundJob ?? undefined,
       exitCode: snapshot.exitCode ?? null,
@@ -14645,6 +14538,7 @@ export function App() {
           {
             paneId,
             knownOutputRevision: requestedRevision,
+            knownOutputCursor: terminalPanesRef.current.find((pane) => pane.id === paneId)?.outputCursor,
           },
         );
         // A restart or capability event can supersede an in-flight read.
@@ -14877,8 +14771,11 @@ export function App() {
     if (isTauriRuntime()) {
       try {
         await invoke("close_terminal_pane", { paneId });
-      } catch {
-        // Closing the UI should still succeed if the backing PTY is already gone.
+      } catch (error) {
+        if (!terminalPaneProcessIsMissing(error)) {
+          notify("command-failed", "Terminal close failed", paneId);
+          return;
+        }
       }
     }
     setTerminalSourceControlByPane((current) => {
@@ -14890,7 +14787,7 @@ export function App() {
       return next;
     });
     dispatchWorkbench({ type: "remove-terminal-pane", paneId });
-  }, []);
+  }, [notify]);
 
   const requestCloseTerminalPane = useCallback(
     async (paneId: string) => {
@@ -15120,11 +15017,10 @@ export function App() {
         );
         syncTerminalSnapshot(snapshot);
       } catch (error) {
-        const pane = workbench.terminalPanes.find((item) => item.id === paneId);
-        if (!pane) {
-          notify("command-failed", "Terminal restart failed", paneId);
-          return;
-        }
+        // Close may have completed while restart was in flight. Never relaunch
+        // from the stale render that requested the restart.
+        const pane = terminalPanesRef.current.find((item) => item.id === paneId);
+        if (!pane || String(error).includes("terminal launch cancelled")) return;
         const profile = getCommandProfile(
           commandProfiles,
           pane.profileId || activeProfileId,
@@ -15201,10 +15097,11 @@ export function App() {
         });
         void refreshTerminalPane(paneId);
       } catch {
-        notify("command-failed", "Terminal resize failed", paneId);
+        return false;
       }
+      return true;
     },
-    [notify, refreshTerminalPane],
+    [refreshTerminalPane],
   );
 
   const setTerminalTemplate = useCallback(
@@ -16529,6 +16426,9 @@ export function App() {
         ]);
       } catch (error) {
         console.error("Gyro shell warm-up failed", error);
+        if (!cancelled && /credential|keychain/i.test(String(error))) {
+          notify("command-failed", "Credential migration did not finish", "Existing credentials were kept. Allow Keychain access and restart Gyro to retry securing them.");
+        }
         if (!cancelled) {
           await Promise.all([
             refreshConfig().catch(() => undefined),
@@ -16545,7 +16445,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [refreshAutomations, refreshConfig, refreshSessions]);
+  }, [refreshAutomations, refreshConfig, refreshSessions, notify]);
 
   useModelCatalog(isShellOptimizing, setConfig, withCouncilConfig, notify);
 
@@ -16644,6 +16544,15 @@ export function App() {
     }, WORKBENCH_PERSIST_DEBOUNCE_MS);
   }, [persistableWorkbench, onAppearancePersisted]);
 
+  useEffect(() => {
+    const persist = () => void persistDurableEditRecovery(editorBuffersRef.current).catch(error =>
+      notify("command-failed", "Unsaved edits could not be backed up", String(error)));
+    const timer = window.setTimeout(persist, 500);
+    const onHidden = () => { if (document.visibilityState === "hidden") persist(); };
+    document.addEventListener("visibilitychange", onHidden);
+    return () => { window.clearTimeout(timer); document.removeEventListener("visibilitychange", onHidden); };
+  }, [workbench.ide.buffers, notify]);
+
   useEffect(
     () => () => {
       if (workbenchPersistTimerRef.current !== undefined) {
@@ -16728,6 +16637,7 @@ export function App() {
         openGlobalSearch("files");
       } else if (event.key.toLowerCase() === "k") {
         event.preventDefault();
+        if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && clearFocusedTerminal()) return;
         openGlobalSearch("global");
       } else if (
         workspaceCommand &&
@@ -17036,16 +16946,13 @@ export function App() {
 
   useEffect(() => {
     const root = workspaceRootForPath(workspaceRoots, selectedFile);
-    const buffer = selectedFile
-      ? workbench.ide.buffers[selectedFile]
-      : undefined;
     if (!root || !isTauriRuntime()) {
       return;
     }
     let cancelled = false;
     let polling = false;
     const pollWorkspace = async () => {
-      if (polling) {
+      if (polling || document.visibilityState !== "visible") {
         return;
       }
       polling = true;
@@ -17075,7 +16982,8 @@ export function App() {
                   workspaceFilesForRoot(workspaceRoot, rootFiles),
               ),
         );
-        if (!selectedFile || !buffer?.contentHash) {
+        const buffer = selectedFile ? editorBuffersRef.current[selectedFile] : undefined;
+        if (!selectedFile || !buffer?.contentHash || buffer.status === "saving") {
           return;
         }
         const stat = await invoke<WorkspaceFileStat>("stat_workspace_file", {
@@ -17085,10 +16993,20 @@ export function App() {
         if (cancelled) {
           return;
         }
-        if (!stat.contentHash || stat.contentHash === buffer.contentHash) {
+        const live = editorBuffersRef.current[selectedFile];
+        if (!live || live.status === "saving" || live.content !== buffer.content || live.contentHash !== buffer.contentHash) return;
+        if (stat.kind === "missing") {
+          const error = "File is missing from disk. Your editor text has been retained.";
+          if (live.error !== error)
+            dispatchWorkbench({ type: "ide-mark-buffer-error", path: selectedFile, error });
+          return;
+        }
+        if (!stat.contentHash || (stat.contentHash === buffer.contentHash &&
+            buffer.status !== "error" && buffer.status !== "conflict")) {
           return;
         }
         if (editorBufferHasUnsavedChanges(buffer)) {
+          if (stat.contentHash === buffer.contentHash || buffer.status === "conflict") return;
           dispatchWorkbench({
             type: "ide-mark-buffer-error",
             path: selectedFile,
@@ -17106,12 +17024,14 @@ export function App() {
           "read_workspace_file_full",
           { workspacePath: root, path: selectedFile },
         );
-        if (cancelled) {
+        const current = editorBuffersRef.current[selectedFile];
+        if (cancelled || !current || current.status === "saving" || current.content !== buffer.content || current.contentHash !== buffer.contentHash) {
           return;
         }
         setSelectedFileContent(content);
         dispatchWorkbench({
-          type: "ide-upsert-buffer",
+          type: "ide-refresh-buffer",
+          before: buffer,
           buffer: workspaceContentToEditorBuffer(content),
         });
       } catch {
@@ -17120,16 +17040,15 @@ export function App() {
         polling = false;
       }
     };
-    const interval =
-      workspaceWatchMode === "polling"
-        ? window.setInterval(() => void pollWorkspace(), 2500)
-        : undefined;
-    if (workspaceWatchMode === "event") {
-      void pollWorkspace();
-    }
+    // Native events are hints. Open generated files and missed events still need reconciliation.
+    const interval = window.setInterval(() => void pollWorkspace(), workspaceWatchMode === "polling" ? 2500 : 5000);
+    const onVisible = () => { if (document.visibilityState === "visible") void pollWorkspace(); };
+    document.addEventListener("visibilitychange", onVisible);
+    void pollWorkspace();
     return () => {
       cancelled = true;
-      if (interval !== undefined) window.clearInterval(interval);
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [
     notify,
@@ -17140,6 +17059,38 @@ export function App() {
     workspaceRoots,
     workspaceWatchMode,
   ]);
+
+  useEffect(() => {
+    if (!isTauriRuntime() || workspaceRoots.length === 0) return;
+    let cancelled = false;
+    let running = false;
+    const refresh = async () => {
+      if (running) return;
+      running = true;
+      try {
+        await refreshOpenEditorBuffers({
+          paths: Object.keys(editorBuffersRef.current).filter(path =>
+            path !== selectedFile && Boolean(workspaceRootForPath(workspaceRoots, path))),
+          getBuffer: path => editorBuffersRef.current[path],
+          cancelled: () => cancelled,
+          stat: path => invoke<WorkspaceFileStat>("stat_workspace_file", {
+            path, workspacePath: workspaceRootForPath(workspaceRoots, path),
+          }),
+          read: async path => workspaceContentToEditorBuffer(await invoke<WorkspaceFileContent>("read_workspace_file_full", {
+            path, workspacePath: workspaceRootForPath(workspaceRoots, path),
+          })),
+          apply: (before, buffer) => dispatchWorkbench({ type: "ide-refresh-buffer", before, buffer }),
+          conflict: (path, error) => {
+            if (editorBuffersRef.current[path]?.error !== error)
+              dispatchWorkbench({ type: "ide-mark-buffer-error", path, error });
+          },
+        });
+      } finally { running = false; }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 5000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [selectedFile, workspaceChangeGeneration, workspaceRoots]);
 
   useEffect(() => {
     if (!workspaceActionRoot || workspaceChangeGeneration === 0) {
@@ -17204,11 +17155,18 @@ export function App() {
       void refreshTerminalPane(paneId);
     }
 
+    const lastPoll = new Map<string, number>();
     const interval = window.setInterval(() => {
       // Output buffers in Rust while hidden; the visibility listener below
       // catches up the moment the window returns.
       if (document.visibilityState !== "visible") return;
+      const visible = new Set(Array.from(document.querySelectorAll<HTMLElement>(".gyro-xterm-host[data-terminal-id]"))
+        .filter((host) => host.getBoundingClientRect().height > 0)
+        .map((host) => host.dataset.terminalId));
+      const now = performance.now();
       for (const paneId of paneIds) {
+        if (now - (lastPoll.get(paneId) ?? 0) < (visible.has(paneId) ? pollInterval : 1000)) continue;
+        lastPoll.set(paneId, now);
         void refreshTerminalPane(paneId);
       }
     }, pollInterval);
@@ -17445,6 +17403,7 @@ export function App() {
       if (event.kind === "file-edit-proposed") {
         dispatchWorkbench({
           type: "sync-diff-event",
+          proposalId: stringFromRecord(recordFromUnknown(event.payload), "proposalId"),
           path: pathFromSessionEvent(
             event,
             activeSession?.workspacePath ?? workspacePath,
@@ -18420,7 +18379,7 @@ export function App() {
           }}
           onMutationApprovalAction={(proposalId, decision) => {
             focusChatPane(pane);
-            handleMutationApprovalAction(proposalId, decision);
+            return handleMutationApprovalAction(proposalId, decision);
           }}
           onProviderApprovalAction={(approvalId, decision) => {
             focusChatPane(pane);
@@ -18747,6 +18706,7 @@ export function App() {
   const appChrome = (
     <AppChrome
       sidebarProjectsReady={sessionsLoadedRef.current}
+      onRetrySessionLoad={refreshSessions}
       renderAiChat={renderWorkspaceChat}
       activePaneTab={workbench.activePaneTab}
       activeDestination={activeDestination}
@@ -19570,6 +19530,8 @@ export function App() {
           motionSpeed={workbench.preferences.motionSpeed}
           launchView={workbench.preferences.launchView}
           reduceMotion={reduceMotion}
+          persistenceError={workbenchSaveError}
+          onRetryPersistence={() => flushPersistedWorkbenchState(pendingWorkbenchPersistRef, onAppearancePersisted)}
           appearanceSaveStatus={appearanceSaveStatus}
           onRetryAppearanceSave={() => {
             retryAppearanceSave();
@@ -20202,6 +20164,11 @@ export function App() {
   );
   return (
     <ChatRetryContext.Provider value={chatAutoRetry}>
+      {configError && <ConfigRecoveryDialog retry={refreshConfig} recover={async () => {
+        const backup = await invoke<string | null>("recover_config");
+        await refreshConfig();
+        if (backup) notify("update", "Configuration recovered", `Original settings saved to ${backup}`);
+      }} />}
       <ProviderSignInContext.Provider value={providerSignInState}>
         <WorkspacePathUndoContext.Provider value={workspacePathUndoValue}>
           <ChatFileActionsContext.Provider value={chatFileActions}>

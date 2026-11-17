@@ -222,7 +222,7 @@ pub fn claude_multimodal_input(
 ) -> anyhow::Result<serde_json::Value> {
     let mut content = vec![serde_json::json!({"type": "text", "text": prompt})];
     for attachment in attachments.iter().filter(|item| item.kind == "image") {
-        let bytes = std::fs::read(&attachment.path)?;
+        let bytes = super::attachments::image(attachment)?;
         content.push(serde_json::json!({
             "type": "image",
             "source": {

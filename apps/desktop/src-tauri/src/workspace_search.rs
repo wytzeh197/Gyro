@@ -40,7 +40,13 @@ pub(super) fn run_workspace_rg_search(
     max_results: usize,
     use_regex: impl Into<RgMatchOptions>,
 ) -> anyhow::Result<Vec<WorkspaceSearchResult>> {
-    Ok(run_workspace_rg_search_scan(root, query, globs, max_results, use_regex)?.results)
+    let scan = run_workspace_rg_search_scan(root, query, globs, max_results, use_regex)?;
+    if scan.incomplete && scan.results.len() < max_results {
+        anyhow::bail!(
+            "Workspace search was interrupted before completion. Narrow the search and try again."
+        );
+    }
+    Ok(scan.results)
 }
 
 pub(super) fn run_workspace_rg_search_scan(

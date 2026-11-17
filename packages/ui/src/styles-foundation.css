@@ -159,6 +159,7 @@
   --gyro-font-mono:
     "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   --gyro-mono: var(--gyro-font-mono);
+  --gyro-terminal-line-height: 1.2;
   /* Type ladder, smallest first: tiny 10, caption 11, micro 12, support 13,
      chrome and body 14, lead 16, heading 22. Chat re-scopes body to its own
      reading size, so fixed 14px chrome uses chrome rather than body. */

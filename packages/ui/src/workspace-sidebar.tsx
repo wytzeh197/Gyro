@@ -109,6 +109,7 @@ import {
 } from "./source-control-stats";
 import { runSurfaceSwitch } from "./surface-switch-transition";
 import { askTextValue } from "./text-prompt";
+import { ToolbarOverflow } from "./toolbar-overflow";
 import type {
   AppDestination,
   CommandProfile,
@@ -1987,15 +1988,6 @@ export function WorkspaceSidebarContent({
                 workspacePath ? (
                   <div className="gyro-sidebar-explorer-toolbar">
                     <button
-                      aria-label="Add folder to workspace"
-                      onClick={onAddWorkspaceFolder}
-                      title="Add folder to workspace"
-                      type="button"
-                    >
-                      <HardDrive size={13} />
-                      <Plus size={9} />
-                    </button>
-                    <button
                       aria-label="New file"
                       onClick={() =>
                         startExplorerDraft("file", explorerCreateParent())
@@ -2018,49 +2010,6 @@ export function WorkspaceSidebarContent({
                       <Plus size={9} />
                     </button>
                     <button
-                      aria-label="Rename selected path"
-                      disabled={
-                        (!selectedExplorerPath && !ide?.activePath) ||
-                        Boolean(selectedExplorerFile?.isWorkspaceRoot)
-                      }
-                      onClick={() =>
-                        startExplorerRename(
-                          selectedExplorerPath ?? ide?.activePath ?? "",
-                        )
-                      }
-                      title="Rename selected path"
-                      type="button"
-                    >
-                      <Edit3 size={13} />
-                    </button>
-                    <button
-                      aria-label={
-                        selectedExplorerFile?.isWorkspaceRoot
-                          ? "Remove folder from workspace"
-                          : "Delete selected path"
-                      }
-                      disabled={!selectedExplorerPath && !ide?.activePath}
-                      onClick={() => {
-                        const path =
-                          selectedExplorerPath ?? ide?.activePath ?? "";
-                        if (selectedExplorerFile?.isWorkspaceRoot) {
-                          onRemoveWorkspaceFolder?.(
-                            selectedExplorerFile.workspacePath ?? path,
-                          );
-                          return;
-                        }
-                        onDeleteWorkspacePath?.(path);
-                      }}
-                      title={
-                        selectedExplorerFile?.isWorkspaceRoot
-                          ? "Remove folder from workspace"
-                          : "Delete selected path"
-                      }
-                      type="button"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                    <button
                       aria-label="Refresh workspace files"
                       onClick={onRefreshWorkspace}
                       title="Refresh workspace files"
@@ -2068,6 +2017,65 @@ export function WorkspaceSidebarContent({
                     >
                       <RefreshCw size={13} />
                     </button>
+                    <ToolbarOverflow label="More Explorer actions">
+                      <button
+                        role="menuitem"
+                        aria-label="Add folder to workspace"
+                        onClick={onAddWorkspaceFolder}
+                        title="Add folder to workspace"
+                        type="button"
+                      >
+                        <HardDrive size={13} />
+                        <span>Add folder to workspace</span>
+                      </button>
+                      <button
+                        role="menuitem"
+                        aria-label="Rename selected path"
+                        disabled={
+                          (!selectedExplorerPath && !ide?.activePath) ||
+                          Boolean(selectedExplorerFile?.isWorkspaceRoot)
+                        }
+                        onClick={() =>
+                          startExplorerRename(
+                            selectedExplorerPath ?? ide?.activePath ?? "",
+                          )
+                        }
+                        title="Rename selected path"
+                        type="button"
+                      >
+                        <Edit3 size={13} />
+                        <span>Rename selected path</span>
+                      </button>
+                      <button
+                        role="menuitem"
+                        aria-label={
+                          selectedExplorerFile?.isWorkspaceRoot
+                            ? "Remove folder from workspace"
+                            : "Delete selected path"
+                        }
+                        disabled={!selectedExplorerPath && !ide?.activePath}
+                        onClick={() => {
+                          const path =
+                            selectedExplorerPath ?? ide?.activePath ?? "";
+                          if (selectedExplorerFile?.isWorkspaceRoot) {
+                            onRemoveWorkspaceFolder?.(
+                              selectedExplorerFile.workspacePath ?? path,
+                            );
+                            return;
+                          }
+                          onDeleteWorkspacePath?.(path);
+                        }}
+                        title={
+                          selectedExplorerFile?.isWorkspaceRoot
+                            ? "Remove folder from workspace"
+                            : "Delete selected path"
+                        }
+                        type="button"
+                      >
+                        <Trash2 size={13} />
+                        <span>{selectedExplorerFile?.isWorkspaceRoot ? "Remove folder from workspace" : "Delete selected path"}</span>
+                      </button>
+                    </ToolbarOverflow>
                   </div>
                 ) : null
               }

@@ -7,7 +7,7 @@ import { dirname, resolve } from "node:path";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const domains = new Map(
   [
-    ["apps/desktop/src/App.tsx", ["apps/desktop/src/app-state.tsx"]],
+    ["apps/desktop/src/App.tsx", ["apps/desktop/src/app-state.tsx", "apps/desktop/src/use-provider-capability-events.ts"]],
     ["packages/ui/src/surfaces.tsx", ["packages/ui/src/workspace-sidebar.tsx"]],
     ["apps/desktop/src-tauri/src/lib.rs", ["apps/desktop/src-tauri/src/tests.rs"]],
     ["packages/ui/src/styles.css", ["packages/ui/src/settings-polish.css"]],

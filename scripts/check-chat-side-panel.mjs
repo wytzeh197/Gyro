@@ -11,7 +11,6 @@ import { readFileSync } from "./read-product-source.mjs";
  * track, the wrong specificity, a control group that cannot wrap.
  */
 
-
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -42,7 +41,8 @@ function cssRules(source, selector) {
 }
 
 const surfaces = read("packages/ui/src/surfaces.tsx");
-const styles = read("packages/ui/src/styles.css") + "\n" + read("packages/ui/src/chat.css");
+const styles =
+  read("packages/ui/src/styles.css") + "\n" + read("packages/ui/src/chat.css");
 const app = read("apps/desktop/src/App.tsx");
 const liveTerminal = read("apps/desktop/src/live-terminal-pane.tsx");
 
@@ -308,7 +308,9 @@ expect(
   ) &&
     surfaces.includes('if (activePaneStatus !== "restored") return') &&
     surfaces.includes("onRestartTerminalPane(activePaneId)") &&
-    liveTerminal.includes('statusRef.current === "restored"') &&
+    /statusRef\.current !== "running"\s*&&\s*statusRef\.current !== "waiting"/.test(
+      liveTerminal,
+    ) &&
     styles.includes(
       ".gyro-xterm-host .xterm-helpers {\n  overflow: visible !important;",
     ),

@@ -3,7 +3,7 @@ use crate::provider_runtime::{
         emit_provider_activity_event, emit_provider_chat_event, emit_provider_context_usage,
         RunnerHost,
     },
-    limits::{MAX_CHAT_IMAGE_BYTES, PROVIDER_CHAT_MAX_RUNTIME_SECS},
+    limits::PROVIDER_CHAT_MAX_RUNTIME_SECS,
     native_args::build_grok_acp_program_args,
     support::{
         provider_billed_usage_from_acp_tokens, provider_chat_cwd, provider_output_summary,
@@ -22,7 +22,6 @@ use crate::{
 use anyhow::Context;
 use base64::Engine;
 use std::{
-    fs,
     path::Path,
     sync::{atomic::AtomicBool, Arc, Mutex},
     time::Duration,
@@ -216,6 +215,7 @@ pub fn apply_acp_workspace_write(
     workspace: &Path,
     target: &Path,
     content: &str,
+    observed_hash: Option<&str>,
     plan_mode: bool,
     require_approval: bool,
     cancellation: &crate::CancellationToken,
@@ -229,6 +229,7 @@ pub fn apply_acp_workspace_write(
     }
     let (transaction, details) =
         crate::mutations::prepare_provider_text_replacement_review(workspace, target, content)?;
+    transaction.assert_observed_base(observed_hash)?;
     if require_approval {
         // The resolver applies the exact reviewed transaction. Never reuse a
         // previous ACP permission grant or apply a committed transaction twice.
@@ -260,18 +261,15 @@ pub fn run_kimi_acp_chat(
     })];
     for attachment in &request.attachments {
         if attachment.kind == "image" {
-            let bytes = fs::read(&attachment.path)
+            let bytes = super::super::attachments::image(attachment)
                 .with_context(|| format!("read image attachment {}", attachment.name))?;
-            if bytes.len() > MAX_CHAT_IMAGE_BYTES as usize {
-                anyhow::bail!("{} exceeds the image attachment limit", attachment.name);
-            }
             prompt.push(serde_json::json!({
                 "type": "image",
                 "data": base64::engine::general_purpose::STANDARD.encode(bytes),
                 "mimeType": attachment.mime_type.as_deref().unwrap_or("application/octet-stream"),
             }));
         } else if attachment.kind == "workspace-file" {
-            let content = fs::read_to_string(&attachment.path)
+            let content = super::super::attachments::workspace_text(attachment, &workspace)
                 .with_context(|| format!("read workspace attachment {}", attachment.name))?;
             prompt.push(serde_json::json!({
                 "type": "resource",
@@ -497,11 +495,12 @@ pub fn run_kimi_acp_chat(
                 KimiAcpApprovalDecision::RejectOnce
             })
         },
-        |target, content| {
+        |target, content, observed_hash| {
             apply_acp_workspace_write(
                 &workspace,
                 target,
                 content,
+                observed_hash,
                 plan_mode,
                 require_file_approval,
                 &cancellation,

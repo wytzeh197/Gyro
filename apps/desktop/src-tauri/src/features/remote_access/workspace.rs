@@ -330,7 +330,7 @@ fn git_snapshot(root: &str) -> Result<(SourceControlStatus, String), String> {
             hash.update(metadata.len().to_be_bytes());
             hash.update(format!("{:?}", metadata.modified().ok()));
             if metadata.is_file() && !metadata.is_symlink() && metadata.len() <= 4 * 1024 * 1024 {
-                hash.update(std::fs::read(target).map_err(err)?);
+                hash.update(super::file_hashes::digest(&target)?);
             }
         }
     }

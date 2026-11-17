@@ -1,3 +1,4 @@
+import { mergeTerminalUpdate } from "./terminal-stream";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ChatAttachment,
@@ -13,7 +14,8 @@ import { reconcileRemoteHistory } from "./history";
 import { RemoteHostClient } from "./client";
 import { clearRemoteAttachments } from "./attachments";
 import { useRemoteAccess } from "./context";
-import { readView, persistView, pendingSubmitOutcome } from "./view-state";
+import { readView, persistViewAsync, hydrateView, mergeHydratedBuffers, rememberView, pendingSubmitOutcome } from "./view-state";
+import type { RemoteView } from "./view-state";
 import type {
   Control,
   GitSnapshot,
@@ -47,7 +49,8 @@ export function useRemoteWorkspace(
     () => new RemoteHostClient(hostId, access.ports),
     [hostId, access.ports],
   );
-  const [view, setView] = useState(() => ({
+  const hydrationSeenBuffers = useRef<Set<string>>();
+  const [view, updateView] = useState(() => ({
     ...readView(hostId),
     ...(selection
       ? {
@@ -57,6 +60,13 @@ export function useRemoteWorkspace(
         }
       : {}),
   }));
+  const setView = useCallback((update: React.SetStateAction<RemoteView>) => {
+    updateView((current) => {
+      if (hydrationSeenBuffers.current)
+        for (const id of Object.keys(current.buffers)) hydrationSeenBuffers.current.add(id);
+      return typeof update === "function" ? update(current) : update;
+    });
+  }, []);
   const [data, setData] = useState<WorkspaceData>(emptyData);
   const [events, setEvents] = useState<SessionEvent[]>([]);
   const [online, setOnline] = useState(false);
@@ -64,6 +74,8 @@ export function useRemoteWorkspace(
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [storageWarning, setStorageWarning] = useState(false);
+  const [buffersLoaded, setBuffersLoaded] = useState(false);
+  const storageReady = useRef<ReturnType<typeof hydrateView>>();
   const [streamEpoch, setStreamEpoch] = useState(0);
   const mounted = useRef(true);
   const viewRef = useRef(view);
@@ -75,10 +87,12 @@ export function useRemoteWorkspace(
   // Which session/panel pair has finished its first load; polling after that
   // refreshes in place instead of flashing a loading state.
   const [toolsLoadedFor, setToolsLoadedFor] = useState<string>();
+  const metadataCache = useRef<{ at: number; info: HostInfo; projects: Project[]; sessions: Session[]; projectId?: string }>();
   const historyRevisions = useRef(new Map<string, string>());
   const persistedHistory = useRef<SessionEvent[]>([]);
   const terminalCache = useRef(new Map<string, TerminalSnapshot>());
   const generation = useRef(0);
+  const fileReadGeneration = useRef(0);
   const earlierLoaded = useRef(false);
   const sessionId = view.sessionId;
   // Trusted, connected devices can act without a manual control step.
@@ -89,7 +103,7 @@ export function useRemoteWorkspace(
   useEffect(() => {
     mounted.current = true;
     return () => {
-      persistView(hostId, viewRef.current);
+      if (buffersLoaded) void persistViewAsync(hostId, viewRef.current);
       mounted.current = false;
       generation.current++;
       queueMicrotask(() => {
@@ -98,8 +112,46 @@ export function useRemoteWorkspace(
     };
   }, [client]);
   useEffect(() => {
-    setStorageWarning(!persistView(hostId, view));
-  }, [hostId, view]);
+    let cancelled = false;
+    const initialBuffers = new Set(Object.keys(viewRef.current.buffers));
+    hydrationSeenBuffers.current = initialBuffers;
+    const ready = hydrateView(hostId);
+    storageReady.current = ready;
+    void ready.then((stored) => {
+      if (cancelled) return;
+      setView((current) => {
+        const buffers = mergeHydratedBuffers(stored.buffers, current.buffers, initialBuffers);
+        return { ...current, buffers };
+      });
+      setBuffersLoaded(true);
+    }).catch(() => {
+      if (storageReady.current === ready) storageReady.current = undefined;
+      if (hydrationSeenBuffers.current === initialBuffers)
+        hydrationSeenBuffers.current = undefined;
+      if (!cancelled) setStorageWarning(true);
+    });
+    return () => {
+      cancelled = true;
+      if (hydrationSeenBuffers.current === initialBuffers)
+        hydrationSeenBuffers.current = undefined;
+    };
+  }, [hostId]);
+  useEffect(() => {
+    rememberView(hostId, view);
+    if (!buffersLoaded) return;
+    hydrationSeenBuffers.current = undefined;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void persistViewAsync(hostId, view).then((saved) => { if (!cancelled) setStorageWarning(!saved); });
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [hostId, view, buffersLoaded]);
+  useEffect(() => {
+    if (!buffersLoaded) return;
+    const flush = () => { void persistViewAsync(hostId, viewRef.current); };
+    window.addEventListener("pagehide", flush);
+    return () => { window.removeEventListener("pagehide", flush); flush(); };
+  }, [hostId, buffersLoaded]);
   const fail = useCallback((reason: unknown) => {
     if (!mounted.current) return;
     const message = String(reason);
@@ -120,20 +172,22 @@ export function useRemoteWorkspace(
     const current = generation.current;
     const selected = viewRef.current;
     try {
-      const info = await client.capabilities();
-      if (info.protocol !== 1)
-        throw new Error("Update Gyro on both Macs to use remote access");
-      const projects = await client.request<Project[]>({ op: "projects" });
-      const projectId = projects.some((p) => p.id === selected.projectId)
-        ? selected.projectId
-        : projects[0]?.id;
-      const sessions = projectId
-        ? await client.request<Session[]>({ op: "sessions", projectId })
-        : [];
+      let metadata = metadataCache.current;
+      if (!metadata || Date.now() - metadata.at > 10_000 || metadata.projectId !== selected.projectId) {
+        const info = await client.capabilities();
+        if (info.protocol !== 1) throw new Error("Update Gyro on both Macs to use remote access");
+        const projects = await client.request<Project[]>({ op: "projects" });
+        const projectId = projects.some((p) => p.id === selected.projectId) ? selected.projectId : projects[0]?.id;
+        const sessions = projectId ? await client.request<Session[]>({ op: "sessions", projectId }) : [];
+        metadata = { at: Date.now(), info, projects, projectId, sessions };
+        metadataCache.current = metadata;
+      }
+      const { info, projects, projectId, sessions } = metadata;
       if (!mounted.current || current !== generation.current) return;
       setOnline(true);
       setLoading(false);
-      setData((previous) => ({ ...previous, info, projects, sessions }));
+      setData((previous) => previous.info === info && previous.projects === projects && previous.sessions === sessions
+        ? previous : { ...previous, info, projects, sessions });
       if (projectId !== selected.projectId) {
         setView((previous) => ({
           ...previous,
@@ -181,7 +235,7 @@ export function useRemoteWorkspace(
               },
         history:
           history.unchanged && previous.history
-            ? { ...previous.history, revision: history.revision }
+            ? previous.history
             : {
                 ...history,
                 hasMoreBefore: earlierLoaded.current
@@ -288,7 +342,7 @@ export function useRemoteWorkspace(
       terminals: [],
     }));
     void load();
-    const timer = setInterval(() => void load(), 2500);
+    const timer = setInterval(() => void load(), 10_000);
     return () => clearInterval(timer);
   }, [view.projectId, sessionId, load]);
   useEffect(() => {
@@ -309,13 +363,8 @@ export function useRemoteWorkspace(
             event.phase,
           );
           if (active || settled)
-            setData((previous) => ({
-              ...previous,
-              snapshot:
-                previous.snapshot?.session.id === event.sessionId
-                  ? { ...previous.snapshot, running: active }
-                  : previous.snapshot,
-            }));
+            setData((previous) => previous.snapshot?.session.id === event.sessionId && previous.snapshot.running !== active
+              ? { ...previous, snapshot: { ...previous.snapshot, running: active } } : previous);
           applyProviderChatStreamEvent(optimistic, setEvents, event);
           applyProviderChatStreamPresentation(optimistic, setEvents, event);
         }
@@ -324,19 +373,50 @@ export function useRemoteWorkspace(
     void client
       .subscribe(sessionId, (event) => {
         if (disposed) return;
-        if (event.topic === "resync" && event.payload?.streamClosed) {
+        if (event.topic === "resync") {
           clearTimeout(reconnectTimer);
           reconnectTimer = window.setTimeout(() => {
             if (!disposed) setStreamEpoch((value) => value + 1);
           }, 1000);
         }
+        if (event.topic === "terminal" && event.payload) {
+          const snapshot = event.payload.snapshot as TerminalSnapshot;
+          const merged = mergeTerminalUpdate(terminalCache.current.get(snapshot.paneId), snapshot);
+          if (merged) {
+            terminalCache.current.set(snapshot.paneId, merged);
+            setData((previous) => ({ ...previous, terminals: previous.terminals.some((pane) => pane.paneId === merged.paneId)
+              ? previous.terminals.map((pane) => pane.paneId === merged.paneId ? merged : pane)
+              : [...previous.terminals, merged] }));
+          } else void loadToolsRef.current();
+          return;
+        }
+        if (event.topic === "checkpoint" && event.payload) {
+          const frames = event.payload.events as unknown as ProviderChatStreamEvent[];
+          const turns = new Set(frames.map((frame) => frame.turnId));
+          const keep = (items: SessionEvent[]) => items.filter((item) =>
+            !turns.has(item.turnId) || !(item.kind === "assistant-message" ||
+              (item.kind === "system-event" && String((item.payload as Record<string, unknown>)?.kind ?? "").startsWith("provider-"))));
+          optimistic.current.set(sessionId, keep(optimistic.current.get(sessionId) ?? []));
+          setEvents(keep);
+          for (const frame of frames) {
+            applyProviderChatStreamEvent(optimistic, setEvents, frame);
+            applyProviderChatStreamPresentation(optimistic, setEvents, frame);
+            streamOrder.current.set(`${sessionId}:${frame.turnId ?? "turn"}`, {
+              nextSequence: frame.sequence + 1, pending: new Map(),
+              terminal: ["completed", "failed", "cancelled"].includes(frame.phase),
+            });
+          }
+          if (event.payload.truncated) setError("This live response exceeds the catch-up limit. Complete history will appear when the turn finishes.");
+        }
         if (event.topic === "provider" && event.payload)
           dispatcher.push(event.payload as unknown as ProviderChatStreamEvent);
-        if (refreshTimer === undefined)
+        const phase = event.payload?.phase;
+        const invalidates = event.topic !== "provider" || ["started", "activity", "completed", "failed", "cancelled"].includes(String(phase));
+        if (invalidates && refreshTimer === undefined)
           refreshTimer = window.setTimeout(() => {
             refreshTimer = undefined;
             void load();
-          }, 200);
+          }, 1000);
       })
       .then((fn) => {
         if (disposed) fn();
@@ -371,6 +451,10 @@ export function useRemoteWorkspace(
       setError(undefined);
       const issued = generation.current;
       try {
+        if (operation.op === "terminal" && operation.action === "input") {
+          const result = await client.input<T>(operation);
+          return mounted.current && issued === generation.current ? result : undefined;
+        }
         // Claim only for an explicit write, never for watching or a heartbeat.
         // The host still fences delayed writes with the returned generation.
         if (
@@ -413,7 +497,10 @@ export function useRemoteWorkspace(
       } finally {
         if (mounted.current) {
           setBusy(false);
-          void load();
+          if (!(operation.op === "terminal" && ["input", "resize", "read", "list"].includes(operation.action))) {
+            metadataCache.current = undefined;
+            void load();
+          }
         }
       }
     },
@@ -519,20 +606,37 @@ export function useRemoteWorkspace(
     const currentDraft = view.drafts[sessionId] ?? "";
     const turnId = crypto.randomUUID(),
       requestId = crypto.randomUUID();
-    setView((previous) => ({
-      ...previous,
+    const pendingView = {
+      ...viewRef.current,
       pendingSubmissions: {
-        ...previous.pendingSubmissions,
-        [sessionId]: {
-          requestId,
-          turnId,
-          message,
-          draft: currentDraft,
-          attachmentIds: attachments.map((attachment) => attachment.id),
-          sentAt: Date.now(),
-        },
+        ...viewRef.current.pendingSubmissions,
+        [sessionId]: { requestId, turnId, message, draft: currentDraft,
+          attachmentIds: attachments.map((attachment) => attachment.id), sentAt: Date.now() },
       },
-    }));
+    };
+    setView(pendingView);
+    let saved = false;
+    try {
+      // Creating a chat can submit before the first IndexedDB read finishes.
+      // Wait for it, rather than mistaking that startup race for a quota error.
+      const hydrated = await (storageReady.current ??= hydrateView(hostId));
+      setBuffersLoaded(true);
+      if (!buffersLoaded && hydrated) pendingView.buffers = { ...hydrated.buffers, ...pendingView.buffers };
+      saved = await persistViewAsync(hostId, pendingView);
+    } catch { storageReady.current = undefined; /* The next explicit send can retry storage. */ }
+    if (!saved) {
+      setView((current) => {
+        const pendingSubmissions = { ...current.pendingSubmissions };
+        delete pendingSubmissions[sessionId];
+        const restored = { ...current, pendingSubmissions };
+        rememberView(hostId, restored);
+        return restored;
+      });
+      setStorageWarning(true);
+      setError("The pending message could not be saved on this Mac. Free storage and retry before sending.");
+      submitting.current = false;
+      return false;
+    }
     let sent = false;
     inFlightSubmits.current.add(requestId);
     const result = await run<{ accepted: boolean; event: SessionEvent }>(
@@ -625,6 +729,8 @@ export function useRemoteWorkspace(
       setData((previous) => ({ ...previous, history: page }));
     }
   }
+  const loadToolsRef = useRef<() => Promise<void>>(async () => {});
+  loadToolsRef.current = loadTools;
   async function loadTools() {
     if (!sessionId || !online || toolsInFlight.current) return;
     toolsInFlight.current = true;
@@ -657,14 +763,14 @@ export function useRemoteWorkspace(
         const terminals = await Promise.all(
           summaries.map(async (summary) => {
             const previous = terminalCache.current.get(summary.paneId);
-            if (previous && previous.outputRevision === summary.outputRevision)
+            if (previous && previous.outputRevision === summary.outputRevision && previous.outputCursor?.generation === summary.outputCursor?.generation)
               return { ...previous, ...summary, output: previous.output };
             const read = await client.request<TerminalSnapshot>({
               op: "terminal",
               action: "read",
               sessionId,
               paneId: summary.paneId,
-              revision: previous?.outputRevision,
+              revision: previous?.outputCursor?.generation === summary.outputCursor?.generation ? previous?.outputRevision : undefined,
             });
             const snapshot = {
               ...read,
@@ -685,6 +791,8 @@ export function useRemoteWorkspace(
     }
   }
   async function openRemoteFile(path: string) {
+    const readGeneration = ++fileReadGeneration.current;
+    const selectionGeneration = generation.current;
     const selected = viewRef.current.sessionId;
     if (!selected) return;
     const root = data.snapshot?.session.workspacePath.replace(/\/+$/, "");
@@ -710,22 +818,20 @@ export function useRemoteWorkspace(
       sessionId: selected,
       path: relative,
     });
-    if (file)
-      setView((previous) => ({
-        ...previous,
-        selectedFile: relative,
-        panel: "files",
-        buffers: {
-          ...previous.buffers,
-          [`${selected}:${relative}`]: { file, text: file.content },
-        },
-      }));
+    if (file && mounted.current)
+      setView((previous) => {
+        const key = `${selected}:${relative}`;
+        if (readGeneration !== fileReadGeneration.current || selectionGeneration !== generation.current
+            || previous.sessionId !== selected || previous.buffers[key] !== existing) return previous;
+        return { ...previous, selectedFile: relative, panel: "files",
+          buffers: { ...previous.buffers, [key]: { file, text: file.content } } };
+      });
   }
   useEffect(() => {
     void loadTools();
     const timer = setInterval(
       () => void loadTools(),
-      view.panel === "terminal" ? 1000 : 5000,
+      view.panel === "terminal" && !data.info?.capabilities.includes("terminalPush") ? 1000 : 5000,
     );
     return () => clearInterval(timer);
   }, [view.panel, sessionId, online]);
@@ -734,6 +840,7 @@ export function useRemoteWorkspace(
     setBusy(true);
     setError(undefined);
     try {
+      metadataCache.current = undefined;
       if (hostId.startsWith("ssh:"))
         await access.action({ action: "sshConnect", hostId });
       await load();

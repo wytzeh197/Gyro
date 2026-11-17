@@ -194,7 +194,7 @@ pub struct AccountSessionState {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct GyroConfig {
     #[serde(default = "default_automatic_update_checks")]
     pub automatic_update_checks: bool,
@@ -517,6 +517,23 @@ impl GyroConfig {
         // during the read are returned uncached.
         let after = ConfigFileVersion::from_metadata(&file.metadata()?);
         Ok((config, (version == after).then_some(version)))
+    }
+
+    /// Explicit user recovery only. Keep the exact invalid bytes under a unique
+    /// private backup name before replacing them; never reset readable config.
+    pub fn recover(paths: &GyroPaths) -> Result<Option<PathBuf>> {
+        let _lock = acquire_config_lock(paths)?;
+        if Self::load_unlocked(paths).is_ok() { return Ok(None); }
+        reject_unsafe_config_target(&paths.config_path)?;
+        let backup = paths.config_path.with_file_name(format!("config.recovery-{}.json", Uuid::new_v4()));
+        crate::paths::secure_private_file(&paths.config_path)?;
+        std::fs::rename(&paths.config_path, &backup).context("back up unreadable configuration")?;
+        if let Err(error) = Self::default().save_unlocked(paths) {
+            std::fs::rename(&backup, &paths.config_path).context("restore original configuration after failed recovery")?;
+            clear_config_cache();
+            return Err(error);
+        }
+        Ok(Some(backup))
     }
 
     pub fn save(&self, paths: &GyroPaths) -> Result<()> {
@@ -1109,6 +1126,22 @@ fn atomic_write_private_config(path: &Path, bytes: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn missing_old_keys_migrate_safely_and_invalid_config_requires_backed_up_recovery() {
+        let parsed: GyroConfig = serde_json::from_str(r#"{"telemetryEnabled":true}"#).unwrap();
+        assert!(parsed.telemetry_enabled);
+        assert!(parsed.require_command_approval && parsed.require_file_edit_approval);
+        let dir = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(dir.path().join("Gyro"));
+        paths.ensure().unwrap();
+        std::fs::write(&paths.config_path, b"{broken").unwrap();
+        assert!(GyroConfig::load(&paths).is_err());
+        assert!(GyroConfig::update(&paths, |_| Ok(())).is_err());
+        let backup = GyroConfig::recover(&paths).unwrap().unwrap();
+        assert_eq!(std::fs::read(&backup).unwrap(), b"{broken");
+        assert!(GyroConfig::load(&paths).unwrap().require_command_approval);
+        assert!(GyroConfig::recover(&paths).unwrap().is_none());
+    }
     #[test]
     fn renderer_derived_model_lists_do_not_break_config_deserialization() {
         // The renderer sends `models` as objects (id, displayName, …) on every

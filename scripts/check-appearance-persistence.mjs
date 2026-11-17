@@ -174,8 +174,13 @@ pending.current = {
   diffReview: { diff: "x".repeat(10_000) },
 };
 context.flushPersistedWorkbenchState(pending, acknowledge);
+assert.deepEqual(receipts.at(-1), { preferences: changed, saved: false });
+assert.ok(pending.current, "failed workbench writes remain queued even when appearance saves");
+window.localStorage.setItem = (key, value) => writes.set(key, value);
+context.flushPersistedWorkbenchState(pending, acknowledge);
+assert.equal(pending.current, undefined, "a successful retry clears the pending write");
 assert.deepEqual(receipts.at(-1), { preferences: changed, saved: true });
-assert.deepEqual(JSON.parse(writes.get("workbench")).preferences, initial);
+assert.deepEqual(JSON.parse(writes.get("workbench")).preferences, changed);
 assert.deepEqual(readStoredAppearance(), changed);
 assert.ok(writes.get(APPEARANCE_STORAGE_KEY).length < 1_024);
 
@@ -185,6 +190,7 @@ const loader = ast.statements.find(
     node.name?.text === "loadInitialWorkbenchState",
 );
 const restartContext = {
+  recoverDurableEditRecovery: (state) => state,
   applyLaunchView,
   loadStoredWorkbenchState: () => ({
     preferences: { ...initial, modelFollow: "peek" },

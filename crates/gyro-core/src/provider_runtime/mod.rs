@@ -3,6 +3,7 @@
 pub mod accounting;
 pub mod advisory;
 pub mod api_config;
+pub mod attachments;
 pub mod codex_client;
 pub mod codex_home;
 mod codex_startup;

@@ -1,5 +1,6 @@
 //! Bounded in-memory catch-up for clients opening an already-running chat.
-//! Durable history remains authoritative; credentials never enter this buffer.
+//! Durable history remains authoritative. Producers own payload redaction;
+//! this buffer bounds and compacts the same events sent to live subscribers.
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 
@@ -16,14 +17,12 @@ pub struct LiveEvents {
 struct Frames {
     turn: Option<String>,
     bytes: usize,
+    truncated: bool,
     events: VecDeque<(Value, usize)>,
 }
 impl LiveEvents {
     pub fn push(&mut self, session: &str, payload: Value) {
         let bytes = payload.to_string().len();
-        if bytes > MAX_BYTES {
-            return;
-        }
         self.order.retain(|id| id != session);
         self.order.push_back(session.into());
         while self.order.len() > MAX_SESSIONS {
@@ -42,13 +41,58 @@ impl LiveEvents {
                 ..Frames::default()
             };
         }
+        // Compact adjacent token deltas into a cumulative checkpoint segment.
+        // Keep the final sequence as the cursor; replay bypasses live ordering.
+        if payload["phase"] == "delta" {
+            if let Some((last, size)) = frames.events.back_mut() {
+                if last["phase"] == "delta"
+                    && last["timelineOrder"] == payload["timelineOrder"]
+                    && last["turnId"] == payload["turnId"]
+                {
+                    if let (Some(before), Some(delta)) =
+                        (last["textDelta"].as_str(), payload["textDelta"].as_str())
+                    {
+                        let mut text = before.to_owned();
+                        let remaining = (256 * 1024usize).saturating_sub(text.len());
+                        let mut end = delta.len().min(remaining);
+                        while !delta.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        text.push_str(&delta[..end]);
+                        frames.truncated |= end < delta.len();
+                        let mut merged = payload;
+                        merged["textDelta"] = Value::String(text);
+                        frames.bytes -= *size;
+                        *size = merged.to_string().len();
+                        frames.bytes += *size;
+                        *last = merged;
+                        self.trim(session);
+                        return;
+                    }
+                }
+            }
+        }
+        if bytes > MAX_BYTES {
+            frames.truncated = true;
+            return;
+        }
         frames.bytes += bytes;
         frames.events.push_back((payload, bytes));
+        self.trim(session);
+    }
+    fn trim(&mut self, session: &str) {
+        let frames = self.sessions.get_mut(session).unwrap();
         while frames.bytes > MAX_BYTES || frames.events.len() > MAX_EVENTS {
             if let Some((_, size)) = frames.events.pop_front() {
                 frames.bytes -= size;
+                frames.truncated = true;
             }
         }
+    }
+    pub fn truncated(&self, session: &str) -> bool {
+        self.sessions
+            .get(session)
+            .is_some_and(|frames| frames.truncated)
     }
     pub fn snapshot(&self, session: &str) -> Vec<Value> {
         self.sessions
@@ -68,6 +112,18 @@ impl LiveEvents {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn thousands_of_tokens_replay_the_whole_prefix_with_a_final_cursor() {
+        let mut live = LiveEvents::default();
+        for sequence in 0..10_000 {
+            live.push("a", json!({"sessionId":"a", "turnId":"t", "phase":"delta", "eventId":format!("frame-{sequence}"), "timelineOrder":1, "sequence":sequence, "textDelta":"x"}));
+        }
+        let events = live.snapshot("a");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["textDelta"].as_str().unwrap().len(), 10_000);
+        assert_eq!(events[0]["sequence"], 9999);
+        assert!(!live.truncated("a"));
+    }
     #[test]
     fn catchup_contains_text_tools_and_context_only_for_the_current_session_and_turn() {
         let mut live = LiveEvents::default();

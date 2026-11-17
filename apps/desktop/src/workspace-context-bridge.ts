@@ -47,6 +47,12 @@ type Attachment =
   | { kind: "buffer"; index: number }
   | { kind: "selection" };
 
+let lastEvidenceRevision = 0;
+function nextEvidenceRevision() {
+  lastEvidenceRevision = Math.max(Date.now(), lastEvidenceRevision + 1);
+  return lastEvidenceRevision;
+}
+
 function utf8Bytes(value: string) {
   return new TextEncoder().encode(value).length;
 }
@@ -133,11 +139,16 @@ export function workspaceContextWithLiveEditor(
     if (!inRoot(path) || seen.has(path)) continue;
     seen.add(path);
     tabPaths.push(path);
-    if (tabPaths.length === 64) break;
   }
   if (activePath && inRoot(activePath) && !seen.has(activePath)) {
-    if (tabPaths.length >= 64) tabPaths.pop();
     tabPaths.unshift(activePath);
+  }
+  const buffersComplete = tabPaths.length <= 64;
+  // Keep the focused file readable, but never imply omitted tabs are clean.
+  if (!buffersComplete) {
+    const activeIndex = tabPaths.indexOf(activePath ?? "");
+    if (activeIndex >= 64) tabPaths.unshift(...tabPaths.splice(activeIndex, 1));
+    tabPaths.length = 64;
   }
 
   const drafts = tabPaths.map((path) =>
@@ -156,7 +167,9 @@ export function workspaceContextWithLiveEditor(
 
   const base: WorkspaceContextSnapshot = {
     ...context,
-    revision: Date.now(),
+    revision: nextEvidenceRevision(),
+    capturedAt: new Date().toISOString(),
+    buffersComplete,
     activePath: activeRelative,
     visibleTabs: drafts.map((draft) => draft.path),
     selection: undefined,

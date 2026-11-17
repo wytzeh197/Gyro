@@ -112,6 +112,10 @@ function diffLines(before: string, after: string): DiffLine[] | undefined {
 }
 
 function MutationBody({ mutation }: { mutation: Mutation }) {
+  if (mutation.previewError) return <p role="alert">{mutation.previewError}</p>;
+  if (mutation.patch !== undefined) {
+    return <pre className="gyro-remote-code gyro-remote-diff">{mutation.patch}</pre>;
+  }
   const after = mutation.afterContent ?? mutation.content;
   if (after === undefined)
     return <p>The proposed content isn't available here.</p>;
@@ -202,7 +206,7 @@ export function MutationReviewPanel({
                   ? "gyro-primary-button"
                   : "gyro-secondary-button"
               }
-              disabled={!canDecide}
+              disabled={!canDecide || mutation.patch === undefined || Boolean(mutation.previewError)}
               onClick={() => onDecide(mutation.id, "approve")}
             >
               Approve edit

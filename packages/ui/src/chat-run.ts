@@ -1,5 +1,6 @@
 import {
   finalAssistantResponseText,
+  assistantTextBlocks,
   isAssistantPreambleBlock,
   isOrphanAssistantFragment,
   isTransientStatusGreeting,
@@ -38,7 +39,7 @@ import {
  * `runRowText`, at the point of display.
  */
 
-export type WorkStatus = "running" | "done" | "failed";
+export type WorkStatus = "running" | "done" | "failed" | "interrupted";
 
 /** Create, rename, move, trash, or duplicate. Content edits leave this unset. */
 export type FileLifecycle =
@@ -249,7 +250,13 @@ export function runWorkGroupText(group: WorkGroup): RunRowText {
   const [inProgress, complete, problem] = labels[group.groupKind];
   const count = group.steps.length;
   return {
-    label: failed ? problem : running ? inProgress : complete,
+    label: failed
+      ? problem
+      : running
+        ? inProgress
+        : group.status === "interrupted"
+          ? "Work interrupted"
+          : complete,
     description: `${count} ${count === 1 ? "action" : "actions"}`,
   };
 }
@@ -472,13 +479,17 @@ export function runCallText(
 ): RunRowText {
   const item = step.item;
   const running = item.status === "running";
-  if (item.status === "failed" && (item.kind === "read" || item.kind === "search")) {
+  if (item.status === "interrupted") return runRowText(step);
+  if (
+    item.status === "failed" &&
+    (item.kind === "read" || item.kind === "search")
+  ) {
     if (item.kind === "search" && item.errorCode === "invalid-search-scope") {
       return { label: "Search path not found", description: item.path };
     }
     return {
       label: item.kind === "read" ? "Read failed" : "Search failed",
-      description: item.kind === "read" ? item.path : item.query ?? item.path,
+      description: item.kind === "read" ? item.path : (item.query ?? item.path),
     };
   }
   switch (item.kind) {
@@ -489,7 +500,11 @@ export function runCallText(
       };
     case "file":
       return {
-        label: fileChangeVerb(item.lifecycle, running ? "running" : "done", true),
+        label: fileChangeVerb(
+          item.lifecycle,
+          running ? "running" : "done",
+          true,
+        ),
         description: item.path,
       };
     case "read": {
@@ -544,6 +559,8 @@ function workGroupStatus(
 ): WorkStatus {
   if (steps.some((step) => step.item.status === "failed")) return "failed";
   if (steps.some((step) => step.item.status === "running")) return "running";
+  if (steps.some((step) => step.item.status === "interrupted"))
+    return "interrupted";
   return "done";
 }
 
@@ -806,13 +823,23 @@ export function buildRunModel(
   // longer driving the turn, nothing is still running — settle the rail so
   // settled turns do not breathe forever or look mid-flight.
   const isRunning = options.isRunning ?? false;
+  const unfinishedStatus: WorkStatus =
+    options.status &&
+    [...PROBLEM_STATUSES, ...INFLIGHT_STATUSES].includes(options.status.status)
+      ? "interrupted"
+      : "done";
   const settledSteps = isRunning
     ? coalesceAdjacentToolSteps(steps)
-    : settleRunningWorkSteps(coalesceAdjacentToolSteps(steps));
+    : settleRunningWorkSteps(
+        coalesceAdjacentToolSteps(steps),
+        unfinishedStatus,
+      );
   const settledFiles = isRunning
     ? files
     : files.map((file) =>
-        file.status === "running" ? { ...file, status: "done" as const } : file,
+        file.status === "running"
+          ? { ...file, status: unfinishedStatus }
+          : file,
       );
 
   return {
@@ -840,14 +867,17 @@ function runQuietSeconds(steps: RunStep[], options: BuildRunModelOptions) {
 }
 
 /** Close open work rows when the turn itself has finished. */
-function settleRunningWorkSteps(steps: RunStep[]): RunStep[] {
+function settleRunningWorkSteps(
+  steps: RunStep[],
+  status: WorkStatus,
+): RunStep[] {
   return steps.map((step) => {
     if (step.kind !== "work" || step.item.status !== "running") {
       return step;
     }
     return {
       ...step,
-      item: { ...step.item, status: "done" },
+      item: { ...step.item, status },
     };
   });
 }
@@ -992,16 +1022,24 @@ function partitionClosingResponse(
   // tools — glued pure-Q&A streams often attach "I'll check…" to the answer.
   const blocks = trailing.map((event) => event.message.trim());
   const { preambles: preambleTexts, answer: answerTexts } =
-    peelAssistantPreambleBlocks(blocks);
+    peelAssistantPreambleBlocks(
+      blocks,
+      trailing.some(isDurableAssistantResponse),
+    );
   const preambleEvents = trailing.slice(0, preambleTexts.length);
   const answerEvents = trailing.slice(preambleTexts.length);
 
   // Single trailing block that still mixes plan + answer as one string.
   if (answerEvents.length === 1) {
     const only = answerEvents[0]!;
-    const parts = structuredCommentaryBlocks(only.message);
+    const parts = isDurableAssistantResponse(only)
+      ? assistantTextBlocks(only.message)
+      : structuredCommentaryBlocks(only.message);
     if (parts.length > 1) {
-      const peeled = peelAssistantPreambleBlocks(parts);
+      const peeled = peelAssistantPreambleBlocks(
+        parts,
+        isDurableAssistantResponse(only),
+      );
       if (peeled.preambles.length > 0) {
         return {
           response: sanitizeResponseEvent({
@@ -1942,6 +1980,13 @@ export function runRowText(step: RunStep): RunRowText {
     return { label: step.event.message || "Waiting for approval" };
   }
   const item = step.item;
+  if (item.status === "interrupted") {
+    const prior = runRowText({ ...step, item: { ...item, status: "running" } });
+    return {
+      label: "Interrupted",
+      description: prior.description ?? prior.label,
+    };
+  }
   switch (item.kind) {
     case "command":
       return {
@@ -1968,13 +2013,15 @@ export function runRowText(step: RunStep): RunRowText {
     case "search":
       return {
         label:
-          item.status === "failed" ? "Search failed" : item.status === "running"
-            ? item.scope === "web"
-              ? "Searching the web"
-              : "Searching project"
-            : item.scope === "web"
-              ? "Searched the web"
-              : "Searched project",
+          item.status === "failed"
+            ? "Search failed"
+            : item.status === "running"
+              ? item.scope === "web"
+                ? "Searching the web"
+                : "Searching project"
+              : item.scope === "web"
+                ? "Searched the web"
+                : "Searched project",
         description: item.query,
       };
     case "memory":
@@ -2113,6 +2160,7 @@ export function fileChangeVerb(
   status: WorkStatus,
   short: boolean,
 ): string {
+  if (status === "interrupted") return "Change interrupted";
   if (!lifecycle) {
     if (status === "running") return short ? "Editing" : "Editing file";
     if (short) return status === "failed" ? "Edit failed" : "Edited";

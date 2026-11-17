@@ -292,6 +292,7 @@ export type {
   TerminalKeepAlive,
   TerminalKeepAlivePhase,
   TerminalPane,
+  TerminalOutputCursor,
   TerminalPaneLayout,
   TerminalPaneStatus,
   TerminalTemplate,

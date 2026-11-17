@@ -345,6 +345,18 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Application commands available only to the main Gyro webview.",
+          "type": "string",
+          "const": "main-commands",
+          "markdownDescription": "Application commands available only to the main Gyro webview."
+        },
+        {
+          "description": "Only the commands used by the menu bar popover.",
+          "type": "string",
+          "const": "menu-bar-commands",
+          "markdownDescription": "Only the commands used by the menu bar popover."
+        },
+        {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
           "type": "string",
           "const": "core:default",

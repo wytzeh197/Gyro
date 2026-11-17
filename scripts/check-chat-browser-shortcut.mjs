@@ -79,6 +79,12 @@ for (const test of [
     expected: [["search", "global"]],
   },
   {
+    name: "Cmd+K clears the focused terminal without opening search",
+    key: "k",
+    terminalFocused: true,
+    expected: [["clear-terminal"]],
+  },
+  {
     name: "explicit workspace shortcut keeps precedence",
     custom: true,
     expected: [["command", "user-command"]],
@@ -119,6 +125,7 @@ for (const test of [
     openCompanionTab: (tab, p) => calls.push([tab, p]),
     addTerminalPane: () => calls.push(["terminal"]),
     openGlobalSearch: (kind) => calls.push(["search", kind]),
+    clearFocusedTerminal: () => { if (!test.terminalFocused) return false; calls.push(["clear-terminal"]); return true; },
     runCommandPaletteCommand: (id) => calls.push(["command", id]),
   };
   try {

@@ -5,10 +5,7 @@
 //! string inside a file the model already read. Both land in the same proposal
 //! store, so the hash guard, atomic replacement, approval review and durable
 //! decision are identical; a string edit only removes the need to re-emit an
-//! entire file to change three lines of it. Immediate string edits of one file
-//! run one at a time. When a sibling edit moves the hash and the matched text
-//! is still there, the same replacement is applied to the current file instead
-//! of failing the tool call.
+//! entire file to change three lines of it. Immediate edits preserve the same stale-base guard as reviewed edits.
 use crate::{
     app::{
         config::load_config_blocking,
@@ -19,7 +16,7 @@ use crate::{
     ide::task_discovery::content_hash,
     state::{managers::with_ide_evidence, provider_run::BoundProviderCapabilityContext},
     stores::open_store,
-    workspace::{files::read_bounded_regular_file, types::FileMutationProposalRequest},
+    workspace::{files::read_workspace_bytes, types::FileMutationProposalRequest},
     workspace_mutations,
 };
 use gyro_core::{
@@ -30,13 +27,6 @@ use serde_json::{json, Value};
 use std::path::Path;
 use tauri::Emitter;
 use uuid::Uuid;
-
-const IMMEDIATE_EDIT_ATTEMPTS: usize = 4;
-
-/// Serializes immediate string edits in this process. The mutation journal
-/// lock covers only the final write, so two tool calls could both snapshot the
-/// same bytes and the second would then fail its hash check.
-static IMMEDIATE_EDIT_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 const WORKSPACE_EDIT_SCHEMA: &str = "gyro.workspace-edit.v1";
 
@@ -125,6 +115,7 @@ pub(super) fn execute(
                 &bound.session_id,
                 bound.turn_id.clone(),
                 Some(&root_id),
+                &bound.workspace,
                 &candidate,
                 &path,
                 arguments,
@@ -212,6 +203,7 @@ struct Replacement {
 /// Every failure here happens before a proposal exists, so a rejected edit
 /// never leaves a reviewable proposal behind.
 fn string_replacement(
+    root: &Path,
     candidate: &Path,
     path: &str,
     arguments: &Value,
@@ -221,8 +213,12 @@ fn string_replacement(
             "{path} does not exist. Recheck the exact workspace-root-relative path in the request and list the root before guessing another location. Use gyro_workspace_propose_edit only if the task actually calls for creating a new file."
         );
     }
-    let (bytes, _) =
-        read_bounded_regular_file(candidate, MAX_WORKSPACE_FILE_EDIT_BYTES, "workspace file")?;
+    let (bytes, _) = read_workspace_bytes(
+        root,
+        candidate,
+        MAX_WORKSPACE_FILE_EDIT_BYTES,
+        "workspace file",
+    )?;
     if bytes.len() > MAX_WORKSPACE_FILE_EDIT_BYTES {
         anyhow::bail!("workspace file is too large to edit in Gyro");
     }
@@ -292,83 +288,37 @@ struct CommittedEdit {
     line: u64,
 }
 
-fn hash_conflict(error: &anyhow::Error) -> bool {
-    let message = error.to_string();
-    message.contains("file changed on disk")
-        || message.contains("file changed after approval was requested")
-}
-
-/// Apply one exact replacement. Reviewed edits keep the caller's hash guard.
-/// Immediate edits hold the process gate and, when that guard is stale only
-/// because another edit landed first, retry against the current text.
+/// Preserve the caller's observed base, including in full-access mode. A
+/// matching string alone cannot establish that an intervening edit was safe.
 fn commit_string_edit(
     store: &SessionStore,
     session_id: &str,
     turn_id: Option<String>,
     root_id: Option<&str>,
+    root: &Path,
     candidate: &Path,
     path: &str,
     arguments: &Value,
     apply_immediately: bool,
 ) -> anyhow::Result<CommittedEdit> {
-    let _gate = apply_immediately.then(|| {
-        IMMEDIATE_EDIT_GATE
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-    });
-    let mut arguments = arguments.clone();
-    let attempts = if apply_immediately {
-        IMMEDIATE_EDIT_ATTEMPTS
-    } else {
-        1
-    };
-    let mut last_error = None;
-    for attempt in 0..attempts {
-        if attempt > 0 {
-            if let Some(object) = arguments.as_object_mut() {
-                object.remove("expectedHash");
-            }
-        }
-        let replacement = match string_replacement(candidate, path, &arguments) {
-            Ok(replacement) => replacement,
-            Err(error) => {
-                if attempt + 1 < attempts && hash_conflict(&error) {
-                    last_error = Some(error);
-                    continue;
-                }
-                return Err(error);
-            }
-        };
-        match workspace_mutations::create_file_mutation_proposal_at_root(
-            store,
-            FileMutationProposalRequest {
-                session_id: session_id.to_string(),
-                turn_id: turn_id.clone(),
-                path: path.to_string(),
-                content: replacement.content,
-                expected_hash: Some(replacement.base_hash),
-            },
-            apply_immediately,
-            root_id,
-        ) {
-            Ok(proposal) => {
-                return Ok(CommittedEdit {
-                    proposal,
-                    count: replacement.count,
-                    line: replacement.line,
-                });
-            }
-            Err(error) => {
-                if attempt + 1 < attempts && hash_conflict(&error) {
-                    last_error = Some(error);
-                    continue;
-                }
-                return Err(error);
-            }
-        }
-    }
-    Err(last_error
-        .unwrap_or_else(|| anyhow::anyhow!("file changed on disk; re-read it before editing")))
+    let replacement = string_replacement(root, candidate, path, arguments)?;
+    let proposal = workspace_mutations::create_file_mutation_proposal_at_root(
+        store,
+        FileMutationProposalRequest {
+            session_id: session_id.to_string(),
+            turn_id,
+            path: path.to_string(),
+            content: replacement.content,
+            expected_hash: Some(replacement.base_hash),
+        },
+        apply_immediately,
+        root_id,
+    )?;
+    Ok(CommittedEdit {
+        proposal,
+        count: replacement.count,
+        line: replacement.line,
+    })
 }
 
 /// A proposed edit is meaningless while the user has unsaved changes in the
@@ -381,6 +331,10 @@ pub(super) fn assert_no_unsaved_editor_changes(
     path: &str,
 ) -> anyhow::Result<()> {
     let dirty = with_ide_evidence(app, bound, |latest| {
+        anyhow::ensure!(
+            latest.buffers_complete,
+            "Editor buffer coverage is incomplete; close extra tabs before editing"
+        );
         Ok(latest.buffers.iter().any(|buffer| {
             buffer.get("path").and_then(Value::as_str) == Some(path)
                 && buffer
@@ -573,7 +527,7 @@ mod tests {
 
     fn workspace_with_file(content: &str) -> (tempfile::TempDir, PathBuf) {
         let temp = tempfile::tempdir().unwrap();
-        let target = temp.path().join("sample.ts");
+        let target = temp.path().canonicalize().unwrap().join("sample.ts");
         fs::write(&target, content).unwrap();
         (temp, target)
     }
@@ -585,8 +539,13 @@ mod tests {
     #[test]
     fn unique_match_is_replaced_and_reports_its_line() {
         let (_temp, target) = workspace_with_file("one\ntwo\nthree\n");
-        let replacement =
-            string_replacement(&target, "sample.ts", &arguments("two", "TWO", false)).unwrap();
+        let replacement = string_replacement(
+            target.parent().unwrap(),
+            &target,
+            "sample.ts",
+            &arguments("two", "TWO", false),
+        )
+        .unwrap();
         assert_eq!(replacement.content, "one\nTWO\nthree\n");
         assert_eq!(replacement.count, 1);
         assert_eq!(replacement.line, 2);
@@ -596,21 +555,36 @@ mod tests {
     #[test]
     fn absent_match_is_rejected_before_any_proposal_exists() {
         let (_temp, target) = workspace_with_file("one\ntwo\n");
-        let error = string_replacement(&target, "sample.ts", &arguments("nope", "x", false))
-            .unwrap_err()
-            .to_string();
+        let error = string_replacement(
+            target.parent().unwrap(),
+            &target,
+            "sample.ts",
+            &arguments("nope", "x", false),
+        )
+        .unwrap_err()
+        .to_string();
         assert!(error.contains("was not found in sample.ts"), "{error}");
     }
 
     #[test]
     fn ambiguous_match_requires_replace_all() {
         let (_temp, target) = workspace_with_file("dup\ndup\n");
-        let error = string_replacement(&target, "sample.ts", &arguments("dup", "x", false))
-            .unwrap_err()
-            .to_string();
+        let error = string_replacement(
+            target.parent().unwrap(),
+            &target,
+            "sample.ts",
+            &arguments("dup", "x", false),
+        )
+        .unwrap_err()
+        .to_string();
         assert!(error.contains("matches 2 places"), "{error}");
-        let replacement =
-            string_replacement(&target, "sample.ts", &arguments("dup", "x", true)).unwrap();
+        let replacement = string_replacement(
+            target.parent().unwrap(),
+            &target,
+            "sample.ts",
+            &arguments("dup", "x", true),
+        )
+        .unwrap();
         assert_eq!(replacement.content, "x\nx\n");
         assert_eq!(replacement.count, 2);
         assert_eq!(replacement.line, 1);
@@ -619,8 +593,13 @@ mod tests {
     #[test]
     fn empty_new_string_deletes_the_match() {
         let (_temp, target) = workspace_with_file("keep\ndrop\nkeep\n");
-        let replacement =
-            string_replacement(&target, "sample.ts", &arguments("drop\n", "", false)).unwrap();
+        let replacement = string_replacement(
+            target.parent().unwrap(),
+            &target,
+            "sample.ts",
+            &arguments("drop\n", "", false),
+        )
+        .unwrap();
         assert_eq!(replacement.content, "keep\nkeep\n");
     }
 
@@ -628,6 +607,7 @@ mod tests {
     fn deleting_an_indented_line_takes_its_indentation_with_it() {
         let (_temp, target) = workspace_with_file("a\n    indented\nb\n");
         let replacement = string_replacement(
+            target.parent().unwrap(),
             &target,
             "sample.ts",
             &arguments("    indented\n", "", false),
@@ -645,13 +625,13 @@ mod tests {
             "newString": "two",
             "expectedHash": content_hash(b"something else")
         });
-        let error = string_replacement(&target, "sample.ts", &stale)
+        let error = string_replacement(target.parent().unwrap(), &target, "sample.ts", &stale)
             .unwrap_err()
             .to_string();
         assert!(error.contains("changed on disk"), "{error}");
 
         let no_op = arguments("one", "one", false);
-        let error = string_replacement(&target, "sample.ts", &no_op)
+        let error = string_replacement(target.parent().unwrap(), &target, "sample.ts", &no_op)
             .unwrap_err()
             .to_string();
         assert!(error.contains("identical"), "{error}");
@@ -700,6 +680,7 @@ mod tests {
     fn missing_file_is_rejected_with_the_create_tool_named() {
         let temp = tempfile::tempdir().unwrap();
         let error = string_replacement(
+            &temp.path().canonicalize().unwrap(),
             &temp.path().join("absent.ts"),
             "absent.ts",
             &arguments("a", "b", false),
@@ -750,10 +731,10 @@ mod tests {
     }
 
     #[test]
-    fn immediate_edits_apply_when_a_sibling_moved_the_read_hash() {
+    fn immediate_edits_reject_a_sibling_that_moved_the_read_hash() {
         let temp = tempfile::tempdir().unwrap();
         let (store, session_id) = session_for(temp.path());
-        let target = temp.path().join("sample.ts");
+        let target = temp.path().canonicalize().unwrap().join("sample.ts");
         let original = "alpha\nbeta\n";
         fs::write(&target, original).unwrap();
         let hash = content_hash(original.as_bytes());
@@ -762,6 +743,7 @@ mod tests {
             &session_id,
             None,
             None,
+            target.parent().unwrap(),
             &target,
             "sample.ts",
             &json!({
@@ -778,6 +760,7 @@ mod tests {
             &session_id,
             None,
             None,
+            target.parent().unwrap(),
             &target,
             "sample.ts",
             &json!({
@@ -787,22 +770,23 @@ mod tests {
             }),
             true,
         )
-        .unwrap();
-        assert_eq!(second.proposal.status.as_str(), "applied");
-        assert_eq!(fs::read_to_string(&target).unwrap(), "ALPHA\nBETA\n");
+        .unwrap_err();
+        assert!(second.to_string().contains("changed on disk"));
+        assert_eq!(fs::read_to_string(&target).unwrap(), "ALPHA\nbeta\n");
     }
 
     #[test]
     fn reviewed_edit_still_rejects_a_stale_hash() {
         let temp = tempfile::tempdir().unwrap();
         let (store, session_id) = session_for(temp.path());
-        let target = temp.path().join("sample.ts");
+        let target = temp.path().canonicalize().unwrap().join("sample.ts");
         fs::write(&target, "alpha\n").unwrap();
         let error = commit_string_edit(
             &store,
             &session_id,
             None,
             None,
+            target.parent().unwrap(),
             &target,
             "sample.ts",
             &json!({
@@ -822,19 +806,20 @@ mod tests {
     fn immediate_edit_stops_when_the_matched_text_is_gone() {
         let temp = tempfile::tempdir().unwrap();
         let (store, session_id) = session_for(temp.path());
-        let target = temp.path().join("sample.ts");
+        let target = temp.path().canonicalize().unwrap().join("sample.ts");
         fs::write(&target, "alpha\n").unwrap();
         let error = commit_string_edit(
             &store,
             &session_id,
             None,
             None,
+            target.parent().unwrap(),
             &target,
             "sample.ts",
             &json!({
                 "oldString": "before",
                 "newString": "after",
-                "expectedHash": content_hash(b"before\n")
+                "expectedHash": content_hash(b"alpha\n")
             }),
             true,
         )

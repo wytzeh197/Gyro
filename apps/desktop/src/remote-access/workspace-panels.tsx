@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { askTextValue, confirmAction } from "@gyro-dev/ui";
 import type {
   Session,
@@ -24,7 +24,14 @@ export function RemoteFiles({
   const key = `${session.id}:${view.selectedFile ?? ""}`;
   const buffer = view.buffers[key];
   const theme = useRemoteTheme();
+  const readRequest = useRef(0);
+  const readPath = useRef<string | undefined>(undefined);
+  const latestView = useRef(view);
+  latestView.current = view;
   async function openFile(path: string, reload = false) {
+    const request = ++readRequest.current;
+    readPath.current = path;
+    const bufferKey = `${session.id}:${path}`;
     const existing = view.buffers[`${session.id}:${path}`];
     if (existing && !reload) {
       setView((previous) => ({ ...previous, selectedFile: path }));
@@ -45,14 +52,22 @@ export function RemoteFiles({
       path,
     });
     if (file)
-      setView((previous) => ({
-        ...previous,
-        selectedFile: path,
-        buffers: {
-          ...previous.buffers,
-          [`${session.id}:${path}`]: { file, text: file.content },
-        },
-      }));
+      setView((previous) => {
+        if (
+          request !== readRequest.current ||
+          previous.sessionId !== session.id ||
+          previous.buffers[bufferKey] !== existing
+        )
+          return previous;
+        return {
+          ...previous,
+          selectedFile: path,
+          buffers: {
+            ...previous.buffers,
+            [bufferKey]: { file, text: file.content },
+          },
+        };
+      });
   }
   async function save() {
     if (!buffer || !view.selectedFile) return;
@@ -64,13 +79,16 @@ export function RemoteFiles({
       expectedHash: buffer.file.contentHash,
     });
     if (file)
-      setView((previous) => ({
-        ...previous,
-        buffers: {
-          ...previous.buffers,
-          [key]: { file, text: previous.buffers[key]?.text ?? file.content },
-        },
-      }));
+      setView((previous) => {
+        const current = previous.buffers[key];
+        // A rename, removal or newer completed save owns the current base.
+        // Typing during this save is retained against the newly saved base.
+        if (!current || current.file !== buffer.file) return previous;
+        return {
+          ...previous,
+          buffers: { ...previous.buffers, [key]: { file, text: current.text } },
+        };
+      });
   }
   async function pathAction(
     action: "createFile" | "createDirectory" | "rename" | "delete",
@@ -88,7 +106,20 @@ export function RemoteFiles({
             initialValue: path,
           })) ?? undefined)
         : undefined;
-    if (action === "rename" && !name) return;
+    if (action === "rename" && (!name || name === path)) return;
+    const destinationKey = `${session.id}:${name ?? ""}`;
+    const destination = latestView.current.buffers[destinationKey];
+    if (
+      action === "rename" &&
+      name !== path &&
+      destination &&
+      destination.text !== destination.file.content
+    ) {
+      w.setError(
+        "The destination has an unsaved editor draft. Save or copy that draft before renaming this file.",
+      );
+      return;
+    }
     if (
       action === "delete" &&
       !(await confirmAction(`Move ${path} to the host's trash?`))
@@ -103,10 +134,36 @@ export function RemoteFiles({
       expectedHash: buffer?.file.contentHash,
     });
     if (result !== undefined && (action === "delete" || action === "rename")) {
+      if (readPath.current === path) readRequest.current++;
+      const oldKey = `${session.id}:${path}`;
+      const current = latestView.current.buffers[oldKey];
+      if (action === "delete" && current && current.text !== buffer?.text)
+        w.setError(
+          "The file was deleted on the host. Your newer editor contents were kept so you can copy them.",
+        );
+      const target = latestView.current.buffers[destinationKey];
+      if (
+        action === "rename" &&
+        target &&
+        destinationKey !== oldKey &&
+        target.text !== target.file.content
+      )
+        w.setError(
+          "The file was renamed on the host. Both editor drafts were kept because the destination has newer unsaved text.",
+        );
       setView((previous) => {
         const buffers = { ...previous.buffers };
-        const oldKey = `${session.id}:${path}`;
         const old = buffers[oldKey];
+        if (action === "delete" && old && old.text !== buffer?.text)
+          return previous;
+        const target = buffers[destinationKey];
+        if (
+          action === "rename" &&
+          target &&
+          destinationKey !== oldKey &&
+          target.text !== target.file.content
+        )
+          return previous;
         delete buffers[oldKey];
         if (action === "rename" && name && old)
           buffers[`${session.id}:${name}`] = {
@@ -116,7 +173,12 @@ export function RemoteFiles({
         return {
           ...previous,
           buffers,
-          selectedFile: action === "rename" ? name : undefined,
+          selectedFile:
+            previous.sessionId === session.id && previous.selectedFile === path
+              ? action === "rename"
+                ? name
+                : undefined
+              : previous.selectedFile,
         };
       });
     }
@@ -468,6 +530,8 @@ function paneFromSnapshot(snapshot: TerminalSnapshot): TerminalPane {
     profileId: "remote-shell",
     command: "/bin/zsh",
     output: snapshot.output ?? "",
+    outputCursor: snapshot.outputCursor,
+    outputComplete: snapshot.outputComplete,
     status: snapshot.status,
     lastEvent: "Remote host terminal",
     workspaceMode: "local",

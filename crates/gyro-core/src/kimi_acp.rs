@@ -294,6 +294,7 @@ struct KimiAcpConnection {
     declined_permission: bool,
     managed_mode: Option<String>,
     awaiting_input: bool,
+    file_read_hashes: std::collections::HashMap<PathBuf, String>,
 }
 
 impl Drop for KimiAcpConnection {
@@ -421,6 +422,7 @@ impl KimiAcpConnection {
         Ok(Self {
             managed_mode,
             awaiting_input: false,
+            file_read_hashes: Default::default(),
             provider_label: request.provider_label.clone(),
             child,
             stdin,
@@ -753,7 +755,7 @@ where
     Delta: FnMut(&str),
     Activity: FnMut(&KimiAcpActivity),
     Approval: FnMut(&KimiAcpApprovalRequest) -> Result<KimiAcpApprovalDecision>,
-    WriteFile: FnMut(&Path, &str) -> Result<()>,
+    WriteFile: FnMut(&Path, &str, Option<&str>) -> Result<()>,
 {
     run_kimi_acp_with_usage_probe(
         request,
@@ -777,7 +779,7 @@ where
     Delta: FnMut(&str),
     Activity: FnMut(&KimiAcpActivity),
     Approval: FnMut(&KimiAcpApprovalRequest) -> Result<KimiAcpApprovalDecision>,
-    WriteFile: FnMut(&Path, &str) -> Result<()>,
+    WriteFile: FnMut(&Path, &str, Option<&str>) -> Result<()>,
 {
     let started_at = Instant::now();
     crate::timing::mark(crate::timing::Stage::ProcessStart);
@@ -1307,7 +1309,7 @@ where
     Delta: FnMut(&str),
     Activity: FnMut(&KimiAcpActivity),
     Approval: FnMut(&KimiAcpApprovalRequest) -> Result<KimiAcpApprovalDecision>,
-    WriteFile: FnMut(&Path, &str) -> Result<()>,
+    WriteFile: FnMut(&Path, &str, Option<&str>) -> Result<()>,
 {
     let Some(resume_session_id) = request.resume_session_id.as_deref() else {
         let (session_id, offered_models) = create_acp_session(
@@ -1415,7 +1417,7 @@ where
     Delta: FnMut(&str),
     Activity: FnMut(&KimiAcpActivity),
     Approval: FnMut(&KimiAcpApprovalRequest) -> Result<KimiAcpApprovalDecision>,
-    WriteFile: FnMut(&Path, &str) -> Result<()>,
+    WriteFile: FnMut(&Path, &str, Option<&str>) -> Result<()>,
 {
     let new_id = connection.send_request(
         "session/new",
@@ -1727,7 +1729,7 @@ where
     Delta: FnMut(&str),
     Activity: FnMut(&KimiAcpActivity),
     Approval: FnMut(&KimiAcpApprovalRequest) -> Result<KimiAcpApprovalDecision>,
-    WriteFile: FnMut(&Path, &str) -> Result<()>,
+    WriteFile: FnMut(&Path, &str, Option<&str>) -> Result<()>,
 {
     // The live thinking line: a provider streams its reasoning as
     // `agent_thought_chunk` deltas that never reach the reply text. Hold them
@@ -1893,8 +1895,11 @@ where
                 let Some(id) = message.get("id").cloned() else {
                     continue;
                 };
-                match read_workspace_text_file(workspace, &params) {
-                    Ok(content) => connection.send_result(id, json!({"content": content}))?,
+                match read_workspace_text_file_with_hash(workspace, &params) {
+                    Ok((content, path, hash)) => {
+                        connection.file_read_hashes.insert(path, hash);
+                        connection.send_result(id, json!({"content": content}))?;
+                    }
                     Err(error) => {
                         connection.send_error(id, -32001, &redact_secrets(&error.to_string()))?
                     }
@@ -1904,9 +1909,15 @@ where
                 let Some(id) = message.get("id").cloned() else {
                     continue;
                 };
-                match prepare_workspace_write(workspace, &params)
-                    .and_then(|(path, content)| on_write_file(&path, &content))
-                {
+                match prepare_workspace_write(workspace, &params).and_then(|(path, content)| {
+                    let observed = connection.file_read_hashes.get(&path).cloned();
+                    on_write_file(&path, &content, observed.as_deref())?;
+                    // A successful write becomes this connection's next known base.
+                    connection
+                        .file_read_hashes
+                        .insert(path, crate::mutations::content_hash(content.as_bytes()));
+                    Ok(())
+                }) {
                     Ok(()) => connection.send_result(id, json!({}))?,
                     Err(error) => {
                         connection.send_error(id, -32001, &redact_secrets(&error.to_string()))?
@@ -2343,7 +2354,15 @@ fn permission_option_id(params: &Value, decision: KimiAcpApprovalDecision) -> Op
     }
 }
 
+#[cfg(test)]
 fn read_workspace_text_file(workspace: &Path, params: &Value) -> Result<String> {
+    Ok(read_workspace_text_file_with_hash(workspace, params)?.0)
+}
+
+fn read_workspace_text_file_with_hash(
+    workspace: &Path,
+    params: &Value,
+) -> Result<(String, PathBuf, String)> {
     let requested = params
         .get("path")
         .and_then(Value::as_str)
@@ -2362,6 +2381,7 @@ fn read_workspace_text_file(workspace: &Path, params: &Value) -> Result<String> 
         anyhow::bail!("ACP file exceeds the {} byte limit", ACP_MAX_FILE_BYTES);
     }
     let content = std::fs::read_to_string(&path)?;
+    let hash = crate::mutations::content_hash(content.as_bytes());
     // Redact the whole file before slicing so multiline credential context is
     // retained, using the same position-preserving policy as governed reads.
     let content = crate::security::redact_secrets_preserving_positions(&content);
@@ -2375,12 +2395,16 @@ fn read_workspace_text_file(workspace: &Path, params: &Value) -> Result<String> 
         .and_then(Value::as_u64)
         .unwrap_or(u64::MAX)
         .min(10_000) as usize;
-    Ok(content
-        .lines()
-        .skip(line.saturating_sub(1))
-        .take(limit)
-        .collect::<Vec<_>>()
-        .join("\n"))
+    Ok((
+        content
+            .lines()
+            .skip(line.saturating_sub(1))
+            .take(limit)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        path,
+        hash,
+    ))
 }
 
 fn prepare_workspace_write(workspace: &Path, params: &Value) -> Result<(PathBuf, String)> {
@@ -2751,7 +2775,7 @@ done
             |_| {},
             |_| {},
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         );
         assert!(result
             .unwrap_err()
@@ -2787,7 +2811,7 @@ done
                 |_| {},
                 |_| {},
                 |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-                |_, _| Ok(()),
+                |_, _, _| Ok(()),
             );
             assert_eq!(result.is_err(), interrupted);
             if let Ok(output) = result {
@@ -2836,7 +2860,7 @@ done
                 }
             },
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap();
         assert_eq!(
@@ -2908,7 +2932,7 @@ done
                     }
                 },
                 |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-                |_, _| Ok(()),
+                |_, _, _| Ok(()),
             )
             .unwrap();
             (output, live_context)
@@ -2983,7 +3007,7 @@ done
                     }
                 },
                 |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-                |_, _| Ok(()),
+                |_, _, _| Ok(()),
             )
             .unwrap();
             assert_eq!(output.usage_observation.tokens.total_tokens, 333519);
@@ -3109,7 +3133,7 @@ done
                 }
             },
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap();
         assert!(
@@ -3177,7 +3201,7 @@ done
                 }
             },
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap();
         let measured = crate::acp_usage::AcpContextUsage {
@@ -3219,7 +3243,7 @@ done
             |_| {},
             |_| {},
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap();
         assert!(!output.response.is_empty());
@@ -3340,7 +3364,7 @@ done
             |_| {},
             |_| {},
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap_err()
         .to_string();
@@ -3520,7 +3544,7 @@ done
             |text| deltas.push_str(text),
             |_| {},
             |_| panic!("metadata must not request approval"),
-            |_, _| panic!("metadata must not write files"),
+            |_, _, _| panic!("metadata must not write files"),
         )
         .unwrap();
         assert_eq!(output.response, "original answer");
@@ -3583,7 +3607,7 @@ done
                 }
             },
             |_| panic!("metadata must not request approval"),
-            |_, _| panic!("metadata must not write files"),
+            |_, _, _| panic!("metadata must not write files"),
         )
         .unwrap();
         assert_eq!(deltas, "original answer");
@@ -3637,7 +3661,7 @@ done
                 |text| deltas.push_str(text),
                 |_| {},
                 |_| panic!("unexpected approval"),
-                |_, _| Ok(()),
+                |_, _, _| Ok(()),
             )
             .unwrap();
             assert_eq!(output.response, "original answer");
@@ -3682,7 +3706,7 @@ done
             |text| deltas.push_str(text),
             |_| {},
             |_| panic!("unexpected approval"),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap();
         // The fixture stalls the first /usage for 10s. The 1s probe deadline
@@ -3730,7 +3754,7 @@ done
                 |_| {},
                 |_| {},
                 |_| panic!("unexpected approval"),
-                |_, _| Ok(()),
+                |_, _, _| Ok(()),
             )
             .unwrap();
             assert_eq!(output.resumed, resumed);
@@ -3765,7 +3789,7 @@ done
             |_| panic!("unexpected text"),
             |_| {},
             |_| panic!("unexpected approval"),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         );
         assert!(result
             .unwrap_err()
@@ -3799,7 +3823,7 @@ done
             |_| panic!("internal report leaked"),
             |_| {},
             |_| panic!("unexpected approval"),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         );
         cancelling.join().unwrap();
         assert!(result.unwrap_err().to_string().contains("cancelled"));
@@ -3847,7 +3871,7 @@ done
             |text| deltas.push_str(text),
             |_| {},
             |_| panic!("unexpected approval"),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         );
         cancelling.join().unwrap();
         assert!(result.unwrap_err().to_string().contains("cancelled"));
@@ -3918,7 +3942,7 @@ done
             |_| {},
             |_| {},
             |_| Ok(KimiAcpApprovalDecision::AllowOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap();
         assert_eq!(output.stop_reason, "end_turn");
@@ -3947,7 +3971,7 @@ done
                 approvals += 1;
                 Ok(KimiAcpApprovalDecision::AllowOnce)
             },
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap();
         assert_eq!(approvals, 1, "the colliding request must be answered");
@@ -3977,7 +4001,7 @@ done
                 approvals += 1;
                 Ok(KimiAcpApprovalDecision::RejectOnce)
             },
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap();
         assert_eq!(approvals, 0, "full access must not open a card");
@@ -4005,7 +4029,7 @@ done
                 |_| {},
                 |_| {},
                 |_| Ok(KimiAcpApprovalDecision::AllowOnce),
-                |_, _| Ok(()),
+                |_, _, _| Ok(()),
             );
             assert!(result.is_err(), "invalid completion accepted: {completion}");
         }
@@ -4056,7 +4080,7 @@ done
             |text| streamed.push_str(text),
             |_| {},
             |_| Ok(KimiAcpApprovalDecision::AllowOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .expect("one cancelled prompt must not fail the turn");
         assert_eq!(output.stop_reason, "end_turn");
@@ -4125,7 +4149,7 @@ done
             |_| {},
             |_| {},
             |_| Ok(KimiAcpApprovalDecision::AllowOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .expect("end_turn plus truncated must continue");
         assert_eq!(output.stop_reason, "end_turn");
@@ -4146,7 +4170,7 @@ done
             |_| {},
             |_| {},
             |_| Ok(KimiAcpApprovalDecision::AllowOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .expect("the streamed answer is kept");
         assert_eq!(output.stop_reason, "end_turn");
@@ -4168,7 +4192,7 @@ done
             |_| {},
             |_| {},
             |_| Ok(KimiAcpApprovalDecision::AllowOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .expect("a plain end_turn is a finished answer");
         assert_eq!(output.stop_reason, "end_turn");
@@ -4227,7 +4251,7 @@ done
             |text| streamed.push_str(text),
             |_| {},
             |_| Ok(KimiAcpApprovalDecision::AllowOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .expect("an output-limit stop must not end the turn");
         assert_eq!(output.stop_reason, "end_turn");
@@ -4251,7 +4275,7 @@ done
             |_| {},
             |_| {},
             |_| Ok(KimiAcpApprovalDecision::AllowOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .expect("the streamed answer is real work and must be kept");
         assert_eq!(output.stop_reason, "max_tokens");
@@ -4351,7 +4375,7 @@ done
                 |text| streamed.push_str(text),
                 |_| {},
                 |_| Ok(KimiAcpApprovalDecision::AllowOnce),
-                |_, _| Ok(()),
+                |_, _, _| Ok(()),
             );
             assert!(
                 !streamed.is_empty(),
@@ -4422,7 +4446,7 @@ done
                     permissions += 1;
                     Ok(KimiAcpApprovalDecision::RejectOnce)
                 },
-                |_, _| panic!("Denied command must not write a file"),
+                |_, _, _| panic!("Denied command must not write a file"),
             )
             .unwrap();
             assert_eq!(permissions, 1);
@@ -4489,7 +4513,7 @@ done
                 |text| streamed.push_str(text),
                 |_| {},
                 |_| panic!("Input is not tool consent"),
-                |_, _| panic!("Input must not write files"),
+                |_, _, _| panic!("Input must not write files"),
             )
             .unwrap();
             assert!(output.response.contains(expected));
@@ -4538,7 +4562,8 @@ exec "$GYRO_TEST_OPENCODE" --pure acp
             let mut delta = |_: &str| {};
             let mut activity = |_: &KimiAcpActivity| {};
             let mut approval = |_: &KimiAcpApprovalRequest| Ok(KimiAcpApprovalDecision::RejectOnce);
-            let mut write = |_: &Path, _: &str| anyhow::bail!("protocol probe must not write");
+            let mut write =
+                |_: &Path, _: &str, _: Option<&str>| anyhow::bail!("protocol probe must not write");
             let id = connection
                 .send_request(
                     "initialize",
@@ -4644,7 +4669,7 @@ done
                 |_| {},
                 |_| {},
                 |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-                |_, _| Ok(()),
+                |_, _, _| Ok(()),
             );
             if reject_model {
                 assert!(result
@@ -4818,7 +4843,7 @@ done
             |delta| deltas.push(delta.to_string()),
             |activity| activities.push(activity.clone()),
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap();
         assert_eq!(output.session_id, "fresh-session");
@@ -4871,7 +4896,7 @@ done
             |_| {},
             |_| {},
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap();
         assert_eq!(output.session_id, "handoff-session");
@@ -4924,7 +4949,7 @@ done
             |_| {},
             |_| {},
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap();
         assert_eq!(output.session_id, "fresh-after-failed-reopen");
@@ -4969,7 +4994,7 @@ done
             |_| {},
             |activity| activities.push(activity.clone()),
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap();
         // A turn also publishes a live context-usage row, so the tool call is no longer
@@ -5019,7 +5044,7 @@ done
             |_| {},
             |activity| activities.push(activity.clone()),
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap();
         // The live context-usage row published while traffic is estimated is not the tool call;
@@ -5079,7 +5104,7 @@ done
             |_| {},
             |_| {},
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap();
         assert_eq!(output.response, "ready");
@@ -5128,7 +5153,7 @@ done
             |delta| deltas.push_str(delta),
             |activity| activities.push(activity.clone()),
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap();
         assert!(output.resumed);
@@ -5177,7 +5202,7 @@ done
                 approvals += 1;
                 Ok(KimiAcpApprovalDecision::AllowOnce)
             },
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap();
         assert!(output.resumed);
@@ -5199,7 +5224,7 @@ done
             |_| {},
             |_| {},
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap_err()
         .to_string();
@@ -5218,7 +5243,7 @@ done
             |_| {},
             |_| {},
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap_err()
         .to_string();
@@ -5280,7 +5305,7 @@ done
             |_| {},
             |_| {},
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
-            |_, _| Ok(()),
+            |_, _, _| Ok(()),
         )
         .unwrap_err()
         .to_string();

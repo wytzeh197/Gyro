@@ -277,6 +277,7 @@ pub(crate) fn validate_chat_context(request: &ProviderChatRequest) -> Result<(),
         return Err(format!("attach at most {MAX_CHAT_VIDEOS} videos per turn"));
     }
     let mut total_bytes = 0_u64;
+    let mut inline_snapshot_bytes = 0_u64;
     for attachment in &request.attachments {
         validate_attachment_name(&attachment.name)?;
         let path = PathBuf::from(&attachment.path);
@@ -383,6 +384,7 @@ pub(crate) fn validate_chat_context(request: &ProviderChatRequest) -> Result<(),
             attachment.kind.as_str(),
             "ide-snapshot" | "browser-snapshot" | "terminal-output"
         ) {
+            inline_snapshot_bytes = inline_snapshot_bytes.saturating_add(metadata.len());
             if metadata.len() > MAX_CHAT_IDE_SNAPSHOT_BYTES {
                 return Err(format!(
                     "{} exceeds the 128 KB editor snapshot limit",
@@ -422,7 +424,40 @@ pub(crate) fn validate_chat_context(request: &ProviderChatRequest) -> Result<(),
             ));
         }
     }
+    let budget = inline_snapshot_budget(
+        crate::provider_context::provider_model_context_window(
+            &request.provider_id,
+            request.model_id.as_deref(),
+        ),
+        request.message.len() as u64,
+    );
+    if inline_snapshot_bytes > budget {
+        return Err(format!("Attached text snapshots total {} KiB; this model's per-turn snapshot budget is {} KiB. Remove snapshots or attach smaller excerpts before sending.",
+            inline_snapshot_bytes.div_ceil(1024), budget / 1024));
+    }
     Ok(())
+}
+
+fn inline_snapshot_budget(window: Option<u64>, message_bytes: u64) -> u64 {
+    // Byte count is a conservative token bound for arbitrary source text. Keep
+    // half the model window for instructions, history, tools and the response;
+    // never silently truncate an immutable snapshot.
+    (window.unwrap_or(32_768) / 2)
+        .min(256 * 1024)
+        .saturating_sub(message_bytes)
+}
+
+#[cfg(test)]
+mod snapshot_budget_tests {
+    use super::*;
+    #[test]
+    fn aggregate_snapshots_respect_small_unknown_and_large_windows() {
+        assert_eq!(inline_snapshot_budget(Some(128_000), 4_000), 60_000);
+        assert_eq!(inline_snapshot_budget(None, 0), 16_384);
+        assert_eq!(inline_snapshot_budget(Some(1_000_000), 0), 256 * 1024);
+        assert_eq!(inline_snapshot_budget(Some(8_000), 9_000), 0);
+        assert!(16 * 128 * 1024 > inline_snapshot_budget(Some(128_000), 0));
+    }
 }
 
 /// Local transcript for a provider turn that cannot resume a foreign agent

@@ -83,6 +83,23 @@ pub(crate) fn git_status_stamp(
             Ok(metadata) => {
                 material.push('\t');
                 material.push_str(&metadata.len().to_string());
+                // Editors and sync tools can preserve mtime on an in-place
+                // rewrite or atomic replacement. Match the line-count cache's
+                // identity/change-time checks before reusing the whole status.
+                #[cfg(unix)]
+                {
+                    use std::fmt::Write;
+                    use std::os::unix::fs::MetadataExt;
+                    let _ = write!(
+                        material,
+                        "\t{}\t{}\t{}\t{}\t{}",
+                        metadata.dev(),
+                        metadata.ino(),
+                        metadata.ctime(),
+                        metadata.ctime_nsec(),
+                        metadata.mode()
+                    );
+                }
                 if let Ok(modified) = metadata.modified() {
                     if let Ok(elapsed) = modified.duration_since(SystemTime::UNIX_EPOCH) {
                         material.push('\t');
@@ -99,7 +116,16 @@ pub(crate) fn git_status_stamp(
 pub(crate) fn cached_git_status(repo_root: &Path, stamp: &str) -> Option<SourceControlStatus> {
     let cache = git_status_cache().lock().ok()?;
     let (cached_stamp, status) = cache.get(repo_root)?;
-    if cached_stamp != stamp {
+    if cached_stamp != stamp
+        || status.stats_partial
+        || status.history_error.is_some()
+        || status
+            .compared_to_main
+            .as_ref()
+            .is_some_and(|comparison| comparison.partial)
+    {
+        // Keep incomplete snapshots for timeout fallback, but retry failed
+        // detail reads even when the working tree has not changed.
         return None;
     }
     let mut status = status.clone();
@@ -316,6 +342,25 @@ fn inspect_git_status_before_inner(
     repository_state.apply(&mut status);
     if detailed {
         let stamp = git_status_stamp(&repo_root, &root, &output.stdout, &status.files, deadline);
+        if let Some(mut cached) = cached_git_status(&root, &stamp) {
+            repository_state.apply(&mut cached);
+            return Ok(cached);
+        }
+        let _details = match super::detail_admission::acquire(&root, deadline) {
+            Ok(permit) => permit,
+            Err(error) => {
+                // The porcelain read succeeded. Retain those fresh paths even
+                // when statistics had no budget left behind another reader.
+                status.repo_root = Some(repo_root.display().to_string());
+                status.last_checked_at = Some(chrono::Utc::now().to_rfc3339());
+                status.stats_partial = true;
+                status.history_error = Some(error.to_string());
+                return Ok(status);
+            }
+        };
+        // A competing reader can have filled the same snapshot while this
+        // request read porcelain or waited. No statistics/history pass is then
+        // needed; fresh porcelain still determines whether it is reusable.
         if let Some(mut cached) = cached_git_status(&root, &stamp) {
             repository_state.apply(&mut cached);
             return Ok(cached);
@@ -796,6 +841,167 @@ mod tests {
             .iter()
             .find(|file| file.path == path)
             .unwrap_or_else(|| panic!("{path} missing from {:?}", status.files))
+    }
+
+    #[test]
+    #[ignore = "disposable concurrent status benchmark; run alone with --exact"]
+    fn benchmark_concurrent_status_reads() {
+        use std::sync::{Arc, Barrier};
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path().canonicalize().unwrap();
+        init_git_repo(&root);
+        fs::write(root.join("tracked.txt"), "base\n").unwrap();
+        run_git(&root, &["add", "."]);
+        run_git(&root, &["commit", "-m", "base"]);
+        fs::write(root.join("tracked.txt"), "base\nchanged\n").unwrap();
+        for index in 0..100 {
+            fs::write(root.join(format!("pending-{index}.txt")), "one\ntwo\n").unwrap();
+        }
+        let traces = tempfile::tempdir().unwrap();
+        let previous = std::env::var_os("GIT_TRACE2_EVENT");
+        struct RestoreTrace(Option<std::ffi::OsString>);
+        impl Drop for RestoreTrace {
+            fn drop(&mut self) {
+                match &self.0 {
+                    Some(value) => std::env::set_var("GIT_TRACE2_EVENT", value),
+                    None => std::env::remove_var("GIT_TRACE2_EVENT"),
+                }
+            }
+        }
+        let _restore = RestoreTrace(previous);
+        for workers in [1, 8] {
+            for trial in 0..5 {
+                git_status_cache().lock().unwrap().remove(&root);
+                let trace = traces.path().join(format!("{workers}-{trial}.jsonl"));
+                std::env::set_var("GIT_TRACE2_EVENT", &trace);
+                let barrier = Arc::new(Barrier::new(workers));
+                let started = Instant::now();
+                std::thread::scope(|scope| {
+                    let threads: Vec<_> = (0..workers)
+                        .map(|_| {
+                            let barrier = barrier.clone();
+                            let root = &root;
+                            scope.spawn(move || {
+                                barrier.wait();
+                                let status = git_status_impl(root.to_str().unwrap()).unwrap();
+                                assert!(status.details_loaded && !status.stats_partial);
+                                assert_eq!(status.files.len(), 101);
+                                assert_eq!(status.additions, 201);
+                            })
+                        })
+                        .collect();
+                    for thread in threads {
+                        thread.join().unwrap();
+                    }
+                });
+                let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+                let commands = fs::read_to_string(&trace)
+                    .unwrap()
+                    .lines()
+                    .filter(|line| {
+                        serde_json::from_str::<serde_json::Value>(line)
+                            .ok()
+                            .is_some_and(|event| event["event"] == "start")
+                    })
+                    .count();
+                eprintln!(
+                    "status benchmark {}",
+                    serde_json::json!({"workers":workers,"trial":trial,"elapsedMs":elapsed_ms,"gitCommands":commands})
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn git_status_refreshes_same_size_edits_and_replacements_with_restored_mtime() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path();
+        init_git_repo(root);
+        let pending = root.join("pending.txt");
+        fs::write(&pending, "abc\n").unwrap();
+        let modified = fs::metadata(&pending).unwrap().modified().unwrap();
+        let path = root.to_str().unwrap();
+        assert_eq!(
+            file(&git_status_impl(path).unwrap(), "pending.txt").additions,
+            1
+        );
+
+        for replacement in [false, true] {
+            if replacement {
+                let next = root.join("replacement");
+                fs::write(&next, "abc\n").unwrap();
+                fs::rename(next, &pending).unwrap();
+            } else {
+                fs::write(&pending, "a\nb\n").unwrap();
+            }
+            fs::File::options()
+                .write(true)
+                .open(&pending)
+                .unwrap()
+                .set_times(fs::FileTimes::new().set_modified(modified))
+                .unwrap();
+            let refreshed = git_status_impl(path).unwrap();
+            assert_eq!(
+                file(&refreshed, "pending.txt").additions,
+                if replacement { 1 } else { 2 }
+            );
+        }
+    }
+
+    #[test]
+    fn git_status_cache_retains_partial_snapshots_but_retries_their_details() {
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path().to_path_buf();
+        for failure in ["statistics", "history", "comparison"] {
+            let mut status = parse_git_status_v2("? pending.txt\0");
+            status.details_loaded = true;
+            match failure {
+                "statistics" => status.stats_partial = true,
+                "history" => status.history_error = Some("temporary read failure".into()),
+                _ => {
+                    status.compared_to_main = Some(crate::git::types::MainComparisonStats {
+                        additions: 0,
+                        deletions: 0,
+                        partial: true,
+                        files: Vec::new(),
+                    })
+                }
+            }
+            store_git_status(root.clone(), "unchanged".into(), status);
+            assert!(
+                last_git_status(&root).is_some(),
+                "retain {failure} fallback"
+            );
+            assert!(
+                cached_git_status(&root, "unchanged").is_none(),
+                "retry {failure}"
+            );
+        }
+        let mut complete = parse_git_status_v2("? pending.txt\0");
+        complete.details_loaded = true;
+        store_git_status(root.clone(), "unchanged".into(), complete);
+        assert!(cached_git_status(&root, "unchanged").is_some());
+    }
+
+    #[test]
+    fn detail_admission_timeout_keeps_fresh_paths_without_claiming_line_counts() {
+        use std::time::Duration;
+        let repo = tempfile::tempdir().unwrap();
+        let root = repo.path().canonicalize().unwrap();
+        init_git_repo(&root);
+        fs::write(root.join("new.txt"), "one\ntwo\n").unwrap();
+        let deadline = Instant::now() + Duration::from_millis(400);
+        let _other_reader = super::super::detail_admission::acquire(&root, deadline).unwrap();
+        let status = inspect_git_status_before(root.to_str().unwrap(), true, deadline).unwrap();
+        assert!(status.available && status.stats_partial);
+        assert!(!status.details_loaded);
+        assert_eq!(file(&status, "new.txt").state, "untracked");
+        assert!(status
+            .history_error
+            .as_deref()
+            .unwrap()
+            .contains("timed out"));
+        assert!(Instant::now().duration_since(deadline) < Duration::from_secs(2));
     }
 
     #[test]

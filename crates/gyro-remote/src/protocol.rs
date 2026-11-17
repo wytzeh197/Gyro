@@ -218,6 +218,36 @@ pub struct AttachmentRef {
 }
 
 impl Operation {
+    /// Labels are a fixed allowlist, never derived from request payload text.
+    pub fn audit_action(&self) -> Option<String> {
+        let label = match self {
+            Self::Pair { .. } => "pair",
+            Self::CreateSession { .. } => "createSession",
+            Self::RenameSession { .. } => "renameSession",
+            Self::SetModel { .. } => "setModel",
+            Self::UploadAttachment { complete: true, .. } => "uploadAttachment",
+            Self::AttachWorkspaceFile { .. } => "attachWorkspaceFile",
+            Self::History { .. } => "readHistory",
+            Self::Submit { .. } => "submit",
+            Self::Stop { .. } => "stop",
+            Self::Approval { .. } => "approval",
+            Self::Question { .. } => "answerQuestion",
+            Self::Claim { .. } => "claimControl",
+            Self::TransferControl { .. } => "transferControl",
+            Self::Release { .. } => "releaseControl",
+            Self::Files { .. } => "listFiles",
+            Self::Search { .. } => "search",
+            Self::ReadImage { .. } => "readImage",
+            Self::ReadFile { .. } => "readFile",
+            Self::WriteFile { .. } => "writeFile",
+            Self::Path { action, .. } => return Some(format!("path:{action:?}")),
+            Self::Git { action, .. } => return Some(format!("git:{action:?}")),
+            Self::Terminal { action, .. } => return Some(format!("terminal:{action:?}")),
+            _ => return None,
+        };
+        Some(label.into())
+    }
+
     pub fn session_id(&self) -> Option<&str> {
         match self {
             Self::RenameSession { session_id, .. }
@@ -306,9 +336,28 @@ pub struct RemoteEvent {
     pub payload: Value,
 }
 
+impl RemoteEvent {
+    pub fn visible_to(&self, peer: &str) -> bool {
+        self.topic != "terminal"
+            || self.payload.get("recipient").and_then(Value::as_str) == Some(peer)
+    }
+}
+
 #[cfg(test)]
 mod snapshot_tests {
     use super::*;
+    #[test]
+    fn terminal_events_are_private_to_the_owning_device() {
+        let mut event = RemoteEvent {
+            session_id: "s".into(),
+            topic: "terminal".into(),
+            payload: serde_json::json!({"recipient":"a","snapshot":{"output":"private"}}),
+        };
+        assert!(event.visible_to("a"));
+        assert!(!event.visible_to("b"));
+        event.payload = Value::Null;
+        assert!(!event.visible_to("a"));
+    }
     #[test]
     fn live_catchup_is_optional_and_keeps_normal_snapshots_small() {
         let normal = serde_json::json!({"op":"snapshot","sessionId":"s"});

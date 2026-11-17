@@ -752,9 +752,9 @@ function MonacoEditorPaneView(props: MonacoEditorPaneProps) {
     );
   return (
     <div className="gyro-syntax-editor" style={{ minWidth: 0 }}>
-      {syntax.notice && (
+      {(buffer?.error || syntax.notice) && (
         <div className="gyro-syntax-notice" role="status">
-          {syntax.notice}
+          {buffer?.error || syntax.notice}
         </div>
       )}
       <Suspense

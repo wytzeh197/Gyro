@@ -630,5 +630,29 @@
   "check-cloud-v3-contract.mjs": {
     "kind": "source-text",
     "reason": "Compares the checked-in public contract, disabled-by-default feature configuration and native wire version constants."
+  },
+  "check-chat-session-reliability-browser.mjs": {
+    "kind": "behavioral"
+  },
+  "check-chat-session-reliability.mjs": {
+    "kind": "behavioral"
+  },
+  "check-chat-workspace-bridge.mjs": {
+    "kind": "behavioral"
+  },
+  "check-remote-storage-browser.mjs": {
+    "kind": "behavioral"
+  },
+  "check-settings-remote-fixes.mjs": {
+    "kind": "behavioral"
+  },
+  "check-terminal-renderer-browser.mjs": {
+    "kind": "behavioral"
+  },
+  "check-workspace-data-safety.mjs": {
+    "kind": "behavioral"
+  },
+  "check-workspace-recovery-browser.mjs": {
+    "kind": "behavioral"
   }
 }

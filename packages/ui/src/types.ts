@@ -237,6 +237,8 @@ export type WorkspaceContextSnapshot = {
   activePath?: string;
   activeView?: IdeViewId;
   visibleTabs: string[];
+  /** False when the broker cannot account for every open buffer. */
+  buffersComplete?: boolean;
   selection?: EditorSelection & { truncated?: boolean };
   buffers: Array<{
     path: string;
@@ -474,7 +476,11 @@ export type TerminalKeepAlive = {
 export type TerminalTemplate = 1 | 2 | 4 | 6 | 8 | 12 | 16;
 export type TerminalPaneLayout = "auto" | "wide" | "compact";
 
+export type TerminalOutputCursor = { generation: string; start: number; end: number };
+
 export type TerminalPane = {
+  outputCursor?: TerminalOutputCursor;
+  outputComplete?: boolean;
   id: string;
   title: string;
   profileId: string;
@@ -684,6 +690,7 @@ export type DiffLine = {
 };
 
 export type DiffFile = {
+  proposalId?: string;
   countsKnown?: boolean;
   path: string;
   additions: number;
@@ -2817,7 +2824,7 @@ export type WorkspaceFileContent = {
 
 export type WorkspaceFileStat = {
   path: string;
-  kind: "file" | "directory";
+  kind: "file" | "directory" | "missing";
   sizeBytes: number;
   contentHash?: string;
 };

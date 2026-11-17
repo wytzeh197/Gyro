@@ -27,7 +27,6 @@ use gyro_core::{
     UsageOutcome,
 };
 use std::{
-    fs,
     sync::atomic::Ordering,
     time::{Duration, Instant},
 };
@@ -459,8 +458,9 @@ pub(crate) fn with_browser_attachment_images(
             if attachment.kind != "browser-snapshot" {
                 continue;
             }
-            let snapshot: serde_json::Value =
-                serde_json::from_str(&fs::read_to_string(&attachment.path)?)?;
+            let snapshot: serde_json::Value = serde_json::from_str(
+                &gyro_core::provider_runtime::attachments::snapshot_text(attachment)?,
+            )?;
             if let Some(image) = snapshot.get("attachedImage") {
                 let image: ChatAttachmentRequest = serde_json::from_value(image.clone())?;
                 anyhow::ensure!(

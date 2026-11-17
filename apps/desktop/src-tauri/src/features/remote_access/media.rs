@@ -14,7 +14,7 @@ use gyro_remote::{protocol::AttachmentRef, Operation, Request};
 use serde_json::Value;
 use std::{
     collections::HashMap,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 use uuid::Uuid;
@@ -293,27 +293,52 @@ pub(super) fn read_image(
     target: &str,
     offset: u64,
 ) -> Result<Value, String> {
-    use std::io::{Read, Seek, SeekFrom};
     let session = runtime.session(session_id)?;
     let paths = gyro_core::GyroPaths::for_current_user().map_err(err)?;
     let path = crate::chat_images::resolve_cited_chat_image(
         target,
         &crate::chat_images::CitedImageContext {
-            workspace: session.workspace_path,
+            workspace: session.workspace_path.clone(),
             provider_id: None,
             provider_session_id: None,
             home: None,
-            browser_captures: Some(paths.browser_captures_dir),
+            browser_captures: Some(paths.browser_captures_dir.clone()),
             attachments: Some(paths.sessions_dir.join("attachments").join(session_id)),
         },
     )
     .ok_or("This image is unavailable in the host workspace or session")?;
-    let mut file = std::fs::File::open(path).map_err(err)?;
+    // Browser captures are a global local cache, not a remotely shared root.
+    // Workspace/attachment roots remain scoped by the session above.
+    if let Ok(captures) = paths.browser_captures_dir.canonicalize() {
+        if path.starts_with(&captures) && !capture_belongs_to_session(&path, session_id) {
+            return Err("This browser capture does not belong to the shared session".into());
+        }
+    }
+    let root = [
+        session.workspace_path,
+        paths.sessions_dir.join("attachments").join(session_id),
+        paths.browser_captures_dir,
+    ]
+    .into_iter()
+    .filter_map(|root| root.canonicalize().ok())
+    .find(|root| path.starts_with(root))
+    .ok_or("This image is outside the shared session")?;
+    read_image_chunk(&root, &path, offset)
+}
+
+fn read_image_chunk(root: &Path, path: &Path, offset: u64) -> Result<Value, String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let parent = gyro_core::workspace_write::WorkspaceWriteParent::open(root, path).map_err(err)?;
+    let mut file = parent.open_read().map_err(err)?;
     let metadata = file.metadata().map_err(err)?;
+    if !metadata.is_file() || metadata.len() > MAX_CHAT_IMAGE_BYTES {
+        return Err("This image is unavailable or exceeds the image size limit".into());
+    }
     if offset >= metadata.len() {
         return Err("Invalid image offset".into());
     }
-    let revision = format!("{}:{:?}", metadata.len(), metadata.modified().map_err(err)?);
+    let version = super::file_hashes::Version::of(&metadata);
+    let revision = format!("{version:?}");
     let mut header = [0; 16];
     let count = file.read(&mut header).map_err(err)?;
     let (mime, _) = crate::sessions::attachments::validated_chat_media_type(
@@ -323,18 +348,87 @@ pub(super) fn read_image(
     )?;
     file.seek(SeekFrom::Start(offset)).map_err(err)?;
     let mut bytes = Vec::new();
-    file.take(CHUNK_BYTES as u64)
+    (&mut file)
+        .take(CHUNK_BYTES as u64)
         .read_to_end(&mut bytes)
         .map_err(err)?;
+    parent.verify().map_err(err)?;
+    if super::file_hashes::Version::of(&file.metadata().map_err(err)?) != version {
+        return Err("The image changed while reading; open it again".into());
+    }
     Ok(serde_json::json!({
         "data": STANDARD.encode(&bytes), "mimeType": mime, "revision": revision,
         "total": metadata.len(), "nextOffset": offset + bytes.len() as u64,
     }))
 }
 
+fn capture_belongs_to_session(path: &std::path::Path, session: &str) -> bool {
+    let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+        return false;
+    };
+    let owner = path.with_file_name(format!("{name}.owner"));
+    let Ok(metadata) = std::fs::symlink_metadata(&owner) else {
+        return false;
+    };
+    metadata.is_file()
+        && !metadata.is_symlink()
+        && metadata.len() <= 64
+        && std::fs::read_to_string(owner).is_ok_and(|value| value == session)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[cfg(unix)]
+    fn image_read_refuses_a_parent_replaced_after_authorization() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let root = base.join("workspace");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(root.join("src/image.png"), b"\x89PNG\r\n\x1a\na").unwrap();
+        std::fs::write(outside.join("image.png"), b"\x89PNG\r\n\x1a\nprivate").unwrap();
+        let approved =
+            gyro_core::security::assert_path_inside_workspace(&root, Path::new("src/image.png"))
+                .unwrap();
+        std::fs::rename(root.join("src"), root.join("old")).unwrap();
+        std::os::unix::fs::symlink(outside, root.join("src")).unwrap();
+        assert!(read_image_chunk(&root, &approved, 0).is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn image_revision_changes_after_same_size_replacement_with_restored_mtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let path = root.join("image.png");
+        std::fs::write(&path, b"\x89PNG\r\n\x1a\na").unwrap();
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let first = read_image_chunk(&root, &path, 0).unwrap();
+        let replacement = root.join("replacement");
+        std::fs::write(&replacement, b"\x89PNG\r\n\x1a\nb").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&replacement)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        std::fs::rename(replacement, &path).unwrap();
+        let second = read_image_chunk(&root, &path, 0).unwrap();
+        assert_ne!(first["revision"], second["revision"]);
+    }
+    #[test]
+    fn browser_capture_ownership_is_session_scoped_and_fail_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("capture.png");
+        assert!(!capture_belongs_to_session(&path, "a"));
+        std::fs::write(dir.path().join("capture.png.owner"), "a").unwrap();
+        assert!(capture_belongs_to_session(&path, "a"));
+        assert!(!capture_belongs_to_session(&path, "b"));
+    }
+
     #[test]
     fn upload_is_ordered_scoped_bounded_and_expires() {
         let mut uploads = Uploads::default();

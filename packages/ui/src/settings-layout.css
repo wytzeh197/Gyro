@@ -160,6 +160,17 @@
 }
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-control-column
+  .gyro-settings-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--gyro-control-height);
+  padding: var(--gyro-space-standard);
+  text-align: start;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
   .gyro-settings-row.is-danger
   .gyro-secondary-button {
   color: var(--gyro-danger);
@@ -183,7 +194,7 @@
   > h2
   > button {
   min-height: 0;
-  padding-block: 10px 12px;
+  padding-block: var(--gyro-space-group) var(--gyro-space-card);
 }
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings
@@ -194,7 +205,7 @@
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings
   .gyro-settings-disclosure-body {
-  padding: 4px 0 0;
+  padding: var(--gyro-space-compact) 0 0;
 }
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings

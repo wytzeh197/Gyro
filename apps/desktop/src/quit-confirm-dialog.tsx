@@ -33,13 +33,13 @@ export function QuitConfirmDialog({
     setError(undefined);
     try {
       await onResolve(quit);
-    } catch {
+    } catch (failure) {
       busyRef.current = false;
       setBusy(false);
       setPending(null);
       setError(
         quit
-          ? "Gyro could not close. Try again."
+          ? `Gyro could not save your session before closing. ${String(failure)}`
           : "Gyro could not dismiss this prompt. Try again.",
       );
     }

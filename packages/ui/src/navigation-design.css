@@ -539,6 +539,34 @@
   padding-right: 96px;
 }
 
+/* Remote rows have no pin/menu actions. Let the actual age text occupy its
+   own column instead of reserving the local row's entire action strip. */
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row.has-idle-time:not(:has(> .gyro-session-actions))
+  .gyro-sidebar-thread-main {
+  padding-right: var(--gyro-space-standard);
+}
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row.has-idle-time:not(:has(> .gyro-session-actions)):is(
+    :hover,
+    :focus-within
+  )
+  .gyro-sidebar-thread-main {
+  grid-template-columns: 16px minmax(0, 1fr) max-content;
+}
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-session-row.has-idle-time:not(:has(> .gyro-session-actions)):is(
+    :hover,
+    :focus-within
+  )
+  .gyro-session-time {
+  position: static;
+  max-width: var(--gyro-control-comfortable);
+}
+
 /* Navigation uses the same line weight as the titlebar. Provider marks and
    semantic status icons retain their own artwork and color. */
 :root[data-theme]

@@ -439,17 +439,19 @@ const mutationCardNode = surfaceAst.statements.find(
 );
 assert.ok(mutationCardNode);
 const mutationModule = { exports: {} };
-new Function("require", "module", "exports", "InlineApprovalCard", "FileCode2",
+let mutationProps;
+new Function("require", "module", "exports", "InlineApprovalCard", "FileCode2", "useState", "useEffect",
   ts.transpileModule("export " + mutationCardNode.getText(surfaceAst), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
   }).outputText,
-)(requireUi, mutationModule, mutationModule.exports, () => null, () => null);
+)(requireUi, mutationModule, mutationModule.exports, props => { mutationProps = props; return null; }, () => null, requireUi("react").useState, requireUi("react").useEffect);
 for (const operation of ["create", "update"]) {
   for (const status of ["pending", "applied", "rejected", "failed"]) {
-    const props = mutationModule.exports.MutationApprovalCard({
+    requireUi("react-dom/server").renderToStaticMarkup(createElement(mutationModule.exports.MutationApprovalCard, {
       approval: { proposalId: "edit", operation, path: "src/a.ts", status,
         effect: "Replace this file with the reviewed content", risk: "Writes one file" },
-    }).props;
+    }));
+    const props = mutationProps;
     assert.equal(props.title.endsWith("?"), status === "pending",
       "only a pending mutation asks the user for permission");
     assert.equal(props.status, status);

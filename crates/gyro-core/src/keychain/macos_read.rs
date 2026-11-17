@@ -17,6 +17,7 @@ const READ_DEADLINE: Duration = Duration::from_secs(3);
 const ACCESS_DETAIL: &str = "Gyro could not read the saved credential from macOS Keychain without user interaction. Unlock your Mac and allow Gyro to access this credential, then send again.";
 
 #[cfg_attr(test, allow(dead_code))]
+#[allow(dead_code)]
 pub(super) fn access_needs_user_interaction(error: &anyhow::Error) -> bool {
     error.is::<InteractionRequired>()
 }

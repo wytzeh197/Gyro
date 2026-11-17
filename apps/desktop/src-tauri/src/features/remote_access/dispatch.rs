@@ -295,7 +295,7 @@ fn hello(runtime: &Runtime) -> Result<Value, String> {
         json!({"id":p.id,"displayName":p.display_name,"models":models,"modelDetails":model_details,"defaultModelId":p.default_model_id,"kind":p.kind,"runtimeStatus":status})
     }).collect::<Vec<_>>();
     Ok(
-        json!({"protocol":1,"hostId":runtime.node.get().unwrap().id(),"name":runtime.store.settings().map_err(err)?.name,"providers":providers,"selectedProviderId":config.selected_provider_id,"fullAccess":config.full_access,"requireCommandApproval":config.require_command_approval,"requireFileEditApproval":config.require_file_edit_approval,"capabilities":["liveCatchup","chat","files","git","terminal","approvals","questions","worktrees","sessionModel","attachments","imagePreviews","chatModes"],"experimental":true}),
+        json!({"protocol":1,"hostId":runtime.node.get().unwrap().id(),"name":runtime.store.settings().map_err(err)?.name,"providers":providers,"selectedProviderId":config.selected_provider_id,"fullAccess":config.full_access,"requireCommandApproval":config.require_command_approval,"requireFileEditApproval":config.require_file_edit_approval,"capabilities":["liveCatchup","liveCheckpoint","terminalPush","chat","files","git","terminal","approvals","questions","worktrees","sessionModel","attachments","imagePreviews","chatModes"],"experimental":true}),
     )
 }
 fn validate_model(model: &ModelChoice) -> Result<(), String> {
@@ -478,9 +478,30 @@ fn snapshot(
             json!({"id":id,"turnId":p.turn_id,"kind":"capability","payload":payload})
         })
         .collect::<Vec<_>>();
+    // Leave room in the remote frame for transcript and other session state.
+    // Never send a clipped diff that could be mistaken for the approved edit.
+    let mut preview_bytes_left = gyro_remote::protocol::MAX_FRAME / 4;
     let mutations = open_store()?
-        .list_unsurfaced_pending_mutation_proposals(session)
-        .map_err(err)?;
+        .list_pending_mutation_proposals(session)
+        .map_err(err)?
+        .into_iter().map(|proposal| {
+            let review = gyro_core::review_mutation_proposal(proposal.clone());
+            let mut item = serde_json::to_value(proposal).map_err(err)?;
+            item.as_object_mut().unwrap().remove("content");
+            match review {
+                Ok(review) => {
+                    let encoded_bytes = serde_json::to_vec(&review.patch).map_err(err)?.len();
+                    if encoded_bytes <= preview_bytes_left {
+                        preview_bytes_left -= encoded_bytes;
+                        item["patch"] = json!(review.patch);
+                    } else {
+                        item["previewError"] = json!("This diff exceeds the remote preview budget. Review this proposal on the host.");
+                    }
+                },
+                Err(error) => item["previewError"] = json!(error.to_string()),
+            }
+            Ok(item)
+        }).collect::<Result<Vec<_>, String>>()?;
     let stored_session = runtime.session(session_id)?;
     let provider_usage = stored_session.provider_id.as_deref().and_then(|provider| {
         crate::usage::fetch::spawn_provider_usage_refresh(&runtime.app, provider, true);
@@ -500,8 +521,9 @@ fn snapshot(
             })
     });
     let session_usage = open_store()?.session_usage_totals(session).map_err(err)?;
+    let live_truncated = runtime.live_events.lock().map_err(err)?.truncated(session_id);
     Ok(
-        json!({"liveEvents":if include_live_events { Some(runtime.live_events.lock().map_err(err)?.snapshot(session_id)) } else { None },"providerUsage":provider_usage,"sessionUsage":session_usage,"session":stored_session,"running":runtime.app.state::<ProviderCancellationManager>().flags.lock().map_err(err)?.contains_key(session_id),"control":runtime.controls.lock().map_err(err)?.current(session_id),"approvals":provider.into_iter().chain(capabilities).collect::<Vec<_>>(),"mutations":mutations}),
+        json!({"liveCheckpoint":true,"liveTruncated":live_truncated,"liveEvents":if include_live_events { Some(runtime.live_events.lock().map_err(err)?.snapshot(session_id)) } else { None },"providerUsage":provider_usage,"sessionUsage":session_usage,"session":stored_session,"running":runtime.app.state::<ProviderCancellationManager>().flags.lock().map_err(err)?.contains_key(session_id),"control":runtime.controls.lock().map_err(err)?.current(session_id),"approvals":provider.into_iter().chain(capabilities).collect::<Vec<_>>(),"mutations":mutations}),
     )
 }
 fn approve(
@@ -567,6 +589,7 @@ fn approve(
             }
             value(
                 crate::workspace_mutations::resolve_file_mutation_proposal_impl(
+                    &runtime.app,
                     crate::workspace::types::FileMutationDecisionRequest {
                         proposal_id: approval_id.into(),
                         decision: decision.into(),

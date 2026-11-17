@@ -1,6 +1,7 @@
 //! Experimental device access, separate from Cloud accounts and entitlements.
 pub(crate) mod commands;
 mod dispatch;
+mod file_hashes;
 pub(crate) mod media;
 mod mutation_locks;
 #[cfg(debug_assertions)]
@@ -9,6 +10,7 @@ pub(crate) mod smoke;
 mod smoke_regressions;
 #[cfg(unix)]
 mod ssh;
+mod terminal_push;
 mod workspace;
 use gyro_remote::{
     control::Controls,
@@ -27,12 +29,16 @@ use tauri::{Emitter, Listener, Manager};
 #[derive(Default)]
 pub(crate) struct RemoteAccess {
     runtime: tokio::sync::Mutex<Option<Arc<Runtime>>>,
+    disabled: std::sync::atomic::AtomicBool,
     active: std::sync::RwLock<Option<std::sync::Weak<Runtime>>>,
     #[cfg(unix)]
     ssh: ssh::Ssh,
 }
 pub(super) struct Runtime {
     pub app: tauri::AppHandle,
+    stopped: std::sync::atomic::AtomicBool,
+    provider_listener: OnceLock<tauri::EventId>,
+    terminal_task: OnceLock<tokio::task::JoinHandle<()>>,
     pub store: Store,
     pub node: OnceLock<Arc<Node>>,
     #[cfg(unix)]
@@ -74,17 +80,26 @@ pub(super) fn store() -> Result<Store, String> {
 impl RemoteAccess {
     pub(super) async fn ensure(&self, app: &tauri::AppHandle) -> Result<Arc<Runtime>, String> {
         let mut slot = self.runtime.lock().await;
+        if self.disabled.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err("Remote access is disabled on this Mac".into());
+        }
         if let Some(runtime) = slot.as_ref() {
             return Ok(runtime.clone());
         }
+        let remote_store = tauri::async_runtime::spawn_blocking(|| -> Result<Store, String> {
+            let store = store()?;
+            if !store.settings().map_err(err)?.enabled {
+                return Err("Remote access is disabled on this Mac".into());
+            }
+            Ok(store)
+        })
+        .await
+        .map_err(err)??;
         let secret = tauri::async_runtime::spawn_blocking(|| {
             gyro_core::keychain::remote_device_identity(iroh_secret).map_err(err)
         })
         .await
         .map_err(err)??;
-        let remote_store = tauri::async_runtime::spawn_blocking(store)
-            .await
-            .map_err(err)??;
         let runtime = Runtime::bind(app, remote_store, secret, false).await?;
         *self.active.write().map_err(err)? = Some(Arc::downgrade(&runtime));
         *slot = Some(runtime.clone());
@@ -107,6 +122,9 @@ impl Runtime {
         }
         let runtime = Arc::new(Runtime {
             app: app.clone(),
+            stopped: std::sync::atomic::AtomicBool::new(false),
+            provider_listener: OnceLock::new(),
+            terminal_task: OnceLock::new(),
             store: remote_store,
             node: OnceLock::new(),
             #[cfg(unix)]
@@ -170,7 +188,7 @@ impl Runtime {
             }
         }
         let weak = Arc::downgrade(&runtime);
-        app.listen_any(crate::app::limits::PROVIDER_CHAT_EVENT, move |event| {
+        let listener = app.listen_any(crate::app::limits::PROVIDER_CHAT_EVENT, move |event| {
             let Some(runtime) = weak.upgrade() else {
                 return;
             };
@@ -184,6 +202,8 @@ impl Runtime {
                 runtime.publish(session, "provider", payload.clone());
             }
         });
+        let _ = runtime.provider_listener.set(listener);
+        let _ = runtime.terminal_task.set(terminal_push::start(&runtime));
         Ok(runtime)
     }
     /// Ends remote shells when their device, session scope, or hosting goes away, so
@@ -240,15 +260,31 @@ impl Runtime {
     async fn handle(self: Arc<Self>, peer: String, request: Request) -> Response {
         let id = request.id;
         let runtime = self.clone();
-        let result =
-            tauri::async_runtime::spawn_blocking(move || runtime.handle_blocking(&peer, &request))
-                .await
-                .map_err(|_| "Remote operation worker failed".to_string())
-                .and_then(|r| r);
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            let trusted = peer.starts_with("ssh:") || runtime.store.trusts(&peer, "client");
+            let result = runtime.handle_blocking(&peer, &request);
+            if trusted {
+                if let Some(action) = request.operation.audit_action() {
+                    // A failed ledger never retries an already-executed action.
+                    let _ = runtime.store.audit(
+                        &peer,
+                        &action,
+                        request.operation.session_id(),
+                        result.is_ok(),
+                    );
+                }
+            }
+            result
+        })
+        .await
+        .map_err(|_| "Remote operation worker failed".to_string())
+        .and_then(|r| r);
         Response::result(id, result)
     }
     fn handle_blocking(&self, peer: &str, request: &Request) -> Result<Value, String> {
-        if !self.store.settings().map_err(err)?.enabled {
+        if self.stopped.load(std::sync::atomic::Ordering::SeqCst)
+            || !self.store.settings().map_err(err)?.enabled
+        {
             return Err("Remote access is disabled on this Mac".into());
         }
         match &request.operation {
@@ -315,6 +351,10 @@ impl Runtime {
                 Operation::UploadAttachment {
                     complete: false,
                     ..
+                } | Operation::Terminal {
+                    action: gyro_remote::protocol::TerminalAction::Input
+                        | gyro_remote::protocol::TerminalAction::Resize,
+                    ..
                 }
             )
         {
@@ -325,7 +365,9 @@ impl Runtime {
         result
     }
     fn authorize(&self, peer: &str, operation: &Operation) -> Result<(), String> {
-        if !self.store.settings().map_err(err)?.enabled {
+        if self.stopped.load(std::sync::atomic::Ordering::SeqCst)
+            || !self.store.settings().map_err(err)?.enabled
+        {
             return Err("Remote access is disabled on this Mac".into());
         }
         // Iroh origins are fixed hex public keys. The reserved ssh: namespace
@@ -358,7 +400,7 @@ impl Runtime {
         let hosting_active =
             self.store.settings().map_err(err)?.enabled && self.node.get().is_some();
         Ok(
-            json!({"sshHostingActive":self.ssh_hosting_active(),"settings":self.store.settings().map_err(err)?,"hostingActive":hosting_active,"invitationActive":self.store.invitation_active().map_err(err)?,"deviceId":self.node.get().map(|n|n.id()),"peers":self.store.peers().map_err(err)?,"pending":self.store.pending().map_err(err)?,"projects":self.store.projects().map_err(err)?,"controls":self.controls.lock().map_err(err)?.all()}),
+            json!({"activity":self.store.activity().map_err(err)?,"sshHostingActive":self.ssh_hosting_active(),"settings":self.store.settings().map_err(err)?,"hostingActive":hosting_active,"invitationActive":self.store.invitation_active().map_err(err)?,"deviceId":self.node.get().map(|n|n.id()),"peers":self.store.peers().map_err(err)?,"pending":self.store.pending().map_err(err)?,"projects":self.store.projects().map_err(err)?,"controls":self.controls.lock().map_err(err)?.all()}),
         )
     }
 }
@@ -431,5 +473,16 @@ pub(crate) fn start_if_enabled(app: tauri::AppHandle) {
         tauri::async_runtime::spawn(async move {
             let _ = app.state::<RemoteAccess>().ensure(&app).await;
         });
+    }
+}
+
+impl Drop for Runtime {
+    fn drop(&mut self) {
+        if let Some(task) = self.terminal_task.get() {
+            task.abort();
+        }
+        if let Some(listener) = self.provider_listener.get() {
+            self.app.unlisten(*listener);
+        }
     }
 }

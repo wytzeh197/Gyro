@@ -13,6 +13,7 @@ use std::{
 #[derive(Clone, Default)]
 pub(crate) struct TerminalProcessManager {
     pub(crate) processes: Arc<Mutex<HashMap<String, terminal_process::TerminalPane>>>,
+    pub(crate) pending_launches: Arc<Mutex<HashMap<String, Arc<()>>>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -69,6 +70,14 @@ pub(crate) struct PaneGovernance {
     pub(crate) args: Vec<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TerminalOutputCursor {
+    pub(crate) generation: String,
+    pub(crate) start: u64,
+    pub(crate) end: u64,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TerminalPaneSnapshot {
@@ -80,6 +89,7 @@ pub(crate) struct TerminalPaneSnapshot {
     pub(crate) execution_policy: &'static str,
     pub(crate) output: Option<String>,
     pub(crate) output_revision: u64,
+    pub(crate) output_cursor: TerminalOutputCursor,
     pub(crate) output_complete: bool,
     pub(crate) status: String,
     pub(crate) has_foreground_job: Option<bool>,

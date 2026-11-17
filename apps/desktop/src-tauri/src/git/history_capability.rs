@@ -19,7 +19,7 @@ use crate::{
     git::commands::git_command,
     ide::types::IdeCommandOutput,
     state::provider_run::BoundProviderCapabilityContext,
-    workspace::files::read_bounded_regular_file,
+    workspace::files::read_workspace_bytes,
 };
 use gyro_core::{CancellationToken, CapabilityId, CapabilityRequest, CapabilityResourceRef};
 use serde_json::{json, Value};
@@ -104,18 +104,9 @@ pub(crate) fn execute(
                 &bound.workspace,
                 Path::new(&path),
             )?;
-            let total_lines = file_line_count(&candidate, &path)?;
+            let (contents, total_lines) = file_snapshot(&bound.workspace, &candidate, &path)?;
             let (start, end) = blame_range(arguments, total_lines)?;
-            let mut command = git_command();
-            command
-                .arg("-C")
-                .arg(&root)
-                .arg("blame")
-                .arg("--line-porcelain")
-                .arg(format!("-L{start},{end}"))
-                .arg("--")
-                .arg(&path);
-            let output = run_git_history(command)?;
+            let output = run_blame(&root, &path, &contents, start, end)?;
             let lines = parse_blame(&output.stdout);
             (
                 format!("Read git blame for {path} lines {start}-{end}"),
@@ -282,9 +273,13 @@ fn blame_range(arguments: &Value, file_lines: u64) -> anyhow::Result<(u64, u64)>
     Ok((start, end))
 }
 
-fn file_line_count(candidate: &Path, path: &str) -> anyhow::Result<u64> {
-    let (bytes, _) =
-        read_bounded_regular_file(candidate, MAX_WORKSPACE_FILE_EDIT_BYTES, "workspace file")?;
+fn file_snapshot(root: &Path, candidate: &Path, path: &str) -> anyhow::Result<(Vec<u8>, u64)> {
+    let (bytes, _) = read_workspace_bytes(
+        root,
+        candidate,
+        MAX_WORKSPACE_FILE_EDIT_BYTES,
+        "workspace file",
+    )?;
     if bytes.len() > MAX_WORKSPACE_FILE_EDIT_BYTES {
         anyhow::bail!("{path} is too large to blame in Gyro");
     }
@@ -292,18 +287,134 @@ fn file_line_count(candidate: &Path, path: &str) -> anyhow::Result<u64> {
         anyhow::bail!("{path} is binary, so there is nothing to blame");
     }
     let newlines = bytes.iter().filter(|byte| **byte == b'\n').count() as u64;
-    Ok(if bytes.is_empty() || bytes.last() == Some(&b'\n') {
+    let lines = if bytes.is_empty() || bytes.last() == Some(&b'\n') {
         newlines
     } else {
         newlines + 1
-    })
+    };
+    Ok((bytes, lines))
+}
+
+fn run_blame(
+    root: &Path,
+    path: &str,
+    contents: &[u8],
+    start: u64,
+    end: u64,
+) -> anyhow::Result<IdeCommandOutput> {
+    // Blame normally reopens the worktree and applies its clean filters, even
+    // with --no-textconv. Use the already checked bytes and only the repository's
+    // object database: neither its config nor its worktree attributes are inputs.
+    let deadline = std::time::Instant::now() + GIT_HISTORY_TIMEOUT;
+    let (repository, prefix) = super::read::repo_root_and_prefix(root, deadline)?
+        .ok_or_else(|| anyhow::anyhow!("workspace is not a Git repository"))?;
+    let (_, common) = super::status_cache::git_dirs(&repository)
+        .ok_or_else(|| anyhow::anyhow!("Git repository metadata is unreadable"))?;
+    let mut resolve = git_command();
+    resolve
+        .arg("-C")
+        .arg(&repository)
+        .args(["rev-parse", "--verify", "HEAD"]);
+    let resolved = super::read::run(&resolve, deadline, 1024)?;
+    let head = resolved.stdout.trim();
+    anyhow::ensure!(
+        resolved.succeeded()
+            && matches!(head.len(), 40 | 64)
+            && head.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "Git HEAD could not be resolved"
+    );
+    let view = tempfile::tempdir()?;
+    let metadata = view.path().join("git");
+    let worktree = view.path().join("worktree");
+    std::fs::create_dir(&metadata)?;
+    std::fs::create_dir(metadata.join("refs"))?;
+    std::fs::create_dir(&worktree)?;
+    let config = if head.len() == 64 {
+        "[core]\nrepositoryformatversion = 1\nbare = false\n[extensions]\nobjectformat = sha256\n"
+    } else {
+        "[core]\nrepositoryformatversion = 0\nbare = false\n"
+    };
+    std::fs::write(metadata.join("config"), config)?;
+    std::fs::write(metadata.join("HEAD"), format!("{head}\n"))?;
+    let objects = common.join("objects").canonicalize()?;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&objects, metadata.join("objects"))?;
+    #[cfg(not(unix))]
+    {
+        let objects = objects
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Git object path is not UTF-8"))?;
+        anyhow::ensure!(
+            !objects.contains(['\r', '\n']),
+            "Git object path contains a line break"
+        );
+        std::fs::create_dir_all(metadata.join("objects/info"))?;
+        std::fs::write(
+            metadata.join("objects/info/alternates"),
+            format!("{objects}\n"),
+        )?;
+    }
+    let snapshot = view.path().join("contents");
+    std::fs::write(&snapshot, contents)?;
+    let mut command = git_command();
+    for key in [
+        "GIT_CONFIG",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_COUNT",
+        "GIT_COMMON_DIR",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_WORK_TREE",
+        "GIT_DIR",
+        "GIT_ATTR_SOURCE",
+        "GIT_NAMESPACE",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_EXTERNAL_DIFF",
+    ] {
+        command.env_remove(key);
+    }
+    command
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env(
+            "GIT_CONFIG_GLOBAL",
+            if cfg!(windows) { "NUL" } else { "/dev/null" },
+        )
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_NO_LAZY_FETCH", "1")
+        .arg("--no-pager")
+        .arg("--git-dir")
+        .arg(&metadata)
+        .arg("--work-tree")
+        .arg(&worktree)
+        .arg("blame")
+        .arg("--no-textconv")
+        .arg("--line-porcelain")
+        .arg("--contents")
+        .arg(&snapshot)
+        .arg(format!("-L{start},{end}"))
+        .arg("--")
+        .arg(format!("{prefix}{path}"));
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    anyhow::ensure!(
+        !remaining.is_zero(),
+        "Git inspection timed out; retry to refresh"
+    );
+    run_git_history_with_timeout(command, remaining)
 }
 
 fn run_git_history(command: Command) -> anyhow::Result<IdeCommandOutput> {
+    run_git_history_with_timeout(command, GIT_HISTORY_TIMEOUT)
+}
+
+fn run_git_history_with_timeout(
+    command: Command,
+    timeout: Duration,
+) -> anyhow::Result<IdeCommandOutput> {
     let output = run_command_output_with_limits(
         command,
         CancellationToken::default(),
-        GIT_HISTORY_TIMEOUT,
+        timeout,
         Some(GIT_HISTORY_INACTIVITY),
     )?;
     if output.status != "done" {
@@ -485,6 +596,155 @@ pub(crate) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
 mod tests {
     use super::*;
 
+    fn blame_repository() -> (tempfile::TempDir, std::path::PathBuf) {
+        blame_repository_with_format("sha1")
+    }
+
+    fn blame_repository_with_format(format: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap().join("repo");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        for args in [
+            vec![
+                "init",
+                "-b",
+                "main",
+                if format == "sha256" {
+                    "--object-format=sha256"
+                } else {
+                    "--object-format=sha1"
+                },
+            ],
+            vec!["config", "user.name", "Gyro Fixture"],
+            vec!["config", "user.email", "fixture@example.test"],
+        ] {
+            assert!(git_command()
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success());
+        }
+        std::fs::write(root.join("src/file.txt"), b"approved\n").unwrap();
+        assert!(git_command()
+            .arg("-C")
+            .arg(&root)
+            .args(["add", "src/file.txt"])
+            .output()
+            .unwrap()
+            .status
+            .success());
+        assert!(git_command()
+            .args([
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null"
+            ])
+            .arg("-C")
+            .arg(&root)
+            .args(["commit", "-m", "base"])
+            .output()
+            .unwrap()
+            .status
+            .success());
+        (temp, root)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn blame_inspection_does_not_execute_repository_programs() {
+        use std::os::unix::fs::PermissionsExt;
+        for setting in [
+            "core.fsmonitor",
+            "diff.fixture.textconv",
+            "filter.fixture.clean",
+        ] {
+            let (_temp, root) = blame_repository();
+            let hook = root.join("probe.sh");
+            std::fs::write(&hook, "#!/bin/sh\nprintf called > \"$(dirname \"$0\")/called\"\nif [ \"$#\" -gt 0 ]; then cat \"$1\"; else cat; fi\n").unwrap();
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o700)).unwrap();
+            std::fs::write(
+                root.join(".gitattributes"),
+                "*.txt diff=fixture filter=fixture\n",
+            )
+            .unwrap();
+            let quoted = format!("'{}'", hook.to_string_lossy().replace('\'', "'\\''"));
+            assert!(git_command()
+                .arg("-C")
+                .arg(&root)
+                .args(["config", setting, &quoted])
+                .output()
+                .unwrap()
+                .status
+                .success());
+            let output = run_blame(&root, "src/file.txt", b"approved\n", 1, 1).unwrap();
+            assert!(
+                !root.join("called").exists(),
+                "inspection executed {setting}"
+            );
+            assert!(output.stdout.contains("\tapproved\n"));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn blame_uses_captured_bytes_after_a_parent_swap() {
+        let (temp, root) = blame_repository();
+        let outside = temp.path().canonicalize().unwrap().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("file.txt"), b"outside sentinel\n").unwrap();
+        std::fs::rename(root.join("src"), root.join("old")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("src")).unwrap();
+        let output = run_blame(&root, "src/file.txt", b"approved\n", 1, 1).unwrap();
+        assert!(
+            output.stdout.contains("\tapproved\n"),
+            "blame ignored its captured source"
+        );
+        assert!(!output.stdout.contains("outside sentinel"));
+    }
+
+    #[test]
+    fn blame_preserves_uncommitted_lines_and_subfolder_paths() {
+        for format in ["sha1", "sha256"] {
+            let (_temp, root) = blame_repository_with_format(format);
+            let output = run_blame(
+                &root.join("src"),
+                "file.txt",
+                b"approved\nuncommitted\n",
+                1,
+                2,
+            )
+            .unwrap();
+            let lines = parse_blame(&output.stdout);
+            assert_eq!(lines.len(), 2, "{format}: {lines:?}");
+            assert_eq!(lines[0]["content"], "approved");
+            assert_eq!(lines[1]["content"], "uncommitted");
+        }
+    }
+
+    #[test]
+    fn blame_reads_objects_from_a_linked_worktree() {
+        let (temp, root) = blame_repository();
+        let linked = temp.path().join("linked");
+        assert!(git_command()
+            .arg("-C")
+            .arg(&root)
+            .args(["worktree", "add", "--detach"])
+            .arg(&linked)
+            .output()
+            .unwrap()
+            .status
+            .success());
+        let output = run_blame(&linked, "src/file.txt", b"approved\nnew line\n", 1, 2).unwrap();
+        let lines = parse_blame(&output.stdout);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0]["content"], "approved");
+        assert_eq!(lines[1]["content"], "new line");
+    }
+
     #[test]
     fn revisions_are_refused_when_they_could_be_read_as_options() {
         for value in ["-n1", "--output=/tmp/x", "-"] {
@@ -599,7 +859,7 @@ mod tests {
     #[test]
     fn line_count_includes_unterminated_lines_and_handles_empty_files() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("file.txt");
+        let path = directory.path().canonicalize().unwrap().join("file.txt");
         for (content, expected) in [
             ("", 0),
             ("single line", 1),
@@ -610,13 +870,15 @@ mod tests {
         ] {
             std::fs::write(&path, content).unwrap();
             assert_eq!(
-                file_line_count(&path, "file.txt").unwrap(),
+                file_snapshot(path.parent().unwrap(), &path, "file.txt")
+                    .unwrap()
+                    .1,
                 expected,
                 "{content:?}"
             );
         }
         std::fs::write(&path, b"binary\0data").unwrap();
-        assert!(file_line_count(&path, "file.txt").is_err());
+        assert!(file_snapshot(path.parent().unwrap(), &path, "file.txt").is_err());
     }
 
     #[test]

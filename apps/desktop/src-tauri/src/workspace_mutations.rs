@@ -5,8 +5,7 @@ use crate::{
     stores::open_store,
     workspace::{
         files::{
-            read_bounded_regular_file, read_workspace_file_with_limit,
-            validated_workspace_file_target,
+            read_workspace_bytes, read_workspace_file_with_limit, validated_workspace_file_target,
         },
         types::{
             FileMutationDecisionRequest, FileMutationDecisionResult, FileMutationProposalRequest,
@@ -109,8 +108,12 @@ fn create_file_mutation_proposal_with_base(
         anyhow::bail!("file changed on disk; reload before proposing an edit");
     }
     let expected_hash = if base_exists {
-        let (current, _) =
-            read_bounded_regular_file(&candidate, MAX_WORKSPACE_FILE_EDIT_BYTES, "workspace file")?;
+        let (current, _) = read_workspace_bytes(
+            &root,
+            &candidate,
+            MAX_WORKSPACE_FILE_EDIT_BYTES,
+            "workspace file",
+        )?;
         if current.len() > MAX_WORKSPACE_FILE_EDIT_BYTES {
             anyhow::bail!("workspace file is too large to edit in Gyro");
         }
@@ -167,6 +170,7 @@ fn create_file_mutation_proposal_with_base(
 }
 
 pub(super) fn resolve_file_mutation_proposal_impl(
+    app: &tauri::AppHandle,
     request: FileMutationDecisionRequest,
 ) -> anyhow::Result<FileMutationDecisionResult> {
     let store = open_store().map_err(|error| anyhow::anyhow!(error))?;
@@ -176,7 +180,23 @@ pub(super) fn resolve_file_mutation_proposal_impl(
         "reject" => MutationDecision::Reject,
         _ => anyhow::bail!("mutation decision must be approve or reject"),
     };
-    let result = decide_mutation_proposal(&store, proposal_id, decision)?;
+    let result = gyro_core::mutations::decide_mutation_proposal_guarded(
+        &store,
+        proposal_id,
+        decision,
+        |proposal| {
+            use tauri::Manager;
+            let manager = app.state::<crate::state::managers::CapabilityIdeEvidenceManager>();
+            let evidence = manager
+                .evidence
+                .lock()
+                .map_err(|_| anyhow::anyhow!("editor evidence unavailable"))?;
+            if let Some(snapshot) = evidence.get(&proposal.workspace_path.to_string_lossy()) {
+                assert_clean_proposal_buffer(snapshot, &proposal.path)?;
+            }
+            Ok(())
+        },
+    )?;
     let file = result
         .changed_path
         .as_ref()
@@ -195,11 +215,42 @@ pub(super) fn resolve_file_mutation_proposal_impl(
     })
 }
 
+fn assert_clean_proposal_buffer(
+    snapshot: &gyro_core::WorkspaceContextSnapshot,
+    path: &str,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        snapshot.buffers_complete,
+        "Editor buffer coverage is incomplete; close extra tabs before approving"
+    );
+    anyhow::ensure!(
+        !snapshot
+            .buffers
+            .iter()
+            .any(|buffer| buffer["path"].as_str() == Some(path)
+                && buffer["dirty"].as_bool() == Some(true)),
+        "The file has unsaved editor changes; save or revert them before approving"
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use gyro_core::{GyroPaths, SessionOrigin};
     use std::fs;
+
+    #[test]
+    fn approval_checks_new_dirty_buffers_and_incomplete_coverage() {
+        let mut snapshot = gyro_core::WorkspaceContextSnapshot::empty("/workspace");
+        assert!(assert_clean_proposal_buffer(&snapshot, "a.ts").is_ok());
+        snapshot.buffers = vec![serde_json::json!({"path":"a.ts", "dirty":true})];
+        assert!(assert_clean_proposal_buffer(&snapshot, "a.ts").is_err());
+        assert!(assert_clean_proposal_buffer(&snapshot, "b.ts").is_ok());
+        snapshot.buffers.clear();
+        snapshot.buffers_complete = false;
+        assert!(assert_clean_proposal_buffer(&snapshot, "a.ts").is_err());
+    }
 
     #[test]
     fn snapshot_replacements_refuse_changed_created_or_removed_bases() {
