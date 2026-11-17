@@ -534,7 +534,10 @@ pub(crate) async fn prepare_workspace(
 ) -> Result<WorkspacePreparationSnapshot, String> {
     let watcher = watcher.inner().clone();
     let preparation = preparation.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || preparation.prepare(request, watcher, app))
-        .await
-        .map_err(|error| format!("workspace preparation worker failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        super::access::open_root(&app, &request.workspace_path)?;
+        preparation.prepare(request, watcher, app)
+    })
+    .await
+    .map_err(|error| format!("workspace preparation worker failed: {error}"))?
 }

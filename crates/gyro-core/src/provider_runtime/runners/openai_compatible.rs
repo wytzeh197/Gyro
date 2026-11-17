@@ -28,10 +28,7 @@ use crate::{
 };
 use base64::Engine;
 use provider_tool_batch::mark_browser_image_attached;
-use std::{
-    fs,
-    sync::{atomic::AtomicBool, Arc},
-};
+use std::sync::{atomic::AtomicBool, Arc};
 use uuid::Uuid;
 pub fn openai_compat_tool_unsupported(error: &anyhow::Error) -> bool {
     let message = error
@@ -76,7 +73,7 @@ pub fn user_content(
             ),
             "This provider accepts PNG, JPEG, GIF, and WebP images."
         );
-        let bytes = fs::read(&attachment.path)?;
+        let bytes = super::super::attachments::image(attachment)?;
         content.push(serde_json::json!({
             "type": "image_url",
             "image_url": { "url": format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)) }

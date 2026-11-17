@@ -438,5 +438,10 @@ try {
   ws?.close();
   browser.kill();
   await delay(300);
-  await rm(profile, { recursive: true, force: true });
+  await rm(profile, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 200,
+  });
 }

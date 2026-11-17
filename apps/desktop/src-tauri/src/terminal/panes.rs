@@ -26,8 +26,9 @@ pub(crate) async fn create_terminal_pane(
     request: TerminalPaneRequest,
 ) -> Result<TerminalPaneSnapshot, String> {
     let manager = manager.inner().clone();
+    let launch = manager.begin_launch(&request.pane_id).map_err(to_string)?;
     tauri::async_runtime::spawn_blocking(move || {
-        create_terminal_pane_blocking(&app, &manager, request)
+        create_terminal_pane_reserved(&app, &manager, request, launch)
     })
     .await
     .map_err(|error| format!("terminal create worker failed: {error}"))?
@@ -36,16 +37,35 @@ pub(crate) async fn create_terminal_pane(
 pub(crate) fn create_terminal_pane_blocking(
     app: &tauri::AppHandle,
     manager: &TerminalProcessManager,
+    request: TerminalPaneRequest,
+) -> Result<TerminalPaneSnapshot, String> {
+    let launch = manager.begin_launch(&request.pane_id).map_err(to_string)?;
+    create_terminal_pane_reserved(app, manager, request, launch)
+}
+
+fn create_terminal_pane_reserved(
+    app: &tauri::AppHandle,
+    manager: &TerminalProcessManager,
     mut request: TerminalPaneRequest,
+    launch: crate::terminal_process::TerminalLaunch,
 ) -> Result<TerminalPaneSnapshot, String> {
     // Governance is resolved here, never taken from the renderer, so the
     // session identity and approval environment an agent CLI inherits always
     // come from persisted backend state.
     request.governance = None;
-    request.provider_data_home =
-        project_import_continuation::resolve_login_data_home(&request).map_err(to_string)?;
+    let data_home = project_import_continuation::resolve_login_data_home(&request);
+    launch.ensure_current().map_err(to_string)?;
+    request.provider_data_home = data_home.map_err(to_string)?;
     if request.governed {
-        request.governance = Some(resolve_pane_governance(app, &request).map_err(to_string)?);
+        let governance = resolve_pane_governance(app, &request);
+        // Report cancellation rather than triggering an ungoverned retry.
+        if let Err(cancelled) = launch.ensure_current() {
+            if let Ok(governance) = governance {
+                release_pane_governance(app, &governance.session_id);
+            }
+            return Err(to_string(cancelled));
+        }
+        request.governance = Some(governance.map_err(to_string)?);
     }
     let governed_session = request
         .governance
@@ -56,7 +76,9 @@ pub(crate) fn create_terminal_pane_blocking(
     // approve. `restart` deliberately does not come through here: it reuses the
     // same governance so a restarted pane keeps its session identity.
     let displaced = manager.governed_session(&request.pane_id);
-    let result = manager.create(request).map_err(to_string);
+    let result = manager
+        .create_with_launch(request, launch)
+        .map_err(to_string);
     if result.is_ok() {
         if let Some(displaced) =
             displaced.filter(|session| Some(session) != governed_session.as_ref())
@@ -92,11 +114,16 @@ pub(crate) async fn read_terminal_output(
     manager: tauri::State<'_, TerminalProcessManager>,
     pane_id: String,
     known_output_revision: Option<u64>,
+    known_output_cursor: Option<crate::terminal::types::TerminalOutputCursor>,
 ) -> Result<TerminalPaneSnapshot, String> {
     let manager = manager.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         manager
-            .read(&pane_id, known_output_revision)
+            .read_since(
+                &pane_id,
+                known_output_revision,
+                known_output_cursor.as_ref(),
+            )
             .map_err(to_string)
     })
     .await

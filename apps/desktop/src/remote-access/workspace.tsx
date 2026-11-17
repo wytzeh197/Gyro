@@ -327,7 +327,7 @@ export default function RemoteWorkspace({
             ? [
                 {
                   id: "storage",
-                  text: "Browser storage is full. Your drafts and edits stay available while this window is open.",
+                  text: "Remote drafts could not be saved on this Mac. Keep this window open while you check storage and retry.",
                   tone: "warning" as const,
                 },
               ]
@@ -600,9 +600,15 @@ export default function RemoteWorkspace({
                   if (pending && decision !== "allow-project")
                     decide(approvalId, pending.kind, decision, pending.turnId);
                 }}
-                onMutationApprovalAction={(approvalId, decision) =>
-                  decide(approvalId, "mutation", decision)
-                }
+                onMutationApprovalAction={async (approvalId, decision) => {
+                  if (decision === "preview") {
+                    const mutation = data.snapshot?.mutations.find(item => item.id === approvalId);
+                    if (mutation?.patch === undefined) throw new Error(mutation?.previewError ?? "Refresh the session to load this proposal's changes.");
+                    return { patch: mutation.patch };
+                  }
+                  decide(approvalId, "mutation", decision);
+                  return undefined;
+                }}
                 questionState={{
                   resolvedId: view.resolvedQuestions[session.id],
                   onResolve: (id) => {

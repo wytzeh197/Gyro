@@ -34,6 +34,17 @@ pub(super) struct ResolveCitedChatImageRequest {
 pub(super) fn resolve_cited_chat_image_request(
     request: ResolveCitedChatImageRequest,
 ) -> Result<Option<String>, String> {
+    Ok(resolve_image_request(request)?.map(|image| image.path.display().to_string()))
+}
+
+struct ResolvedCitedImage {
+    root: PathBuf,
+    path: PathBuf,
+}
+
+fn resolve_image_request(
+    request: ResolveCitedChatImageRequest,
+) -> Result<Option<ResolvedCitedImage>, String> {
     let paths = gyro_core::GyroPaths::for_current_user().map_err(|error| error.to_string())?;
     let attachments = request
         .session_id
@@ -43,7 +54,7 @@ pub(super) fn resolve_cited_chat_image_request(
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from);
-    let resolved = resolve_cited_chat_image(
+    let resolved = resolve_scoped_image(
         &request.target,
         &CitedImageContext {
             workspace: request
@@ -58,7 +69,7 @@ pub(super) fn resolve_cited_chat_image_request(
             home,
         },
     );
-    Ok(resolved.map(|path| path.display().to_string()))
+    Ok(resolved)
 }
 
 /// Previewing an existing image is a bounded read, not an attachment upload.
@@ -66,15 +77,19 @@ pub(super) fn resolve_cited_chat_image_request(
 pub(super) fn read_cited_chat_image_request(
     request: ResolveCitedChatImageRequest,
 ) -> Result<Option<String>, String> {
-    let Some(path) = resolve_cited_chat_image_request(request)? else {
+    let Some(image) = resolve_image_request(request)? else {
         return Ok(None);
     };
-    image_data_url(Path::new(&path)).map(Some)
+    image_data_url(&image.root, &image.path).map(Some)
 }
 
-fn image_data_url(path: &Path) -> Result<String, String> {
-    let (bytes, _) = crate::workspace::files::read_bounded_regular_file(
-        path,
+fn image_data_url(root: &Path, path: &Path) -> Result<String, String> {
+    let root = root.canonicalize().map_err(|error| error.to_string())?;
+    let path = gyro_core::security::assert_path_inside_workspace(&root, path)
+        .map_err(|error| error.to_string())?;
+    let (bytes, _) = crate::workspace::files::read_workspace_bytes(
+        &root,
+        &path,
         crate::app::limits::MAX_CHAT_IMAGE_BYTES as usize,
         "chat image preview",
     )
@@ -93,6 +108,10 @@ pub(super) fn resolve_cited_chat_image(
     target: &str,
     context: &CitedImageContext,
 ) -> Option<PathBuf> {
+    resolve_scoped_image(target, context).map(|image| image.path)
+}
+
+fn resolve_scoped_image(target: &str, context: &CitedImageContext) -> Option<ResolvedCitedImage> {
     let candidate = cited_candidate(target)?;
     let roots = image_roots(context);
     match candidate {
@@ -199,7 +218,7 @@ fn workspace_labels(workspace: &Path) -> Vec<String> {
     labels
 }
 
-fn accept_image(root: &Path, candidate: &Path) -> Option<PathBuf> {
+fn accept_image(root: &Path, candidate: &Path) -> Option<ResolvedCitedImage> {
     let root = root.canonicalize().ok()?;
     if !fs::metadata(&root).ok()?.is_dir() {
         return None;
@@ -208,7 +227,9 @@ fn accept_image(root: &Path, candidate: &Path) -> Option<PathBuf> {
     if !canonical.starts_with(&root) {
         return None;
     }
-    let metadata = fs::metadata(&canonical).ok()?;
+    let parent = gyro_core::workspace_write::WorkspaceWriteParent::open(&root, &canonical).ok()?;
+    let mut file = parent.open_read().ok()?;
+    let metadata = file.metadata().ok()?;
     if !metadata.is_file()
         || metadata.len() == 0
         || metadata.len() > crate::app::limits::MAX_CHAT_IMAGE_BYTES
@@ -216,11 +237,14 @@ fn accept_image(root: &Path, candidate: &Path) -> Option<PathBuf> {
         return None;
     }
     let mut header = [0_u8; 16];
-    let mut file = fs::File::open(&canonical).ok()?;
     let read = file.read(&mut header).ok()?;
     crate::sessions::attachments::validated_chat_media_type("cited", false, &header[..read])
         .ok()?;
-    Some(canonical)
+    parent.verify().ok()?;
+    Some(ResolvedCitedImage {
+        root,
+        path: canonical,
+    })
 }
 
 fn safe_relative(target: &str) -> Option<PathBuf> {
@@ -322,6 +346,22 @@ fn percent_decode(value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[cfg(unix)]
+    fn preview_rejects_a_parent_replaced_after_resolution() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let root = base.join("workspace");
+        let outside = base.join("outside");
+        fs::create_dir_all(root.join("images")).unwrap();
+        fs::create_dir(&outside).unwrap();
+        fs::write(root.join("images/view.png"), PNG).unwrap();
+        fs::write(outside.join("view.png"), PNG).unwrap();
+        let approved = accept_image(&root, &root.join("images/view.png")).unwrap();
+        fs::rename(root.join("images"), root.join("old")).unwrap();
+        std::os::unix::fs::symlink(outside, root.join("images")).unwrap();
+        assert!(image_data_url(&approved.root, &approved.path).is_err());
+    }
 
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\ncited";
 
@@ -356,11 +396,11 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let image = temp.path().join("invalid.png");
         fs::write(&image, b"not an image").unwrap();
-        assert!(image_data_url(&image).is_err());
+        assert!(image_data_url(temp.path(), &image).is_err());
         let file = fs::File::create(&image).unwrap();
         file.set_len(crate::app::limits::MAX_CHAT_IMAGE_BYTES + 1)
             .unwrap();
-        assert!(image_data_url(&image).is_err());
+        assert!(image_data_url(temp.path(), &image).is_err());
     }
 
     fn context(workspace: &Path, home: &Path, provider: &str, session: &str) -> CitedImageContext {

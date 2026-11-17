@@ -89,12 +89,19 @@ assert.equal(pending.length, 0);
 
 let config;
 let configLoaded = false;
+let configError = true;
 let finishDiscovery;
 const refreshConfig = hook("refreshConfig", "selectDestination", {
+  configRefreshGenerationRef: { current: 0 },
   setConfig: (value) => {
     config = typeof value === "function" ? value(config) : value;
   },
-  setConfigLoaded: (value) => { configLoaded = value; },
+  setConfigLoaded: (value) => {
+    configLoaded = value;
+  },
+  setConfigError: (value) => {
+    configError = value;
+  },
   setActiveProfileId: () => {},
   providersForConfig: (value) => value.modelProviders,
   withCouncilConfig: (value) => value,
@@ -117,7 +124,16 @@ const refreshConfig = hook("refreshConfig", "selectDestination", {
   },
 });
 await refreshConfig();
-assert.equal(configLoaded, true, "startup marks config ready before optional discovery");
+assert.equal(
+  configLoaded,
+  true,
+  "startup marks config ready before optional discovery",
+);
+assert.equal(
+  configError,
+  false,
+  "successful config reads clear the recovery state",
+);
 assert.equal(
   config.preference,
   "original",
@@ -135,8 +151,88 @@ assert.equal(
   "discovery must preserve newer preferences",
 );
 assert.equal(config.modelProviders[0].selectedModelId, "test:small");
+await refreshConfig();
+const olderDiscovery = finishDiscovery;
+await refreshConfig();
+const newerDiscovery = finishDiscovery;
+newerDiscovery({
+  baseUrl: "http://localhost:11434/api",
+  models: [{ id: "new-model", displayName: "New", supportsTools: false }],
+});
+await flush();
+olderDiscovery({
+  baseUrl: "http://localhost:11434/api",
+  models: [{ id: "old-model", displayName: "Old", supportsTools: false }],
+});
+await flush();
+assert.equal(
+  config.modelProviders[0].selectedModelId,
+  "new-model",
+  "Late discovery must not replace the newest provider model catalog",
+);
+
+// Refreshes can overlap after focus, provider changes, and recovery. A slow
+// earlier success or error must never replace the newer acknowledged state.
+for (const olderFails of [false, true]) {
+  const loads = [];
+  let current;
+  let loaded = false;
+  let failed = true;
+  const refresh = hook("refreshConfig", "selectDestination", {
+    configRefreshGenerationRef: { current: 0 },
+    setConfig: (value) => {
+      current = typeof value === "function" ? value(current) : value;
+    },
+    setConfigLoaded: (value) => {
+      loaded = value;
+    },
+    setConfigError: (value) => {
+      failed = value;
+    },
+    setActiveProfileId() {},
+    providersForConfig: (value) => value.modelProviders,
+    withCouncilConfig: (value) => value,
+    applyProviderCapabilityManifest() {},
+    restoreModelCatalog() {},
+    invoke: (command) =>
+      command === "load_config"
+        ? new Promise((resolve, reject) => loads.push({ resolve, reject }))
+        : Promise.resolve([]),
+  });
+  const older = refresh();
+  const newer = refresh();
+  loads[1].resolve({
+    preference: "newer",
+    commandProfiles: [],
+    modelProviders: [],
+  });
+  await newer;
+  if (olderFails) loads[0].reject(Error("late read failure"));
+  else
+    loads[0].resolve({
+      preference: "older",
+      commandProfiles: [],
+      modelProviders: [],
+    });
+  await older;
+  assert.equal(
+    current.preference,
+    "newer",
+    "Late config reads must not roll back newer preferences",
+  );
+  assert.equal(
+    loaded,
+    true,
+    "Late failures must not hide a successfully loaded app",
+  );
+  assert.equal(
+    failed,
+    false,
+    "Late failures must not reopen configuration recovery",
+  );
+}
 console.log(
-  "Startup performance checks passed: bounded Git refresh bursts, stale-workspace suppression, failure recovery, nonblocking Ollama discovery, preserved preferences.",
+  "Startup performance checks passed: bounded Git refresh bursts, stale-workspace suppression, failure recovery, nonblocking discovery, and config/catalog refresh ordering.",
 );
 
 const selectionStart = source.indexOf(

@@ -264,7 +264,7 @@ export default function RemoteAccessSettings() {
                 label="Allow remote access"
                 onChange={(next) =>
                   void run(async () => {
-                    await action({ action: "configure", enabled: next, name });
+                    await action({ action: "configure", enabled: next, name: next ? name : status.settings.name });
                     setInvitation(undefined);
                   })
                 }
@@ -474,7 +474,12 @@ export default function RemoteAccessSettings() {
                       value={name}
                       maxLength={80}
                       onChange={(event) => setName(event.target.value)}
-                      onBlur={() => {
+                      onBlur={(event) => {
+                        if (event.relatedTarget?.getAttribute("aria-label") === "Allow remote access") return;
+                        if (!name.trim() || /[\u0000-\u001f\u007f]/.test(name)) {
+                          setError("Use a device name between 1 and 80 characters");
+                          return;
+                        }
                         if (name !== status.settings.name)
                           void run(() =>
                             action({
@@ -706,6 +711,14 @@ export default function RemoteAccessSettings() {
             )}
           </>
         )}
+        {status && <SettingsGroup label="Recent device activity" description="Latest 50 records. Repeated actions are counted together. Prompts, file contents and terminal input are never recorded here.">
+          {!status.activity?.length ? <SettingsEmptyState title="No device activity yet" description="Actions from connected devices appear here." /> : status.activity.map((entry) => (
+            <SettingsRow key={entry.id} label={`${status.peers.find((peer) => peer.id === entry.peerId)?.name ?? (entry.peerId.startsWith("ssh:") ? "SSH device" : fingerprint(entry.peerId))} · ${entry.action}`}
+              detail={`${new Date(entry.at * 1000).toLocaleString()}${entry.count > 1 ? ` · ${entry.count} times` : ""}${entry.sessionId ? ` · Chat ${entry.sessionId.slice(0, 8)}` : ""}`}>
+              <SettingsStatus status={entry.ok ? "good" : "critical"}>{entry.ok ? "Succeeded" : "Failed"}</SettingsStatus>
+            </SettingsRow>
+          ))}
+        </SettingsGroup>}
       </div>
     </SettingsSection>
   );

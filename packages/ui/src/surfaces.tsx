@@ -969,6 +969,7 @@ function ChatSwitcher({
 
 type AppChromeProps = {
   sidebarProjectsReady?: boolean;
+  onRetrySessionLoad?: () => Promise<void>;
   sessions: Session[];
   commandProfiles: CommandProfile[];
   savedProjects: Array<{ path: string; label: string }>;
@@ -1903,10 +1904,13 @@ export function CliUpdateBanner({
 function FailureNotice({
   notification,
   onDismiss,
+  onRetry,
 }: {
   notification: Notification;
   onDismiss?: (id: string) => void;
+  onRetry?: () => Promise<void>;
 }) {
+  const [retrying, setRetrying] = useState(false);
   return (
     <div
       className="gyro-cli-update-banner gyro-failure-notice"
@@ -1921,6 +1925,19 @@ function FailureNotice({
         <strong>{notification.title}</strong>
         {notification.detail ? <small>{notification.detail}</small> : null}
       </span>
+      {onRetry ? (
+        <button
+          className="gyro-cli-update-banner-action"
+          disabled={retrying}
+          onClick={() => {
+            setRetrying(true);
+            void onRetry().finally(() => setRetrying(false));
+          }}
+          type="button"
+        >
+          {retrying ? "Retrying…" : "Retry"}
+        </button>
+      ) : null}
       <button
         aria-label={`Dismiss ${notification.title}`}
         className="gyro-cli-update-banner-dismiss"
@@ -2002,6 +2019,7 @@ function PreservedLocalWorkspace({
 
 export function AppChrome({
   sidebarProjectsReady = true,
+  onRetrySessionLoad,
   sessions,
   commandProfiles,
   savedProjects,
@@ -3188,6 +3206,7 @@ export function AppChrome({
                 key={notification.id}
                 notification={notification}
                 onDismiss={onDismissNotification}
+                onRetry={notification.correlationKey === "session-list-load" ? onRetrySessionLoad : undefined}
               />
             ))}
             {!remoteActive &&
@@ -5008,8 +5027,8 @@ type ChatSurfaceProps = {
   onComposerAction?: (action: string) => void;
   onMutationApprovalAction?: (
     proposalId: string,
-    decision: "approve" | "reject",
-  ) => void;
+    decision: "approve" | "reject" | "preview",
+  ) => void | Promise<{ patch: string } | void>;
   onProviderApprovalAction?: (
     approvalId: string,
     decision: "approve" | "reject" | "allow-project",
@@ -18684,6 +18703,8 @@ export type SettingsSurfaceProps = {
   interfaceSize?: InterfaceSize;
   motionSpeed?: MotionSpeed;
   reduceMotion?: boolean;
+  persistenceError?: boolean;
+  onRetryPersistence?: () => void;
   appearanceSaveStatus?: "saving" | "saved" | "error";
   onRetryAppearanceSave?: () => void;
   onInterfaceSizeChange?: (size: InterfaceSize) => void;
@@ -18963,6 +18984,8 @@ export function SettingsSurface({
   interfaceSize = "default",
   motionSpeed = "default",
   reduceMotion = false,
+  persistenceError,
+  onRetryPersistence,
   appearanceSaveStatus,
   onRetryAppearanceSave,
   onInterfaceSizeChange,
@@ -19435,6 +19458,10 @@ export function SettingsSurface({
           aria-label="Settings"
           data-settings-page={activeSection}
         >
+          {persistenceError && <p className="gyro-settings-page-status" role="alert">
+            Settings could not be saved. Changes are kept in memory until you close Gyro.{" "}
+            <button type="button" className="gyro-secondary-button" onClick={onRetryPersistence}>Retry saving</button>
+          </p>}
           {activeSection === "remote-access" ? <RemoteAccessSettingsContent /> : null}
           {activeSection === "import-projects" && projectImport ? (
             <SettingsSection
@@ -24716,8 +24743,8 @@ const ChatEvent = memo(function ChatEvent({
   ) => void | Promise<string | void>;
   onMutationApprovalAction?: (
     proposalId: string,
-    decision: "approve" | "reject",
-  ) => void;
+    decision: "approve" | "reject" | "preview",
+  ) => void | Promise<{ patch: string } | void>;
   onProviderApprovalAction?: (
     approvalId: string,
     decision: "approve" | "reject" | "allow-project",
@@ -24806,6 +24833,7 @@ const ChatEvent = memo(function ChatEvent({
   if (mutationApproval) {
     return (
       <MutationApprovalCard
+        key={mutationApproval.proposalId}
         approval={mutationApproval}
         onAction={onMutationApprovalAction}
       />
@@ -24982,8 +25010,24 @@ function MutationApprovalCard({
   onAction,
 }: {
   approval: MutationApproval;
-  onAction?: (proposalId: string, decision: "approve" | "reject") => void;
+  onAction?: (proposalId: string, decision: "approve" | "reject" | "preview") => void | Promise<{ patch: string } | void>;
 }) {
+  const [preview, setPreview] = useState<string>();
+  const [loading, setLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string>();
+  useEffect(() => { setPreview(undefined); setPreviewError(undefined); }, [approval.proposalId]);
+  const loadPreview = async () => {
+    setLoading(true);
+    setPreview(undefined);
+    setPreviewError(undefined);
+    try {
+      const result = await onAction?.(approval.proposalId, "preview");
+      if (!result) throw new Error("Change preview is unavailable.");
+      setPreview(result.patch);
+    } catch (error) {
+      setPreviewError(String(error));
+    } finally { setLoading(false); }
+  };
   return (
     <InlineApprovalCard
       title={
@@ -25004,7 +25048,7 @@ function MutationApprovalCard({
             .map((value) => (/[.!?]$/.test(value) ? value : `${value}.`))
             .join(" ")
         : ""}
-      files={[{ path: approval.path }]}
+      files={[{ path: approval.path, diff: preview }]}
       scope={
         approval.workspacePath
           ? `Workspace: ${approval.workspacePath}`
@@ -25012,10 +25056,14 @@ function MutationApprovalCard({
             ? "Selected project only"
             : approval.scope
       }
-      error={approval.error}
+      error={previewError ?? approval.error}
       status={approval.status}
       actions={
         <>
+          <button disabled={!onAction} aria-disabled={loading || !onAction} aria-busy={loading}
+            onClick={() => { if (!loading) void loadPreview(); }} type="button">
+            {loading ? "Loading changes…" : preview === undefined ? "Load changes" : "Reload changes"}
+          </button>
           <button
             disabled={!onAction}
             onClick={() => onAction?.(approval.proposalId, "reject")}
@@ -25025,7 +25073,7 @@ function MutationApprovalCard({
           </button>
           <button
             className="is-primary"
-            disabled={!onAction}
+            disabled={!onAction || preview === undefined || loading}
             onClick={() => onAction?.(approval.proposalId, "approve")}
             type="button"
           >
@@ -25570,8 +25618,8 @@ function ChatTurnView({
   onUndoChanges?: () => void;
   onMutationApprovalAction?: (
     proposalId: string,
-    decision: "approve" | "reject",
-  ) => void;
+    decision: "approve" | "reject" | "preview",
+  ) => void | Promise<{ patch: string } | void>;
   onProviderApprovalAction?: (
     approvalId: string,
     decision: "approve" | "reject" | "allow-project",

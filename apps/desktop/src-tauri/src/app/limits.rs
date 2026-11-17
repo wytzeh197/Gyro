@@ -21,8 +21,8 @@ pub(crate) const MAX_CHAT_IMAGES: usize = 10;
 pub(crate) const MAX_CHAT_VIDEO_BYTES: u64 = 200 * 1024 * 1024;
 pub(crate) const MAX_CHAT_VIDEOS: usize = 2;
 pub(crate) const MAX_CHAT_ATTACHMENTS: usize = 16;
-pub(crate) const MAX_CHAT_WORKSPACE_ATTACHMENT_BYTES: u64 = 32 * 1024 * 1024;
-pub(crate) const MAX_CHAT_IDE_SNAPSHOT_BYTES: u64 = 128 * 1024;
+pub(crate) use gyro_core::provider_runtime::limits::MAX_CHAT_IDE_SNAPSHOT_BYTES;
+pub(crate) use gyro_core::provider_runtime::limits::MAX_CHAT_WORKSPACE_ATTACHMENT_BYTES;
 pub(crate) const MAX_CHAT_ATTACHMENT_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 // A chat keeps its files for as long as its transcript points at them, so these
 // limits last its whole life. Bytes are the budget. The file count only guards
@@ -65,8 +65,6 @@ pub(crate) const GIT_STATUS_PREPARATION_TIMEOUT: Duration = Duration::from_secs(
 pub(crate) const MAX_GIT_STATUS_CACHES: usize = 32;
 pub(crate) const MAX_WORKSPACE_WATCH_CACHES: usize = 8;
 pub(crate) const MAX_WORKSPACE_PREPARATION_CACHES: usize = MAX_WORKSPACE_WATCH_CACHES;
-pub(crate) const WORKSPACE_SEARCH_FALLBACK_TIMEOUT: Duration = Duration::from_secs(10);
-pub(crate) const MAX_WORKSPACE_SEARCH_FALLBACK_FILES: usize = 5_000;
 pub(crate) const MAX_WORKSPACE_SEARCH_FALLBACK_BYTES: u64 = 64 * 1024 * 1024;
 pub(crate) const MAX_DESKTOP_SESSION_EVENTS_READ: usize = 400;
 /// Recent sessions read during shell warm-up, mirroring the page the sidebar

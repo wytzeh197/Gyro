@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import vm from "node:vm";
 import ts from "typescript";
+import { createChatSendLifecycle } from "../apps/desktop/src/chat-send-lifecycle.ts";
+import { readChatSessionList } from "../apps/desktop/src/chat-session-updates.ts";
 
 const source = readRepoSource(
   new URL("../apps/desktop/src/App.tsx", import.meta.url),
@@ -33,7 +35,7 @@ function callback(name, context) {
       },
     },
   ).outputText;
-  return vm.runInNewContext(js, { useCallback: (fn) => fn, ...context });
+  return vm.runInNewContext(js, { useCallback: (fn) => fn, readChatSessionList: read => readChatSessionList(read, async () => {}), notify: () => {}, dispatchWorkbench: () => {}, chatSendLifecycleRef: { current: createChatSendLifecycle() }, ...context });
 }
 
 const draftKey = "new:/project";

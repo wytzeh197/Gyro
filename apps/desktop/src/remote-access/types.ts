@@ -35,6 +35,7 @@ export type SshHost = {
   connected: boolean;
 };
 export type AccessStatus = {
+  activity?: Array<{ id: number; peerId: string; action: string; sessionId: string; at: number; ok: boolean; count: number }>;
   sshHosts?: SshHost[];
   sshClientId?: string;
   sshHostingActive?: boolean;
@@ -81,6 +82,8 @@ export type History = {
 };
 export type Snapshot = {
   liveEvents?: ProviderChatStreamEvent[];
+  liveCheckpoint?: boolean;
+  liveTruncated?: boolean;
   providerUsage?: ProviderUsageState;
   sessionUsage?: SessionUsageTotals;
   session: Session;
@@ -94,6 +97,8 @@ export type Snapshot = {
   }>;
   /** Pending file-edit proposals as the host stores them. */
   mutations: Array<{
+    patch?: string;
+    previewError?: string;
     id: string;
     path?: string;
     operation?: "create" | "update";
@@ -196,7 +201,7 @@ export type HostOperation =
     };
 export type HostEvent = {
   sessionId: string;
-  topic: "provider" | "refresh" | "resync";
+  topic: "provider" | "refresh" | "resync" | "checkpoint" | "terminal";
   payload: Record<string, unknown> | null;
 };
 export type HostRequest = {
@@ -206,6 +211,7 @@ export type HostRequest = {
 };
 export type GitSnapshot = { status: SourceControlState; revision: string };
 export type TerminalSnapshot = {
+  outputCursor?: { generation: string; start: number; end: number };
   paneId: string;
   title: string;
   output?: string;

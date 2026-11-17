@@ -12,7 +12,9 @@ use crate::{
     command_execution::{apply_terminal_credential_policy, run_bounded_command},
     diagnostics::export::{terminal_command_path, user_home_directory},
     git::commands::git_command,
-    terminal::types::{TerminalPaneRequest, TerminalPaneSnapshot, TerminalProcessManager},
+    terminal::types::{
+        TerminalOutputCursor, TerminalPaneRequest, TerminalPaneSnapshot, TerminalProcessManager,
+    },
 };
 use gyro_core::augmented_gui_path;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
@@ -23,6 +25,12 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
+// Metadata-only wakeups. Remote subscribers batch output reads off the UI thread.
+static OUTPUT_CHANGES: std::sync::OnceLock<tokio::sync::broadcast::Sender<String>> =
+    std::sync::OnceLock::new();
+pub(crate) fn output_changes() -> &'static tokio::sync::broadcast::Sender<String> {
+    OUTPUT_CHANGES.get_or_init(|| tokio::sync::broadcast::channel(256).0)
+}
 pub(crate) struct TerminalProcess {
     request: TerminalPaneRequest,
     working_directory: Option<PathBuf>,
@@ -41,11 +49,36 @@ pub(crate) struct TerminalProcess {
 
 pub(crate) type TerminalPane = Arc<Mutex<TerminalProcess>>;
 
-#[derive(Default)]
 pub(crate) struct TerminalOutputBuffer {
     pub(crate) bytes: VecDeque<u8>,
     pub(crate) revision: u64,
     reader_finished: bool,
+    pending_utf8: Vec<u8>,
+    end: u64,
+    generation: String,
+}
+
+impl Default for TerminalOutputBuffer {
+    fn default() -> Self {
+        Self {
+            bytes: VecDeque::new(),
+            revision: 0,
+            reader_finished: false,
+            pending_utf8: Vec::new(),
+            end: 0,
+            generation: uuid::Uuid::new_v4().to_string(),
+        }
+    }
+}
+
+impl TerminalOutputBuffer {
+    fn cursor(&self) -> TerminalOutputCursor {
+        TerminalOutputCursor {
+            generation: self.generation.clone(),
+            start: self.end - self.bytes.len() as u64,
+            end: self.end,
+        }
+    }
 }
 
 impl Drop for TerminalProcess {
@@ -64,6 +97,43 @@ fn lock_pane(pane: &TerminalPane) -> std::sync::MutexGuard<'_, TerminalProcess> 
 /// Terminates a pane that has already left the map. Quit runs these in parallel.
 pub(crate) fn terminate_terminal_pane(pane: &TerminalPane) {
     terminate_terminal_process(&mut lock_pane(pane));
+}
+
+/// A close or newer launch invalidates this reservation, including while cwd or
+/// governance resolution is blocked. Dropping a failed launch removes its entry.
+pub(crate) struct TerminalLaunch {
+    pane_id: String,
+    token: Arc<()>,
+    pending: Arc<Mutex<HashMap<String, Arc<()>>>>,
+}
+impl TerminalLaunch {
+    pub(crate) fn ensure_current(&self) -> anyhow::Result<()> {
+        let pending = self
+            .pending
+            .lock()
+            .map_err(|_| anyhow::anyhow!("terminal launch lock poisoned"))?;
+        if !pending
+            .get(&self.pane_id)
+            .is_some_and(|token| Arc::ptr_eq(token, &self.token))
+        {
+            anyhow::bail!("terminal launch cancelled");
+        }
+        Ok(())
+    }
+}
+impl Drop for TerminalLaunch {
+    fn drop(&mut self) {
+        let mut pending = self
+            .pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if pending
+            .get(&self.pane_id)
+            .is_some_and(|token| Arc::ptr_eq(token, &self.token))
+        {
+            pending.remove(&self.pane_id);
+        }
+    }
 }
 
 impl TerminalProcessManager {
@@ -96,6 +166,28 @@ impl TerminalProcessManager {
         &self,
         request: TerminalPaneRequest,
     ) -> anyhow::Result<TerminalPaneSnapshot> {
+        let launch = self.begin_launch(&request.pane_id)?;
+        self.create_with_launch(request, launch)
+    }
+
+    pub(crate) fn begin_launch(&self, pane_id: &str) -> anyhow::Result<TerminalLaunch> {
+        let token = Arc::new(());
+        self.pending_launches
+            .lock()
+            .map_err(|_| anyhow::anyhow!("terminal launch lock poisoned"))?
+            .insert(pane_id.to_owned(), Arc::clone(&token));
+        Ok(TerminalLaunch {
+            pane_id: pane_id.to_owned(),
+            token,
+            pending: Arc::clone(&self.pending_launches),
+        })
+    }
+
+    pub(crate) fn create_with_launch(
+        &self,
+        request: TerminalPaneRequest,
+        launch: TerminalLaunch,
+    ) -> anyhow::Result<TerminalPaneSnapshot> {
         let at_limit = |panes: &HashMap<String, TerminalPane>, pane_id: &str| {
             !panes.contains_key(pane_id) && panes.len() >= MAX_TERMINAL_PROCESSES
         };
@@ -104,10 +196,23 @@ impl TerminalProcessManager {
         }
         // Resolving the working directory can run git for seconds; never hold
         // the pane map while doing it.
-        let mut process = spawn_terminal_process(request)?;
+        launch.ensure_current()?;
+        let mut process = spawn_terminal_process(request, &launch)?;
         let snapshot = snapshot_terminal_process(&mut process, None);
         let pane_id = process.request.pane_id.clone();
         let replaced = {
+            // Keep cancellation and insertion atomic with respect to Close.
+            let pending = self
+                .pending_launches
+                .lock()
+                .map_err(|_| anyhow::anyhow!("terminal launch lock poisoned"))?;
+            if !pending
+                .get(&launch.pane_id)
+                .is_some_and(|token| Arc::ptr_eq(token, &launch.token))
+            {
+                drop(pending);
+                anyhow::bail!("terminal launch cancelled");
+            }
             let mut panes = self.lock_panes()?;
             if at_limit(&*panes, &pane_id) {
                 drop(panes);
@@ -154,6 +259,45 @@ impl TerminalProcessManager {
         })
     }
 
+    /// Local renderers can ask for only the unseen UTF-8 bytes. Legacy and
+    /// remote consumers may continue to request complete bounded snapshots.
+    pub(crate) fn read_since(
+        &self,
+        pane_id: &str,
+        revision: Option<u64>,
+        cursor: Option<&TerminalOutputCursor>,
+    ) -> anyhow::Result<TerminalPaneSnapshot> {
+        self.with_pane(pane_id, |process| {
+            let same_generation = cursor.is_some_and(|cursor| {
+                process
+                    .output
+                    .lock()
+                    .is_ok_and(|output| output.generation == cursor.generation)
+            });
+            let mut snapshot = snapshot_terminal_process(
+                process,
+                if cursor.is_some() && !same_generation {
+                    None
+                } else {
+                    revision
+                },
+            );
+            if let (Some(cursor), Some(text)) = (cursor, snapshot.output.as_mut()) {
+                if cursor.generation == snapshot.output_cursor.generation
+                    && cursor.end >= snapshot.output_cursor.start
+                    && cursor.end <= snapshot.output_cursor.end
+                {
+                    let offset = (cursor.end - snapshot.output_cursor.start) as usize;
+                    if text.is_char_boundary(offset) {
+                        *text = text.split_off(offset);
+                        snapshot.output_cursor.start = cursor.end;
+                    }
+                }
+            }
+            Ok(snapshot)
+        })
+    }
+
     /// Resource listings need only the pane label, not a PTY poll or scrollback.
     pub(crate) fn title(&self, pane_id: &str) -> anyhow::Result<String> {
         self.with_pane(pane_id, |process| Ok(process.request.title.clone()))
@@ -181,14 +325,16 @@ impl TerminalProcessManager {
         rows: u16,
     ) -> anyhow::Result<TerminalPaneSnapshot> {
         self.with_pane(pane_id, |process| {
-            process.cols = cols;
-            process.rows = rows;
             process.master.resize(PtySize {
                 rows,
                 cols,
                 pixel_width: 0,
                 pixel_height: 0,
             })?;
+            process.cols = cols;
+            process.rows = rows;
+            process.request.cols = Some(cols);
+            process.request.rows = Some(rows);
             Ok(snapshot_terminal_process(process, None))
         })
     }
@@ -214,10 +360,18 @@ impl TerminalProcessManager {
     /// Closes a pane, returning the governed session it held so the caller can
     /// retire its approval authority.
     pub(crate) fn close(&self, pane_id: &str) -> anyhow::Result<Option<String>> {
-        let pane = self
-            .lock_panes()?
-            .remove(pane_id)
-            .ok_or_else(|| anyhow::anyhow!("terminal pane not found"))?;
+        let pane = {
+            let mut pending = self
+                .pending_launches
+                .lock()
+                .map_err(|_| anyhow::anyhow!("terminal launch lock poisoned"))?;
+            let cancelled = pending.remove(pane_id).is_some();
+            match self.lock_panes()?.remove(pane_id) {
+                Some(pane) => pane,
+                None if cancelled => return Ok(None),
+                None => anyhow::bail!("terminal pane not found"),
+            }
+        };
         let mut process = lock_pane(&pane);
         let governed_session = process
             .request
@@ -231,6 +385,11 @@ impl TerminalProcessManager {
     /// Removes every pane without terminating it, so quit can stop them in
     /// parallel under one deadline.
     pub(crate) fn take_all(&self) -> Vec<TerminalPane> {
+        let mut pending = self
+            .pending_launches
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        pending.clear();
         self.processes
             .lock()
             .map(|mut panes| panes.drain().map(|(_, pane)| pane).collect())
@@ -273,9 +432,10 @@ impl TerminalProcessManager {
         pane_id: &str,
         refresh_policy: impl FnOnce(&mut TerminalPaneRequest) -> anyhow::Result<()>,
     ) -> anyhow::Result<TerminalPaneSnapshot> {
+        let launch = self.begin_launch(pane_id)?;
         let mut request = self.with_pane(pane_id, |process| Ok(process.request.clone()))?;
         refresh_policy(&mut request)?;
-        self.create(request)
+        self.create_with_launch(request, launch)
     }
 
     pub(crate) fn restore(&self) -> anyhow::Result<Vec<TerminalPaneSnapshot>> {
@@ -287,7 +447,10 @@ impl TerminalProcessManager {
     }
 }
 
-fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<TerminalProcess> {
+fn spawn_terminal_process(
+    request: TerminalPaneRequest,
+    launch: &TerminalLaunch,
+) -> anyhow::Result<TerminalProcess> {
     if request.command.trim().is_empty() {
         anyhow::bail!("terminal command cannot be empty");
     }
@@ -324,9 +487,8 @@ fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<Termin
             command.env(name, value);
         }
     }
-    if !command_path.contains('/') {
-        command.env("PATH", augmented_gui_path());
-    }
+    // Absolute executables still need a usable PATH for their subprocesses.
+    command.env("PATH", augmented_gui_path());
     if let Some(sandbox) = sandbox.as_ref() {
         for (key, value) in sandbox.environment() {
             command.env(key, value);
@@ -338,25 +500,30 @@ fn spawn_terminal_process(request: TerminalPaneRequest) -> anyhow::Result<Termin
     // here could drop scratch while leaving the just-spawned process alive.
     let reader = pair.master.try_clone_reader()?;
     let writer = pair.master.take_writer()?;
+    launch.ensure_current()?;
     let child = pair.slave.spawn_command(command)?;
     let output = Arc::new(Mutex::new(TerminalOutputBuffer::default()));
-    spawn_terminal_reader(reader, Arc::clone(&output));
     drop(pair.slave);
 
-    Ok(TerminalProcess {
+    let mut process = TerminalProcess {
         request,
         working_directory: cwd,
         master: pair.master,
         writer: Arc::new(Mutex::new(writer)),
         child,
-        output,
+        output: Arc::clone(&output),
         status: "running".into(),
         exit_code: None,
         cols,
         rows,
         terminated: false,
         sandbox,
-    })
+    };
+    if let Err(error) = spawn_terminal_reader(reader, output, process.request.pane_id.clone()) {
+        terminate_terminal_process(&mut process);
+        return Err(error.into());
+    }
+    Ok(process)
 }
 
 fn terminate_terminal_process(process: &mut TerminalProcess) {
@@ -510,24 +677,41 @@ fn terminal_local_workspace(workspace: &Path) -> anyhow::Result<PathBuf> {
     Ok(workspace.to_path_buf())
 }
 
-fn spawn_terminal_reader<R>(reader: R, output: Arc<Mutex<TerminalOutputBuffer>>)
+fn spawn_terminal_reader<R>(
+    reader: R,
+    output: Arc<Mutex<TerminalOutputBuffer>>,
+    pane_id: String,
+) -> std::io::Result<()>
 where
     R: Read + Send + 'static,
 {
-    std::thread::spawn(move || {
-        let mut reader = BufReader::new(reader);
-        let mut chunk = [0; 8192];
-        loop {
-            match reader.read(&mut chunk) {
-                Ok(0) => break,
-                Ok(count) => append_terminal_output(&output, &chunk[..count]),
-                Err(_) => break,
+    std::thread::Builder::new()
+        .name("gyro-pty-reader".into())
+        .spawn(move || {
+            let mut reader = BufReader::new(reader);
+            let mut chunk = [0; 8192];
+            loop {
+                match reader.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(count) => {
+                        append_terminal_output(&output, &chunk[..count]);
+                        let _ = output_changes().send(pane_id.clone());
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(_) => break,
+                }
             }
-        }
-        if let Ok(mut output) = output.lock() {
-            output.reader_finished = true;
-        }
-    });
+            if let Ok(mut output) = output.lock() {
+                if !output.pending_utf8.is_empty() {
+                    let tail = String::from_utf8_lossy(&std::mem::take(&mut output.pending_utf8))
+                        .into_owned();
+                    retain_terminal_text(&mut output, &tail);
+                }
+                output.reader_finished = true;
+            }
+            let _ = output_changes().send(pane_id);
+        })
+        .map(|_| ())
 }
 
 pub(crate) fn append_terminal_output(output: &Arc<Mutex<TerminalOutputBuffer>>, bytes: &[u8]) {
@@ -537,25 +721,58 @@ pub(crate) fn append_terminal_output(output: &Arc<Mutex<TerminalOutputBuffer>>, 
     let Ok(mut output) = output.lock() else {
         return;
     };
-    output.revision = output.revision.wrapping_add(1).max(1);
-    if bytes.len() >= MAX_TERMINAL_OUTPUT_BYTES {
-        output.bytes.clear();
-        output.bytes.extend(
-            bytes[bytes.len() - MAX_TERMINAL_OUTPUT_BYTES..]
-                .iter()
-                .copied(),
-        );
+    // Decode incrementally: a poll must never see half an emoji as U+FFFD.
+    let mut pending = std::mem::take(&mut output.pending_utf8);
+    pending.extend_from_slice(bytes);
+    let mut remaining = pending.as_slice();
+    let mut text = String::new();
+    while !remaining.is_empty() {
+        match std::str::from_utf8(remaining) {
+            Ok(valid) => {
+                text.push_str(valid);
+                break;
+            }
+            Err(error) => {
+                let valid = error.valid_up_to();
+                text.push_str(&String::from_utf8_lossy(&remaining[..valid]));
+                if let Some(invalid) = error.error_len() {
+                    text.push('\u{fffd}');
+                    remaining = &remaining[valid + invalid..];
+                } else {
+                    output.pending_utf8.extend_from_slice(&remaining[valid..]);
+                    break;
+                }
+            }
+        }
+    }
+    retain_terminal_text(&mut output, &text);
+}
+
+fn retain_terminal_text(output: &mut TerminalOutputBuffer, text: &str) {
+    if text.is_empty() {
         return;
     }
-    let overflow = output
-        .bytes
-        .len()
-        .saturating_add(bytes.len())
-        .saturating_sub(MAX_TERMINAL_OUTPUT_BYTES);
-    if overflow > 0 {
+    output.revision = output.revision.wrapping_add(1).max(1);
+    output.end += text.len() as u64;
+    let bytes = text.as_bytes();
+    if bytes.len() >= MAX_TERMINAL_OUTPUT_BYTES {
+        output.bytes.clear();
+        output
+            .bytes
+            .extend(&bytes[bytes.len() - MAX_TERMINAL_OUTPUT_BYTES..]);
+    } else {
+        let overflow = output
+            .bytes
+            .len()
+            .saturating_add(bytes.len())
+            .saturating_sub(MAX_TERMINAL_OUTPUT_BYTES);
         output.bytes.drain(..overflow);
+        output.bytes.extend(bytes);
     }
-    output.bytes.extend(bytes.iter().copied());
+    // A rolling window may start inside a multibyte character; never replay it.
+    while output.bytes.front().is_some_and(|byte| byte & 0xc0 == 0x80) {
+        output.bytes.pop_front();
+    }
 }
 
 fn snapshot_terminal_process(
@@ -586,14 +803,17 @@ fn snapshot_terminal_process(
         }
     }
 
-    let (output, output_revision, output_complete) = process
+    let (output, output_revision, output_complete, output_cursor) = process
         .output
         .lock()
         .map(|value| {
             let (output, revision) = snapshot_terminal_output(&value, known_output_revision);
-            (output, revision, value.reader_finished)
+            (output, revision, value.reader_finished, value.cursor())
         })
-        .unwrap_or((None, 0, false));
+        .unwrap_or_else(|poisoned| {
+            let value = poisoned.into_inner();
+            (None, value.revision, value.reader_finished, value.cursor())
+        });
     let has_foreground_job = terminal_process_has_foreground_job(process);
     TerminalPaneSnapshot {
         pane_id: process.request.pane_id.clone(),
@@ -606,6 +826,7 @@ fn snapshot_terminal_process(
             .join(" "),
         output,
         output_revision,
+        output_cursor,
         output_complete,
         status: process.status.clone(),
         has_foreground_job,
@@ -673,6 +894,122 @@ fn terminal_output_text(output: &VecDeque<u8>) -> String {
 mod tests {
     use super::*;
     use std::{fs, sync::mpsc, time::Instant};
+
+    #[test]
+    fn split_utf8_and_rollover_preserve_stream_positions() {
+        let output = Arc::new(Mutex::new(TerminalOutputBuffer::default()));
+        append_terminal_output(&output, &[0xf0, 0x9f]);
+        assert_eq!(
+            snapshot_terminal_output(&output.lock().unwrap(), None)
+                .0
+                .as_deref(),
+            Some("")
+        );
+        append_terminal_output(&output, &[0x98, 0x80]);
+        assert_eq!(
+            snapshot_terminal_output(&output.lock().unwrap(), None)
+                .0
+                .as_deref(),
+            Some("😀")
+        );
+        append_terminal_output(&output, &vec![b'x'; MAX_TERMINAL_OUTPUT_BYTES]);
+        let before = output.lock().unwrap().cursor();
+        append_terminal_output(&output, b"xxxxxxxx");
+        let after = output.lock().unwrap().cursor();
+        assert_eq!(before.generation, after.generation);
+        assert_eq!(after.end - before.end, 8);
+        assert_eq!(after.end - after.start, MAX_TERMINAL_OUTPUT_BYTES as u64);
+    }
+
+    #[test]
+    fn cancelled_launch_cannot_reappear_and_new_launch_can_succeed() {
+        let manager = TerminalProcessManager::default();
+        let launch = manager.begin_launch("pending").unwrap();
+        manager.close("pending").unwrap();
+        let result = manager.create_with_launch(
+            TerminalPaneRequest {
+                pane_id: "pending".into(),
+                command: "sh".into(),
+                args: vec!["-c".into(), "exec sleep 30".into()],
+                ..Default::default()
+            },
+            launch,
+        );
+        assert!(result.unwrap_err().to_string().contains("cancelled"));
+        assert!(manager.restore().unwrap().is_empty());
+        assert!(manager.pending_launches.lock().unwrap().is_empty());
+        start(&manager, "pending", "printf ready; exec sleep 30");
+        wait_for_output(&manager, "pending", "ready");
+        manager.close("pending").unwrap();
+    }
+
+    #[test]
+    fn restart_keeps_resized_pty_and_changes_output_generation() {
+        let manager = TerminalProcessManager::default();
+        start(&manager, "geometry", "stty size; exec sleep 30");
+        let before = manager.resize("geometry", 93, 27).unwrap();
+        let after = manager.restart("geometry").unwrap();
+        assert_eq!((after.cols, after.rows), (93, 27));
+        assert_ne!(
+            before.output_cursor.generation,
+            after.output_cursor.generation
+        );
+        wait_for_output(&manager, "geometry", "27 93");
+        manager.close("geometry").unwrap();
+    }
+
+    #[test]
+    fn ctrl_c_reaches_the_foreground_process() {
+        let manager = TerminalProcessManager::default();
+        start(
+            &manager,
+            "interrupt",
+            "trap 'printf interrupted; exit 0' INT; printf ready; while :; do sleep 1; done",
+        );
+        wait_for_output(&manager, "interrupt", "ready");
+        manager.write("interrupt", "\x03").unwrap();
+        wait_for_output(&manager, "interrupt", "interrupted");
+        manager.close("interrupt").unwrap();
+    }
+
+    #[test]
+    fn read_since_returns_exact_delta_and_full_snapshot_after_restart() {
+        let manager = TerminalProcessManager::default();
+        start(
+            &manager,
+            "delta",
+            "printf hello; read answer; printf world; exec sleep 30",
+        );
+        wait_for_output(&manager, "delta", "hello");
+        let first = manager.read("delta", None).unwrap();
+        manager.write("delta", "\n").unwrap();
+        wait_for_output(&manager, "delta", "world");
+        let delta = manager
+            .read_since(
+                "delta",
+                Some(first.output_revision),
+                Some(&first.output_cursor),
+            )
+            .unwrap();
+        assert!(!delta.output.as_deref().unwrap().contains("hello"));
+        assert!(delta.output.as_deref().unwrap().ends_with("world"));
+        assert_eq!(delta.output_cursor.start, first.output_cursor.end);
+        manager.restart("delta").unwrap();
+        wait_for_output(&manager, "delta", "hello");
+        let restarted = manager
+            .read_since(
+                "delta",
+                Some(first.output_revision),
+                Some(&first.output_cursor),
+            )
+            .unwrap();
+        assert!(restarted.output.as_deref().unwrap().contains("hello"));
+        assert_ne!(
+            restarted.output_cursor.generation,
+            first.output_cursor.generation
+        );
+        manager.close("delta").unwrap();
+    }
 
     #[test]
     fn imported_provider_login_receives_its_resolved_home_without_shell_interpolation() {

@@ -537,6 +537,8 @@ pub struct WorkspaceContextSnapshot {
     pub active_view: Option<String>,
     #[serde(default)]
     pub visible_tabs: Vec<String>,
+    #[serde(default = "workspace_buffers_complete")]
+    pub buffers_complete: bool,
     pub selection: Option<Value>,
     #[serde(default)]
     pub buffers: Vec<Value>,
@@ -563,6 +565,7 @@ impl WorkspaceContextSnapshot {
             active_path: None,
             active_view: None,
             visible_tabs: Vec::new(),
+            buffers_complete: true,
             selection: None,
             buffers: Vec::new(),
             diagnostics: Vec::new(),
@@ -598,6 +601,10 @@ impl WorkspaceContextSnapshot {
         validate_capability_result_data(serde_json::to_value(self)?)?;
         Ok(())
     }
+}
+
+fn workspace_buffers_complete() -> bool {
+    true
 }
 
 fn workspace_context_available() -> String {

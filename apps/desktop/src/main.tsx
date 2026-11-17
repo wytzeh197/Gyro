@@ -130,8 +130,10 @@ if (bootSurface === "embedded") {
     import("./menu-bar.css"),
     import("./dictation-access"),
     import("@gyro-dev/ui/tooltips"),
+    import("./editor/durable-edit-recovery"),
   ])
-    .then(([{ App }, { RemoteWorkspaceRoot }, , , , , { installGyroTooltips }]) => {
+    .then(async ([{ App }, { RemoteWorkspaceRoot }, , , , , { installGyroTooltips }, { initializeDurableEditRecovery }]) => {
+      await initializeDurableEditRecovery();
       installGyroTooltips();
       root.render(
         <React.StrictMode>

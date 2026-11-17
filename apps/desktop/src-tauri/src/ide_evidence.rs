@@ -44,6 +44,13 @@ impl IdeEvidenceCache {
     /// project once the cap is reached. The entry just written is never the
     /// one dropped, so a push for a new project always lands.
     pub(super) fn store(&mut self, workspace_key: String, snapshot: WorkspaceContextSnapshot) {
+        if self
+            .entries
+            .get(&workspace_key)
+            .is_some_and(|current| current.revision > 0 && snapshot.revision <= current.revision)
+        {
+            return;
+        }
         self.touch(&workspace_key);
         self.entries.insert(workspace_key.clone(), snapshot);
         while self.entries.len() > self.capacity {
@@ -98,6 +105,21 @@ mod tests {
 
     fn snapshot(workspace_key: &str) -> WorkspaceContextSnapshot {
         WorkspaceContextSnapshot::empty(workspace_key)
+    }
+
+    #[test]
+    fn older_or_duplicate_revision_cannot_replace_live_evidence() {
+        let mut cache = IdeEvidenceCache::default();
+        let mut latest = snapshot("a");
+        latest.revision = 200;
+        latest.buffers = vec![serde_json::json!({"path":"a.txt","dirty":true})];
+        cache.store("a".into(), latest.clone());
+        for revision in [100, 200, 0] {
+            let mut old = snapshot("a");
+            old.revision = revision;
+            cache.store("a".into(), old);
+            assert_eq!(cache.get("a"), Some(&latest));
+        }
     }
 
     #[test]

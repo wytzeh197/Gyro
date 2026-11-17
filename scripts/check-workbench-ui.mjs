@@ -7864,7 +7864,7 @@ expect(
     !sourceIncludes(appSource, "shouldClearGoal") &&
     sourceIncludes(
       appSource,
-      'const turnGoal = turnMode === "plan" ? undefined : (',
+      'const turnGoal = turnMode === "plan" ? undefined :',
     ) &&
     sourceIncludes(appSource, 'overrideContext && "goal" in overrideContext') &&
     sourceIncludes(appSource, "const turnMode =") &&

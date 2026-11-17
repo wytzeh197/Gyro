@@ -1,4 +1,4 @@
-use crate::diff::{changed_line_counts, summarize_text_diff, TextDiff};
+use crate::diff::{changed_line_counts_and_patch, summarize_text_diff, TextDiff};
 use crate::security::assert_path_inside_workspace;
 use crate::sessions::{
     MutationProposal, MutationProposalStatus, SessionEvent, SessionEventKind, SessionStore,
@@ -45,6 +45,7 @@ pub enum MutationDecision {
 pub struct MutationReview {
     pub proposal: MutationProposal,
     pub diff: TextDiff,
+    pub patch: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -80,6 +81,17 @@ pub struct PreparedProviderMutationTransaction {
 }
 
 impl PreparedProviderMutationTransaction {
+    /// ACP replacements must derive from the bytes this connection observed,
+    /// not from a fresh baseline silently adopted when the write arrives.
+    pub fn assert_observed_base(&self, observed_hash: Option<&str>) -> Result<()> {
+        anyhow::ensure!(self.changes.len() == 1, "expected one ACP replacement");
+        anyhow::ensure!(
+            self.changes[0].expected_hash.as_deref() == observed_hash,
+            "file changed or was not read by this ACP session; read it again before writing"
+        );
+        Ok(())
+    }
+
     pub fn workspace_path(&self) -> &Path {
         &self.workspace_path
     }
@@ -152,6 +164,7 @@ pub struct PendingProviderMutationCommit {
     journal_path: PathBuf,
     journal: ProviderMutationJournal,
     _lock: ProviderMutationRecoveryLock,
+    _workspace_lock: ProviderMutationRecoveryLock,
 }
 
 impl PendingProviderMutationCommit {
@@ -201,14 +214,35 @@ struct ProviderMutationJournalEntry {
 }
 
 #[derive(Debug)]
-struct ProviderMutationRecoveryLock {
+pub struct ProviderMutationRecoveryLock {
     _file: fs::File,
+}
+
+#[cfg(unix)]
+impl Drop for ProviderMutationRecoveryLock {
+    fn drop(&mut self) {
+        // A concurrent fork can inherit the open file description until exec.
+        // Release the owner's lease even while that child retains a copy.
+        loop {
+            if unsafe { libc::flock(self._file.as_raw_fd(), libc::LOCK_UN) } == 0 {
+                break;
+            }
+            if std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+                break;
+            }
+        }
+    }
 }
 
 pub fn review_mutation_proposal(proposal: MutationProposal) -> Result<MutationReview> {
     let original = read_original_content(&proposal)?;
     let diff = summarize_text_diff(&original, &proposal.content);
-    Ok(MutationReview { proposal, diff })
+    let patch = diffy::create_patch(&original, &proposal.content).to_string();
+    Ok(MutationReview {
+        proposal,
+        diff,
+        patch,
+    })
 }
 
 pub fn decide_mutation_proposal(
@@ -228,12 +262,41 @@ pub fn decide_mutation_proposal_with_cancellation<F>(
 where
     F: FnMut() -> bool,
 {
+    decide_mutation_proposal_checked(store, proposal_id, decision, &mut is_cancelled, |_| Ok(()))
+}
+
+/// Desktop approval can revalidate live editor evidence while holding the same
+/// write lock used by editor saves, including just before the staged rename.
+pub fn decide_mutation_proposal_guarded<G>(
+    store: &SessionStore,
+    proposal_id: Uuid,
+    decision: MutationDecision,
+    guard: G,
+) -> Result<MutationDecisionResult>
+where
+    G: FnMut(&MutationProposal) -> Result<()>,
+{
+    decide_mutation_proposal_checked(store, proposal_id, decision, || false, guard)
+}
+
+fn decide_mutation_proposal_checked<F, G>(
+    store: &SessionStore,
+    proposal_id: Uuid,
+    decision: MutationDecision,
+    mut is_cancelled: F,
+    mut guard: G,
+) -> Result<MutationDecisionResult>
+where
+    F: FnMut() -> bool,
+    G: FnMut(&MutationProposal) -> Result<()>,
+{
     ensure_mutation_not_cancelled(&mut is_cancelled)?;
     let _mutation_lock =
         acquire_provider_mutation_lock_blocking(&store.paths().mutation_journals_dir)?;
     let proposal = store
         .get_mutation_proposal(proposal_id)?
         .ok_or_else(|| anyhow!("unknown mutation proposal {proposal_id}"))?;
+    let _workspace_lock = acquire_workspace_write_lock()?;
     let proposal = if proposal.status == MutationProposalStatus::Applying {
         reconcile_claimed_mutation_proposal(store, proposal)?
     } else {
@@ -301,8 +364,22 @@ where
                 return Err(anyhow!("could not apply {}: {detail}", proposal.path));
             }
 
+            guard(&proposal)?;
             let proposal = store.claim_mutation_proposal(proposal_id)?;
-            match apply_mutation_proposal(&proposal, &mut is_cancelled) {
+            let mut guard_error = None;
+            let applied = apply_mutation_proposal(&proposal, &mut || {
+                if let Err(error) = guard(&proposal) {
+                    guard_error = Some(error);
+                    true
+                } else {
+                    is_cancelled()
+                }
+            });
+            let applied = match guard_error {
+                Some(error) => Err(error),
+                None => applied,
+            };
+            match applied {
                 Ok((changed_path, counts)) => {
                     let proposal = store.finish_claimed_mutation_proposal(
                         proposal_id,
@@ -408,11 +485,16 @@ fn append_mutation_decision_event_with_counts(
 }
 
 fn read_original_content(proposal: &MutationProposal) -> Result<String> {
+    let candidate = workspace_file_target(proposal)?;
     if !proposal.base_exists {
+        anyhow::ensure!(
+            !candidate.exists(),
+            "file appeared after proposal; request a new edit"
+        );
         return Ok(String::new());
     }
-    let candidate = workspace_file_target(proposal)?;
-    let bytes = read_bounded_mutation_file(
+    let bytes = read_workspace_mutation_file(
+        &proposal.workspace_path,
         &candidate,
         MAX_PROVIDER_MUTATION_FILE_BYTES,
         "mutation target",
@@ -420,7 +502,11 @@ fn read_original_content(proposal: &MutationProposal) -> Result<String> {
     if bytes.contains(&0) {
         return Err(anyhow!("mutation target is a binary file"));
     }
-    Ok(String::from_utf8_lossy(&bytes).to_string())
+    anyhow::ensure!(
+        proposal.expected_hash.as_deref() == Some(content_hash(&bytes).as_str()),
+        "file changed after proposal; request a new edit"
+    );
+    Ok(String::from_utf8(bytes).context("proposal base is not UTF-8")?)
 }
 
 fn reconcile_claimed_mutation_proposal(
@@ -430,7 +516,8 @@ fn reconcile_claimed_mutation_proposal(
     let target = workspace_file_target(&proposal)?;
     let desired_hash = content_hash(proposal.content.as_bytes());
     let applied = target.is_file()
-        && read_bounded_mutation_file(
+        && read_workspace_mutation_file(
+            &proposal.workspace_path,
             &target,
             MAX_PROVIDER_MUTATION_FILE_BYTES,
             "claimed mutation target",
@@ -474,7 +561,8 @@ where
         if candidate.is_dir() {
             return Err(anyhow!("mutation target became a directory"));
         }
-        let current = read_bounded_mutation_file(
+        let current = read_workspace_mutation_file(
+            &proposal.workspace_path,
             &candidate,
             MAX_PROVIDER_MUTATION_FILE_BYTES,
             "mutation target",
@@ -502,19 +590,15 @@ where
         ));
     }
 
-    let counts = changed_line_counts(&original, proposal.content.as_bytes());
-    atomic_write_workspace_file(&candidate, proposal.content.as_bytes(), is_cancelled)?;
-    let patch = captured_patch(&original, proposal.content.as_bytes());
+    let (counts, patch) =
+        changed_line_counts_and_patch(&original, proposal.content.as_bytes(), 256 * 1024);
+    atomic_write_workspace_file(
+        &proposal.workspace_path,
+        &candidate,
+        proposal.content.as_bytes(),
+        is_cancelled,
+    )?;
     Ok((candidate, (counts.0, counts.1, patch)))
-}
-
-fn captured_patch(before: &[u8], after: &[u8]) -> Option<String> {
-    let patch = diffy::create_patch(
-        std::str::from_utf8(before).ok()?,
-        std::str::from_utf8(after).ok()?,
-    )
-    .to_string();
-    (patch.len() <= 256 * 1024).then_some(patch)
 }
 
 fn ensure_mutation_not_cancelled<F>(is_cancelled: &mut F) -> Result<()>
@@ -554,7 +638,12 @@ fn workspace_file_target(proposal: &MutationProposal) -> Result<PathBuf> {
     ))
 }
 
-fn atomic_write_workspace_file<F>(path: &Path, content: &[u8], is_cancelled: &mut F) -> Result<()>
+fn atomic_write_workspace_file<F>(
+    root: &Path,
+    path: &Path,
+    content: &[u8],
+    is_cancelled: &mut F,
+) -> Result<()>
 where
     F: FnMut() -> bool,
 {
@@ -568,11 +657,9 @@ where
             .unwrap_or("mutation"),
         Uuid::new_v4()
     ));
+    let directory = crate::workspace_write::WorkspaceWriteParent::open(root, path)?;
     let result = (|| -> Result<()> {
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)?;
+        let mut file = directory.create(temporary.file_name().unwrap())?;
         if let Ok(metadata) = fs::metadata(path) {
             file.set_permissions(metadata.permissions())?;
         }
@@ -583,12 +670,16 @@ where
         file.flush()?;
         file.sync_all()?;
         ensure_mutation_not_cancelled(is_cancelled)?;
-        fs::rename(&temporary, path)?;
-        fs::File::open(parent)?.sync_all()?;
+        directory.rename_to(
+            temporary.file_name().unwrap(),
+            &directory,
+            path.file_name().unwrap(),
+        )?;
+        directory.sync()?;
         Ok(())
     })();
     if result.is_err() {
-        let _ = fs::remove_file(&temporary);
+        let _ = directory.remove(temporary.file_name().unwrap());
     }
     result
 }
@@ -628,6 +719,7 @@ pub fn prepare_provider_mutation_transaction(
                 ensure_provider_text(change.diff.as_bytes(), &source_relative)?;
                 total_bytes = total_bytes.saturating_add(change.diff.len());
                 push_provider_mutation(
+                    &workspace_path,
                     &mut prepared,
                     &mut destinations,
                     source_relative,
@@ -637,7 +729,8 @@ pub fn prepare_provider_mutation_transaction(
                 )?;
             }
             "update" => {
-                let current = read_provider_mutation_file(&source, &source_relative)?;
+                let current =
+                    read_provider_mutation_file(&workspace_path, &source, &source_relative)?;
                 let expected_hash = content_hash(&current);
                 let desired =
                     apply_provider_unified_diff(&source_relative, &current, change.diff.as_str())?;
@@ -659,6 +752,7 @@ pub fn prepare_provider_mutation_transaction(
                         ));
                     }
                     push_provider_mutation(
+                        &workspace_path,
                         &mut prepared,
                         &mut destinations,
                         source_relative,
@@ -667,6 +761,7 @@ pub fn prepare_provider_mutation_transaction(
                         None,
                     )?;
                     push_provider_mutation(
+                        &workspace_path,
                         &mut prepared,
                         &mut destinations,
                         destination_relative,
@@ -676,6 +771,7 @@ pub fn prepare_provider_mutation_transaction(
                     )?;
                 } else {
                     push_provider_mutation(
+                        &workspace_path,
                         &mut prepared,
                         &mut destinations,
                         source_relative,
@@ -686,8 +782,10 @@ pub fn prepare_provider_mutation_transaction(
                 }
             }
             "delete" | "remove" => {
-                let current = read_provider_mutation_file(&source, &source_relative)?;
+                let current =
+                    read_provider_mutation_file(&workspace_path, &source, &source_relative)?;
                 push_provider_mutation(
+                    &workspace_path,
                     &mut prepared,
                     &mut destinations,
                     source_relative,
@@ -732,7 +830,7 @@ pub fn prepare_provider_text_replacement_review(
         .with_context(|| format!("resolve provider workspace {}", workspace.display()))?;
     let relative_path = provider_relative_path(&workspace_path, target)?;
     let change = if target.exists() {
-        let current = read_provider_mutation_file(target, &relative_path)?;
+        let current = read_provider_mutation_file(&workspace_path, target, &relative_path)?;
         let current = String::from_utf8(current)
             .with_context(|| format!("read provider mutation target {relative_path} as UTF-8"))?;
         ProviderFileChange {
@@ -793,14 +891,14 @@ fn provider_changes_from_claude_tool(
                 .and_then(serde_json::Value::as_str)
                 .ok_or_else(|| anyhow!("Claude Write approval did not include content"))?;
             if target.exists() {
-                let current = read_claude_edit_target(&target, &relative_path)?;
+                let current = read_claude_edit_target(&workspace, &target, &relative_path)?;
                 ("update", diffy::create_patch(&current, desired).to_string())
             } else {
                 ("add", desired.to_string())
             }
         }
         "Edit" => {
-            let current = read_claude_edit_target(&target, &relative_path)?;
+            let current = read_claude_edit_target(&workspace, &target, &relative_path)?;
             let desired = apply_claude_text_edit(&current, input)?;
             (
                 "update",
@@ -808,7 +906,7 @@ fn provider_changes_from_claude_tool(
             )
         }
         "MultiEdit" => {
-            let current = read_claude_edit_target(&target, &relative_path)?;
+            let current = read_claude_edit_target(&workspace, &target, &relative_path)?;
             let edits = input
                 .get("edits")
                 .and_then(serde_json::Value::as_array)
@@ -844,8 +942,8 @@ fn provider_changes_from_claude_tool(
     }])
 }
 
-fn read_claude_edit_target(path: &Path, relative_path: &str) -> Result<String> {
-    let bytes = read_provider_mutation_file(path, relative_path)?;
+fn read_claude_edit_target(workspace: &Path, path: &Path, relative_path: &str) -> Result<String> {
+    let bytes = read_provider_mutation_file(workspace, path, relative_path)?;
     String::from_utf8(bytes)
         .with_context(|| format!("Claude edit target {relative_path} is not a UTF-8 text file"))
 }
@@ -898,12 +996,17 @@ pub fn apply_provider_mutation_transaction_with_cancellation<F>(
 where
     F: FnMut() -> bool,
 {
+    let _workspace_lock = acquire_workspace_write_lock()?;
     validate_provider_mutation_transaction(transaction, &mut is_cancelled)?;
     let staged = stage_provider_mutation_transaction(transaction, &mut is_cancelled)?;
     let backups = provider_mutation_backup_paths(transaction);
+    if let Err(error) = validate_provider_mutation_transaction(transaction, &mut is_cancelled) {
+        cleanup_provider_staging(&transaction.workspace_path, &staged);
+        return Err(error);
+    }
     commit_provider_mutation_transaction(transaction, &staged, &backups, &mut is_cancelled)?;
     for backup in backups.iter().flatten() {
-        let _ = fs::remove_file(backup);
+        let _ = crate::workspace_write::remove(&transaction.workspace_path, backup);
     }
     let _ = sync_provider_mutation_parents(transaction);
     Ok(provider_mutation_result(transaction))
@@ -929,6 +1032,7 @@ where
     F: FnMut() -> bool,
 {
     let mutation_lock = acquire_provider_mutation_lock_blocking(journal_dir)?;
+    let workspace_lock = acquire_workspace_write_lock()?;
     validate_provider_mutation_transaction(transaction, &mut is_cancelled)?;
     let staged = stage_provider_mutation_transaction(transaction, &mut is_cancelled)?;
     let backups = provider_mutation_backup_paths(transaction);
@@ -955,7 +1059,7 @@ where
     };
     let journal_path = provider_mutation_journal_path(journal_dir, journal.id)?;
     write_provider_mutation_journal(&journal_path, &journal).inspect_err(|_error| {
-        cleanup_provider_staging(&staged);
+        cleanup_provider_staging(&transaction.workspace_path, &staged);
     })?;
     let commit_result = validate_provider_mutation_transaction(transaction, &mut is_cancelled)
         .and_then(|()| {
@@ -972,6 +1076,7 @@ where
         journal_path,
         journal,
         _lock: mutation_lock,
+        _workspace_lock: workspace_lock,
     })
 }
 
@@ -999,10 +1104,15 @@ where
     let mut staged = vec![None; transaction.changes.len()];
     for (index, change) in transaction.changes.iter().enumerate() {
         if let Some(content) = change.desired_content.as_deref() {
-            match stage_provider_mutation_file(&change.target, content, is_cancelled) {
+            match stage_provider_mutation_file(
+                &transaction.workspace_path,
+                &change.target,
+                content,
+                is_cancelled,
+            ) {
                 Ok(temporary) => staged[index] = Some(temporary),
                 Err(error) => {
-                    cleanup_provider_staging(&staged);
+                    cleanup_provider_staging(&transaction.workspace_path, &staged);
                     return Err(error);
                 }
             }
@@ -1039,22 +1149,28 @@ where
     for (index, change) in transaction.changes.iter().enumerate() {
         if let Err(error) = ensure_mutation_not_cancelled(is_cancelled) {
             let _ = rollback_provider_mutations(transaction, backups, touched);
-            cleanup_provider_staging(staged);
+            cleanup_provider_staging(&transaction.workspace_path, staged);
             return Err(error);
         }
         if let Some(backup) = backups[index].as_ref() {
-            if let Err(error) = fs::rename(&change.target, backup) {
+            if let Err(error) =
+                crate::workspace_write::rename(&transaction.workspace_path, &change.target, backup)
+            {
                 let _ = rollback_provider_mutations(transaction, backups, touched);
-                cleanup_provider_staging(staged);
+                cleanup_provider_staging(&transaction.workspace_path, staged);
                 return Err(error)
                     .with_context(|| format!("back up approved file {}", change.relative_path));
             }
         }
         touched = index + 1;
         if let Some(temporary) = staged[index].as_ref() {
-            if let Err(error) = fs::rename(temporary, &change.target) {
+            if let Err(error) = crate::workspace_write::rename(
+                &transaction.workspace_path,
+                temporary,
+                &change.target,
+            ) {
                 let _ = rollback_provider_mutations(transaction, backups, touched);
-                cleanup_provider_staging(staged);
+                cleanup_provider_staging(&transaction.workspace_path, staged);
                 return Err(error)
                     .with_context(|| format!("commit approved file {}", change.relative_path));
             }
@@ -1062,7 +1178,7 @@ where
     }
     if let Err(error) = sync_provider_mutation_parents(transaction) {
         let _ = rollback_provider_mutations(transaction, backups, touched);
-        cleanup_provider_staging(staged);
+        cleanup_provider_staging(&transaction.workspace_path, staged);
         return Err(error);
     }
     Ok(())
@@ -1091,6 +1207,7 @@ fn provider_mutation_result(
 }
 
 fn push_provider_mutation(
+    workspace: &Path,
     prepared: &mut Vec<PreparedProviderMutation>,
     destinations: &mut HashSet<PathBuf>,
     relative_path: String,
@@ -1104,7 +1221,8 @@ fn push_provider_mutation(
         ));
     }
     let original = if let Some(expected) = expected_hash.as_deref() {
-        let bytes = read_bounded_mutation_file(
+        let bytes = read_workspace_mutation_file(
+            workspace,
             &target,
             MAX_PROVIDER_MUTATION_FILE_BYTES,
             "mutation target",
@@ -1116,18 +1234,11 @@ fn push_provider_mutation(
     } else {
         Vec::new()
     };
-    let line_counts =
-        changed_line_counts(&original, desired_content.as_deref().unwrap_or_default());
-    let patch = match (
-        std::str::from_utf8(&original),
-        std::str::from_utf8(desired_content.as_deref().unwrap_or_default()),
-    ) {
-        (Ok(before), Ok(after)) => {
-            let patch = diffy::create_patch(before, after).to_string();
-            (patch.len() <= 256 * 1024).then_some(patch)
-        }
-        _ => None,
-    };
+    let (line_counts, patch) = changed_line_counts_and_patch(
+        &original,
+        desired_content.as_deref().unwrap_or_default(),
+        256 * 1024,
+    );
     prepared.push(PreparedProviderMutation {
         patch,
         line_counts,
@@ -1206,13 +1317,34 @@ fn provider_relative_path(workspace: &Path, target: &Path) -> Result<String> {
         .replace('\\', "/"))
 }
 
-fn read_provider_mutation_file(path: &Path, relative_path: &str) -> Result<Vec<u8>> {
-    let bytes = read_bounded_mutation_file(
+fn read_provider_mutation_file(
+    workspace: &Path,
+    path: &Path,
+    relative_path: &str,
+) -> Result<Vec<u8>> {
+    let bytes = read_workspace_mutation_file(
+        workspace,
         path,
         MAX_PROVIDER_MUTATION_FILE_BYTES,
         &format!("provider mutation target {relative_path}"),
     )?;
     ensure_provider_text(&bytes, relative_path)?;
+    Ok(bytes)
+}
+
+fn read_workspace_mutation_file(
+    root: &Path,
+    path: &Path,
+    max_bytes: usize,
+    label: &str,
+) -> Result<Vec<u8>> {
+    let root = root.canonicalize()?;
+    let parent = crate::workspace_write::WorkspaceWriteParent::open(&root, path)?;
+    let file = parent
+        .open_read()
+        .with_context(|| format!("open {label} {}", path.display()))?;
+    let bytes = read_mutation_descriptor(file, path, max_bytes, label)?;
+    parent.verify()?;
     Ok(bytes)
 }
 
@@ -1225,11 +1357,24 @@ fn read_bounded_mutation_file(path: &Path, max_bytes: usize, label: &str) -> Res
         // Inspect the opened descriptor without waiting for a FIFO writer.
         options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
-    let mut file = options
+    let file = options
         .open(path)
         .with_context(|| format!("open {label} {}", path.display()))?;
-    if !file.metadata()?.is_file() {
+    read_mutation_descriptor(file, path, max_bytes, label)
+}
+
+fn read_mutation_descriptor(
+    mut file: fs::File,
+    path: &Path,
+    max_bytes: usize,
+    label: &str,
+) -> Result<Vec<u8>> {
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
         return Err(anyhow!("{label} is not a regular file"));
+    }
+    if metadata.len() > max_bytes as u64 {
+        return Err(anyhow!("{label} exceeds the {max_bytes} byte size limit"));
     }
     let mut bytes = Vec::with_capacity(max_bytes.min(8 * 1024));
     Read::by_ref(&mut file)
@@ -1290,7 +1435,7 @@ where
     }
     match &change.expected_hash {
         Some(expected_hash) => {
-            let current = read_provider_mutation_file(&target, &change.relative_path)?;
+            let current = read_provider_mutation_file(workspace, &target, &change.relative_path)?;
             if content_hash(&current) != *expected_hash {
                 return Err(anyhow!(
                     "{} changed after approval was requested; review the file set again",
@@ -1310,6 +1455,7 @@ where
 }
 
 fn stage_provider_mutation_file<F>(
+    root: &Path,
     target: &Path,
     content: &[u8],
     is_cancelled: &mut F,
@@ -1318,11 +1464,9 @@ where
     F: FnMut() -> bool,
 {
     let temporary = provider_sibling_path(target, "stage");
+    let directory = crate::workspace_write::WorkspaceWriteParent::open(root, target)?;
     let result = (|| -> Result<()> {
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)?;
+        let mut file = directory.create(temporary.file_name().unwrap())?;
         if let Ok(metadata) = fs::metadata(target) {
             file.set_permissions(metadata.permissions())?;
         }
@@ -1332,10 +1476,11 @@ where
         }
         file.flush()?;
         file.sync_all()?;
+        directory.verify()?;
         Ok(())
     })();
     if let Err(error) = result {
-        let _ = fs::remove_file(&temporary);
+        let _ = directory.remove(temporary.file_name().unwrap());
         return Err(error);
     }
     Ok(temporary)
@@ -1479,6 +1624,7 @@ pub fn recover_provider_mutation_transactions(
             ..ProviderMutationRecoveryReport::default()
         });
     };
+    let _workspace_lock = acquire_workspace_write_lock()?;
     let mut report = ProviderMutationRecoveryReport::default();
     for path in provider_mutation_journal_paths(journal_dir)? {
         match recover_provider_mutation_journal(&path, store) {
@@ -1552,6 +1698,19 @@ fn acquire_provider_mutation_recovery_lock(
     journal_dir: &Path,
 ) -> Result<Option<ProviderMutationRecoveryLock>> {
     acquire_provider_mutation_lock(journal_dir, true)
+}
+
+/// One user-private lock covers editor saves, immediate provider writes and
+/// approved transactions, including sessions opened with overlapping roots.
+/// Unlike journal locks, this is shared across SessionStore instances as well.
+pub fn acquire_workspace_write_lock() -> Result<ProviderMutationRecoveryLock> {
+    #[cfg(unix)]
+    let owner = unsafe { libc::geteuid() }.to_string();
+    #[cfg(not(unix))]
+    let owner = "user";
+    let directory = std::env::temp_dir().join(format!("gyro-workspace-writes-{owner}"));
+    crate::paths::ensure_private_directory(&directory)?;
+    acquire_provider_mutation_lock_blocking(&directory)
 }
 
 fn acquire_provider_mutation_lock_blocking(
@@ -1721,30 +1880,38 @@ fn rollback_provider_mutation_journal(journal: &ProviderMutationJournal) -> Resu
         if let Some(backup) = entry.backup.as_deref().filter(|path| path.exists()) {
             if entry.target.exists() {
                 ensure_recovery_hash(
+                    &journal.workspace_path,
                     &entry.target,
                     entry.desired_hash.as_deref(),
                     "committed target",
                 )?;
-                fs::remove_file(&entry.target)?;
+                crate::workspace_write::remove(&journal.workspace_path, &entry.target)?;
             }
-            fs::rename(backup, &entry.target)?;
+            crate::workspace_write::rename(&journal.workspace_path, backup, &entry.target)?;
             ensure_recovery_hash(
+                &journal.workspace_path,
                 &entry.target,
                 entry.original_hash.as_deref(),
                 "restored target",
             )?;
         } else if let Some(original_hash) = entry.original_hash.as_deref() {
-            ensure_recovery_hash(&entry.target, Some(original_hash), "original target")?;
+            ensure_recovery_hash(
+                &journal.workspace_path,
+                &entry.target,
+                Some(original_hash),
+                "original target",
+            )?;
         } else if entry.target.exists() {
             ensure_recovery_hash(
+                &journal.workspace_path,
                 &entry.target,
                 entry.desired_hash.as_deref(),
                 "created target",
             )?;
-            fs::remove_file(&entry.target)?;
+            crate::workspace_write::remove(&journal.workspace_path, &entry.target)?;
         }
         if let Some(stage) = entry.stage.as_deref().filter(|path| path.exists()) {
-            fs::remove_file(stage)?;
+            crate::workspace_write::remove(&journal.workspace_path, stage)?;
         }
     }
     sync_provider_mutation_journal_parents(journal)
@@ -1754,9 +1921,12 @@ fn finalize_provider_mutation_journal(journal: &ProviderMutationJournal) -> Resu
     validate_provider_mutation_journal(journal)?;
     for entry in &journal.entries {
         match entry.desired_hash.as_deref() {
-            Some(desired_hash) => {
-                ensure_recovery_hash(&entry.target, Some(desired_hash), "committed target")?
-            }
+            Some(desired_hash) => ensure_recovery_hash(
+                &journal.workspace_path,
+                &entry.target,
+                Some(desired_hash),
+                "committed target",
+            )?,
             None if entry.target.exists() => {
                 return Err(anyhow!(
                     "deleted provider target reappeared before journal cleanup"
@@ -1769,7 +1939,7 @@ fn finalize_provider_mutation_journal(journal: &ProviderMutationJournal) -> Resu
             .flatten()
         {
             if artifact.exists() {
-                fs::remove_file(artifact)?;
+                crate::workspace_write::remove(&journal.workspace_path, artifact)?;
             }
         }
     }
@@ -1790,9 +1960,15 @@ fn sync_provider_mutation_journal_parents(journal: &ProviderMutationJournal) -> 
     Ok(())
 }
 
-fn ensure_recovery_hash(path: &Path, expected: Option<&str>, label: &str) -> Result<()> {
+fn ensure_recovery_hash(
+    workspace: &Path,
+    path: &Path,
+    expected: Option<&str>,
+    label: &str,
+) -> Result<()> {
     let expected = expected.ok_or_else(|| anyhow!("provider journal is missing {label} hash"))?;
-    let bytes = read_bounded_mutation_file(path, MAX_PROVIDER_MUTATION_FILE_BYTES, label)?;
+    let bytes =
+        read_workspace_mutation_file(workspace, path, MAX_PROVIDER_MUTATION_FILE_BYTES, label)?;
     if content_hash(&bytes) != expected {
         return Err(anyhow!(
             "{label} changed before provider mutation recovery; manual review is required"
@@ -1809,18 +1985,18 @@ fn rollback_provider_mutations(
     for index in (0..touched).rev() {
         let change = &transaction.changes[index];
         if change.target.exists() {
-            fs::remove_file(&change.target)?;
+            crate::workspace_write::remove(&transaction.workspace_path, &change.target)?;
         }
         if let Some(backup) = backups[index].as_ref() {
-            fs::rename(backup, &change.target)?;
+            crate::workspace_write::rename(&transaction.workspace_path, backup, &change.target)?;
         }
     }
     sync_provider_mutation_parents(transaction)
 }
 
-fn cleanup_provider_staging(staged: &[Option<PathBuf>]) {
+fn cleanup_provider_staging(root: &Path, staged: &[Option<PathBuf>]) {
     for temporary in staged.iter().flatten() {
-        let _ = fs::remove_file(temporary);
+        let _ = crate::workspace_write::remove(root, temporary);
     }
 }
 
@@ -1842,6 +2018,46 @@ fn sync_provider_mutation_parents(transaction: &PreparedProviderMutationTransact
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn mutation_lock_releases_while_an_inherited_descriptor_remains_open() {
+        let temp = tempfile::tempdir().unwrap();
+        let lock = acquire_provider_mutation_recovery_lock(temp.path())
+            .unwrap()
+            .unwrap();
+        // A duplicate shares the open file description, just as a child does
+        // between fork and exec. It must not extend the owner's lease.
+        let inherited = lock._file.try_clone().unwrap();
+        assert!(acquire_provider_mutation_recovery_lock(temp.path())
+            .unwrap()
+            .is_none());
+        drop(lock);
+        let next = acquire_provider_mutation_recovery_lock(temp.path()).unwrap();
+        assert!(
+            next.is_some(),
+            "inherited descriptor retained the released lock"
+        );
+        drop(inherited);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn mutation_reads_refuse_a_replaced_parent() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let root = base.join("workspace");
+        let outside = base.join("outside");
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir(&outside).unwrap();
+        fs::write(root.join("src/file"), b"approved").unwrap();
+        fs::write(outside.join("file"), b"outside sentinel").unwrap();
+        let target =
+            crate::security::assert_path_inside_workspace(&root, Path::new("src/file")).unwrap();
+        fs::rename(root.join("src"), root.join("old")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("src")).unwrap();
+        assert!(read_workspace_mutation_file(&root, &target, 1024, "mutation fixture").is_err());
+    }
     use crate::{GyroPaths, SessionOrigin};
 
     #[cfg(unix)]
@@ -2106,6 +2322,180 @@ mod tests {
         let error = error.to_string();
         assert!(error.contains("outside") && error.contains("workspace"));
         assert!(!outside.path().join("out.txt").exists());
+    }
+
+    #[test]
+    fn acp_replacements_cannot_adopt_unread_or_changed_bases() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let file = root.join("file.txt");
+        fs::write(&file, "user changed this").unwrap();
+        let (transaction, _) =
+            prepare_provider_text_replacement_review(&root, &file, "agent replacement").unwrap();
+        assert!(transaction
+            .assert_observed_base(Some(&content_hash(b"agent read this earlier")))
+            .is_err());
+        assert!(transaction.assert_observed_base(None).is_err());
+        assert!(transaction
+            .assert_observed_base(Some(&content_hash(b"user changed this")))
+            .is_ok());
+        assert_eq!(fs::read_to_string(&file).unwrap(), "user changed this");
+        let (create, _) =
+            prepare_provider_text_replacement_review(&root, &root.join("new.txt"), "new").unwrap();
+        assert!(create.assert_observed_base(None).is_ok());
+    }
+
+    #[test]
+    fn concurrent_direct_writers_cannot_both_commit_the_same_base() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let file = root.join("shared.txt");
+        fs::write(&file, "base").unwrap();
+        let (a, _) = prepare_provider_text_replacement_review(&root, &file, "session A").unwrap();
+        let (b, _) = prepare_provider_text_replacement_review(&root, &file, "session B").unwrap();
+        let (staged, ready) = std::sync::mpsc::channel();
+        let (resume, wait) = std::sync::mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            let mut checks = 0;
+            apply_provider_mutation_transaction_with_cancellation(&a, || {
+                checks += 1;
+                if checks == 3 {
+                    staged.send(()).unwrap();
+                    wait.recv().unwrap();
+                }
+                false
+            })
+        });
+        ready
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap();
+        let (sent, result) = std::sync::mpsc::channel();
+        let sibling =
+            std::thread::spawn(move || sent.send(apply_provider_mutation_transaction(&b)).unwrap());
+        let premature = result.recv_timeout(std::time::Duration::from_millis(50));
+        resume.send(()).unwrap();
+        writer.join().unwrap().unwrap();
+        assert!(
+            matches!(premature, Err(std::sync::mpsc::RecvTimeoutError::Timeout)),
+            "second writer passed a live transaction"
+        );
+        let error = result
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap()
+            .unwrap_err();
+        sibling.join().unwrap();
+        assert!(error.to_string().contains("changed after approval"));
+        assert_eq!(fs::read_to_string(file).unwrap(), "session A");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn approval_rejects_a_parent_moved_outside_during_staging() {
+        let temp = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let src = root.join("src");
+        fs::create_dir(&src).unwrap();
+        fs::write(src.join("file.txt"), "base").unwrap();
+        let (store, session_id) = proposal_store(&temp);
+        let proposal = store
+            .create_mutation_proposal(
+                session_id,
+                None,
+                "src/file.txt",
+                "agent",
+                Some(content_hash(b"base")),
+                true,
+            )
+            .unwrap();
+        let moved = outside.path().join("moved");
+        let mut checks = 0;
+        let result = decide_mutation_proposal_with_cancellation(
+            &store,
+            proposal.id,
+            MutationDecision::Approve,
+            || {
+                checks += 1;
+                if checks == 4 {
+                    fs::rename(&src, &moved).unwrap();
+                    std::os::unix::fs::symlink(&moved, &src).unwrap();
+                }
+                false
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(moved.join("file.txt")).unwrap(), "base");
+        assert_eq!(
+            fs::read_dir(&moved).unwrap().count(),
+            1,
+            "staging is cleaned through its pinned descriptor"
+        );
+    }
+
+    #[test]
+    fn editor_guard_rejects_before_claim_and_again_before_commit() {
+        let temp = tempfile::tempdir().unwrap();
+        let (store, session_id) = proposal_store(&temp);
+        let proposal = store
+            .create_mutation_proposal(session_id, None, "guard.txt", "agent", None, false)
+            .unwrap();
+        let result = decide_mutation_proposal_guarded(
+            &store,
+            proposal.id,
+            MutationDecision::Approve,
+            |_| Err(anyhow!("unsaved editor text")),
+        );
+        assert!(result.unwrap_err().to_string().contains("unsaved editor"));
+        assert_eq!(
+            store
+                .get_mutation_proposal(proposal.id)
+                .unwrap()
+                .unwrap()
+                .status,
+            MutationProposalStatus::Pending
+        );
+        let mut checks = 0;
+        let result = decide_mutation_proposal_guarded(
+            &store,
+            proposal.id,
+            MutationDecision::Approve,
+            |_| {
+                checks += 1;
+                if checks >= 3 {
+                    Err(anyhow!("typing began during approval"))
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert!(result.unwrap_err().to_string().contains("typing began"));
+        assert!(!temp.path().join("guard.txt").exists());
+    }
+
+    #[test]
+    fn preview_rejects_a_changed_base_and_contains_the_complete_patch() {
+        let temp = tempfile::tempdir().unwrap();
+        let old = format!("{}old\n", "same\n".repeat(30));
+        let new = format!("{}new\n", "same\n".repeat(30));
+        fs::write(temp.path().join("review.txt"), &old).unwrap();
+        let (store, session_id) = proposal_store(&temp);
+        let proposal = store
+            .create_mutation_proposal(
+                session_id,
+                None,
+                "review.txt",
+                new,
+                Some(content_hash(old.as_bytes())),
+                true,
+            )
+            .unwrap();
+        let review = review_mutation_proposal(proposal.clone()).unwrap();
+        assert!(review.patch.contains("-old\n+new\n"));
+        fs::write(temp.path().join("review.txt"), "intervening edit").unwrap();
+        assert!(review_mutation_proposal(proposal)
+            .unwrap_err()
+            .to_string()
+            .contains("changed after proposal"));
     }
 
     #[test]

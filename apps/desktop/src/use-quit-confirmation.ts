@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { isTauriRuntime } from "./tauri-runtime";
 
-export function useQuitConfirmation() {
+export function useQuitConfirmation(beforeQuit?: () => Promise<void>) {
   const [requested, setRequested] = useState(false);
   useEffect(() => {
     if (!isTauriRuntime()) return;
@@ -34,6 +34,7 @@ export function useQuitConfirmation() {
   return {
     requested,
     async resolve(quit: boolean) {
+      if (quit) await beforeQuit?.();
       await invoke("resolve_quit_confirmation", { quit });
       setRequested(false);
     },

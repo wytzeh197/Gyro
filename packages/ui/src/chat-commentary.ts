@@ -53,53 +53,82 @@ const ONLINE_GREETING = /\bis online and working\b/i;
 const STATUS_GREETING =
   /\b(?:chat\s+mode\s+is\s+up|is\s+online\s+and\s+working|(?:is\s+)?(?:up|ready|online)\s+and\s+(?:ready|working)|ready\s+to\s+(?:help|work|assist))\b/i;
 
-/**
- * Offsets where successive streamed blocks were concatenated without a break.
- * Always includes 0 when any later boundary exists so callers can slice the
- * message into one segment per block.
- */
-export function gluedAssistantBlockStarts(value: string): number[] {
-  if (!value) {
-    return [];
-  }
-  const starts = [0];
-  for (const match of value.matchAll(GLUED_BLOCK_BOUNDARY)) {
-    const nextStart = match.index + match[1]!.length;
-    if (nextStart > starts[starts.length - 1]! && nextStart < value.length) {
-      starts.push(nextStart);
+/** Code and link destinations must never be repaired as prose or split at blank lines. */
+function opaqueMarkdownRanges(value: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  let fence: { start: number; marker: string } | undefined;
+  for (const match of value.matchAll(
+    /^ {0,3}(`{3,}|~{3,})([^\n]*)(?:\n|$)/gm,
+  )) {
+    const marker = match[1]!;
+    if (!fence) fence = { start: match.index!, marker };
+    else if (
+      marker[0] === fence.marker[0] &&
+      marker.length >= fence.marker.length &&
+      !match[2]!.trim()
+    ) {
+      ranges.push([fence.start, match.index! + match[0].length]);
+      fence = undefined;
     }
   }
-  return starts.length > 1 ? starts : [];
+  if (fence) ranges.push([fence.start, value.length]);
+  for (const match of value.matchAll(/(`+)([\s\S]*?)\1/g))
+    ranges.push([match.index!, match.index! + match[0].length]);
+  for (const match of value.matchAll(/\]\((?:<[^>]*>|[^)\n]+)\)/g))
+    ranges.push([match.index!, match.index! + match[0].length]);
+  // Merge once so long messages do not scan every code span for every boundary.
+  const merged: Array<[number, number]> = [];
+  for (const range of ranges.sort((a, b) => a[0] - b[0])) {
+    const previous = merged.at(-1);
+    if (previous && range[0] <= previous[1])
+      previous[1] = Math.max(previous[1], range[1]);
+    else merged.push(range);
+  }
+  return merged;
 }
 
-/**
- * Block starts from glued stream joins *and* blank-line paragraphs.
- * Providers often emit plan lines and the answer as separate paragraphs in one
- * durable message; without paragraph splits the whole blob becomes the final
- * answer (plan text mixed into the response body).
- */
-export function assistantMessageBlockStarts(value: string): number[] {
-  if (!value) {
-    return [];
-  }
+function textBlockStarts(value: string, paragraphs: boolean): number[] {
+  if (!value) return [];
+  const protectedRanges = opaqueMarkdownRanges(value);
+  const isProtected = (offset: number) => {
+    let low = 0;
+    let high = protectedRanges.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (protectedRanges[middle]![0] <= offset) low = middle + 1;
+      else high = middle;
+    }
+    return low > 0 && offset < protectedRanges[low - 1]![1];
+  };
   const starts = new Set<number>([0]);
   for (const match of value.matchAll(GLUED_BLOCK_BOUNDARY)) {
-    const nextStart = match.index + match[1]!.length;
-    if (nextStart > 0 && nextStart < value.length) {
-      starts.add(nextStart);
-    }
+    const start = match.index! + match[1]!.length;
+    if (!isProtected(match.index!)) starts.add(start);
   }
-  for (const match of value.matchAll(/\n[ \t]*\n+/g)) {
-    let nextStart = match.index + match[0].length;
-    while (nextStart < value.length && /[ \t\r]/.test(value[nextStart]!)) {
-      nextStart += 1;
+  if (paragraphs)
+    for (const match of value.matchAll(/\n[ \t]*\n+/g)) {
+      if (isProtected(match.index!)) continue;
+      const start = match.index! + match[0].length;
+      if (start < value.length) starts.add(start);
     }
-    if (nextStart > 0 && nextStart < value.length) {
-      starts.add(nextStart);
-    }
-  }
-  const sorted = [...starts].sort((a, b) => a - b);
-  return sorted.length > 1 ? sorted : [];
+  return starts.size > 1 ? [...starts].sort((a, b) => a - b) : [];
+}
+
+export function gluedAssistantBlockStarts(value: string): number[] {
+  return textBlockStarts(value, false);
+}
+
+export function assistantMessageBlockStarts(value: string): number[] {
+  return textBlockStarts(value, true);
+}
+
+/** Paragraphs retain all whitespace inside a Markdown code block. */
+export function assistantTextBlocks(value: string): string[] {
+  const starts = assistantMessageBlockStarts(value);
+  if (!starts.length) return value.trim() ? [value.trim()] : [];
+  return starts
+    .map((start, index) => value.slice(start, starts[index + 1]).trim())
+    .filter(Boolean);
 }
 
 /**
@@ -252,28 +281,15 @@ export function isAssistantPreambleBlock(value: string): boolean {
 }
 
 export function structuredCommentaryBlocks(value: string) {
-  return (
-    value
-      // Some providers send cumulative commentary updates without preserving the
-      // separator between updates (for example, `finished.I’ll continue`). Repair
-      // only that unmistakable boundary so ordinary prose, versions, and paths
-      // remain untouched.
-      .replace(GLUED_BLOCK_BOUNDARY, "$1\n\n")
-      .split(/\n\s*\n/)
-      .map((block) => block.trim())
-      .filter(
-        (block) =>
-          block &&
-          !isOrphanAssistantFragment(block) &&
-          !isTransientStatusGreeting(block),
-      )
+  return assistantTextBlocks(value).filter(
+    (block) =>
+      !isOrphanAssistantFragment(block) && !isTransientStatusGreeting(block),
   );
 }
 
-/** Final replies must remain visible even when they are just a digit or symbol. */
+/** Final answers are content, including single-character and symbol paragraphs. */
 export function finalAssistantResponseText(value: string): string {
-  const blocks = structuredCommentaryBlocks(value);
-  return blocks.length > 0 ? blocks.join("\n\n") : value.trim();
+  return assistantTextBlocks(value).join("\n\n");
 }
 
 /**
@@ -284,12 +300,15 @@ export function finalAssistantResponseText(value: string): string {
  * Transient status greetings ("chat mode is up") are dropped entirely rather
  * than moved to the rail — they should not show each turn.
  */
-export function peelAssistantPreambleBlocks(blocks: string[]): {
+export function peelAssistantPreambleBlocks(
+  blocks: string[],
+  preserveContent = false,
+): {
   preambles: string[];
   answer: string[];
 } {
   const usable = blocks.filter(
-    (block) => block && !isTransientStatusGreeting(block),
+    (block) => block && (preserveContent || !isTransientStatusGreeting(block)),
   );
   if (usable.length === 0) {
     return { preambles: [], answer: blocks.slice(-1) };
@@ -300,6 +319,11 @@ export function peelAssistantPreambleBlocks(blocks: string[]): {
   let peel = 0;
   while (
     peel < usable.length - 1 &&
+    !(
+      preserveContent &&
+      (isOrphanAssistantFragment(usable[peel] ?? "") ||
+        isTransientStatusGreeting(usable[peel] ?? ""))
+    ) &&
     isAssistantPreambleBlock(usable[peel] ?? "")
   ) {
     peel += 1;

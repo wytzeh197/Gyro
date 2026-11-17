@@ -67,6 +67,11 @@ function hooks() {
       }
       return values[index].value;
     },
+    useRef(current) {
+      const index = cursor++;
+      values[index] ??= { current };
+      return values[index];
+    },
   };
 }
 function compile(code, dependencies) {
@@ -159,6 +164,7 @@ const contextDependencies = {
     }),
   useEffect: contextHooks.useEffect,
   useMemo: contextHooks.useMemo,
+  useRef: contextHooks.useRef,
   selectedFile: undefined,
   workspaceRoots: ["/project/a", "/project/b"],
   workspaceActionRoot: "/project/a",

@@ -1,18 +1,13 @@
 use crate::{
-    app::limits::{
-        MAX_WORKSPACE_FILE_EDIT_BYTES, MAX_WORKSPACE_FILE_PREVIEW_BYTES,
-        MAX_WORKSPACE_SEARCH_FALLBACK_BYTES, MAX_WORKSPACE_SEARCH_FALLBACK_FILES,
-        WORKSPACE_PATHS_CHANGED_EVENT, WORKSPACE_SEARCH_FALLBACK_TIMEOUT,
-    },
+    app::limits::{MAX_WORKSPACE_FILE_EDIT_BYTES, WORKSPACE_PATHS_CHANGED_EVENT},
     ide::task_discovery::content_hash,
     state::workspace::WorkspaceWatchManager,
     stores::to_string,
     workspace::{
         files::{
-            assert_workspace_entry, assert_workspace_path, read_bounded_regular_file,
+            assert_workspace_entry, assert_workspace_path, read_workspace_bytes,
             stat_workspace_file_impl, workspace_root,
         },
-        tree::is_generated_workspace_dir,
         types::{
             WorkspaceFile, WorkspaceFileStat, WorkspacePathCreateRequest,
             WorkspacePathDeleteRequest, WorkspacePathDuplicateRequest, WorkspacePathRenameRequest,
@@ -20,25 +15,25 @@ use crate::{
         },
     },
     workspace_path_history,
-    workspace_search::{literal_search_ranges, run_workspace_rg_search, RgMatchOptions},
+    workspace_search::{run_workspace_rg_search, RgMatchOptions},
 };
-use std::{
-    path::{Path, PathBuf},
-    time::Instant,
-};
+use std::path::{Path, PathBuf};
 use tauri::Emitter;
-use walkdir::WalkDir;
 #[tauri::command]
 pub(crate) async fn watch_workspace(
+    app: tauri::AppHandle,
     workspace_path: String,
     manager: tauri::State<'_, WorkspaceWatchManager>,
 ) -> Result<Vec<WorkspaceFile>, String> {
     // Polling now stats only known directories in the common case. A full walk
     // runs when directory metadata changes or at a bounded reconciliation age.
     let manager = manager.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || manager.snapshot(&workspace_path))
-        .await
-        .map_err(|error| format!("workspace watch worker failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        super::access::open_root(&app, &workspace_path)?;
+        manager.snapshot(&workspace_path)
+    })
+    .await
+    .map_err(|error| format!("workspace watch worker failed: {error}"))?
 }
 
 #[tauri::command]
@@ -47,6 +42,7 @@ pub(crate) async fn create_workspace_file(
     request: WorkspacePathCreateRequest,
 ) -> Result<WorkspaceFileStat, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        super::access::require_path(&app, &request.workspace_path, &request.path, true)?;
         run_workspace_lifecycle(
             Some(&app),
             "ui",
@@ -71,6 +67,8 @@ pub(crate) async fn rename_workspace_path(
     request: WorkspacePathRenameRequest,
 ) -> Result<WorkspaceFileStat, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        super::access::require_path(&app, &request.workspace_path, &request.from_path, true)?;
+        super::access::require_path(&app, &request.workspace_path, &request.to_path, true)?;
         run_workspace_lifecycle(
             Some(&app),
             "ui",
@@ -102,6 +100,7 @@ pub(crate) async fn delete_workspace_path(
     request: WorkspacePathDeleteRequest,
 ) -> Result<bool, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        super::access::require_path(&app, &request.workspace_path, &request.path, true)?;
         run_workspace_lifecycle(
             Some(&app),
             "ui",
@@ -127,6 +126,7 @@ pub(crate) async fn duplicate_workspace_path(
     request: WorkspacePathDuplicateRequest,
 ) -> Result<WorkspaceFileStat, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        super::access::require_root(&app, &request.workspace_path)?;
         let stat = duplicate_workspace_path_impl(&request).map_err(to_string)?;
         emit_workspace_path_change(
             &app,
@@ -182,11 +182,15 @@ pub(crate) async fn redo_workspace_path(app: tauri::AppHandle) -> Result<bool, S
 
 #[tauri::command]
 pub(crate) async fn search_workspace(
+    app: tauri::AppHandle,
     request: WorkspaceSearchRequest,
 ) -> Result<Vec<WorkspaceSearchResult>, String> {
-    tauri::async_runtime::spawn_blocking(move || search_workspace_impl(&request).map_err(to_string))
-        .await
-        .map_err(|error| format!("workspace search worker failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        super::access::require_root(&app, &request.workspace_path)?;
+        search_workspace_impl(&request).map_err(to_string)
+    })
+    .await
+    .map_err(|error| format!("workspace search worker failed: {error}"))?
 }
 
 /// What one lifecycle call did, in the shape an open editor needs to follow it.
@@ -361,6 +365,22 @@ pub(crate) fn create_workspace_path_impl(
     stat_workspace_file_impl(&request.workspace_path, &request.path)
 }
 
+// Lifecycle results describe the entry itself, not the symlink's target.
+fn stat_workspace_entry(workspace_path: &str, path: &str) -> anyhow::Result<WorkspaceFileStat> {
+    let root = workspace_root(workspace_path)?;
+    let entry = assert_workspace_entry(&root, path)?;
+    let metadata = std::fs::symlink_metadata(&entry)?;
+    if !metadata.is_symlink() {
+        return stat_workspace_file_impl(workspace_path, path);
+    }
+    Ok(WorkspaceFileStat {
+        path: path.to_string(),
+        kind: "file".into(),
+        size_bytes: metadata.len(),
+        content_hash: None,
+    })
+}
+
 pub(crate) fn rename_workspace_path_impl(
     request: &WorkspacePathRenameRequest,
 ) -> anyhow::Result<WorkspaceFileStat> {
@@ -384,7 +404,7 @@ pub(crate) fn rename_workspace_path_impl(
         from: from.clone(),
         to: to.clone(),
     });
-    stat_workspace_file_impl(&request.workspace_path, &request.to_path)
+    stat_workspace_entry(&request.workspace_path, &request.to_path)
 }
 
 pub(crate) fn delete_workspace_path_impl(
@@ -406,7 +426,8 @@ pub(crate) fn delete_workspace_path_impl(
     }
     if metadata.is_file() {
         if let Some(expected_hash) = request.expected_hash.as_deref() {
-            let (bytes, _) = read_bounded_regular_file(
+            let (bytes, _) = read_workspace_bytes(
+                &root,
                 &candidate,
                 MAX_WORKSPACE_FILE_EDIT_BYTES,
                 "workspace file",
@@ -478,7 +499,7 @@ pub(crate) fn duplicate_workspace_path_impl(
         .map_err(|_| anyhow::anyhow!("duplicate landed outside the workspace"))?
         .to_string_lossy()
         .replace('\\', "/");
-    stat_workspace_file_impl(&request.workspace_path, &relative)
+    stat_workspace_entry(&request.workspace_path, &relative)
 }
 
 /// Moves a trashed entry back home, recreating a parent folder if it is gone.
@@ -603,7 +624,7 @@ pub(crate) fn search_workspace_impl(
     request: &WorkspaceSearchRequest,
 ) -> anyhow::Result<Vec<WorkspaceSearchResult>> {
     let root = workspace_root(&request.workspace_path)?;
-    let query = request.query.trim();
+    let query = request.query.as_str();
     if query.is_empty() {
         return Ok(Vec::new());
     }
@@ -615,120 +636,84 @@ pub(crate) fn search_workspace_impl(
         ignore_case: !request.case_sensitive.unwrap_or(true),
         whole_word: request.whole_word.unwrap_or(false),
     };
-    let fallback = || fallback_search_workspace(&root, query, max_results, options.ignore_case);
-    match run_workspace_rg_search(&root, query, request.globs.as_ref(), max_results, options) {
-        Ok(results) => Ok(results),
-        // Agents sometimes send patterns that are invalid regex. Fall back to a
-        // literal search so the capability returns matches instead of an error
-        // that short-circuits the whole turn.
-        Err(_) if options.use_regex => run_workspace_rg_search(
-            &root,
-            query,
-            request.globs.as_ref(),
-            max_results,
-            RgMatchOptions {
-                use_regex: false,
-                ..options
-            },
-        )
-        .or_else(|_| fallback()),
-        Err(_) => fallback(),
-    }
+    // Invalid patterns, missing rg and permission errors must remain errors. A
+    // literal fallback cannot honor the user's glob/word/ignore semantics.
+    run_workspace_rg_search(&root, query, request.globs.as_ref(), max_results, options)
 }
 
-/// Best-effort walk used only when ripgrep cannot run. `ignore_case` folds
-/// ASCII only, which keeps byte offsets stable for the match ranges. Whole-word
-/// matching is not applied here.
-pub(crate) fn fallback_search_workspace(
-    root: &Path,
-    query: &str,
-    max_results: usize,
-    ignore_case: bool,
-) -> anyhow::Result<Vec<WorkspaceSearchResult>> {
-    let folded_query = ignore_case.then(|| query.to_ascii_lowercase());
-    let mut results = Vec::new();
-    let started_at = Instant::now();
-    let mut scanned_files = 0usize;
-    let mut scanned_bytes = 0u64;
-    for entry in WalkDir::new(root)
-        .min_depth(1)
-        .max_depth(8)
-        .into_iter()
-        .filter_entry(|entry| {
-            let name = entry.file_name().to_string_lossy();
-            !(is_generated_workspace_dir(&name)
-                || matches!(name.as_ref(), ".git" | "target" | "dist" | "build"))
-        })
-    {
-        if started_at.elapsed() >= WORKSPACE_SEARCH_FALLBACK_TIMEOUT
-            || scanned_files >= MAX_WORKSPACE_SEARCH_FALLBACK_FILES
-            || scanned_bytes >= MAX_WORKSPACE_SEARCH_FALLBACK_BYTES
-        {
-            break;
+#[cfg(test)]
+mod ide_regression_tests {
+    use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn external_and_dangling_symlink_renames_report_success() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("target.txt"), "outside").unwrap();
+        for name in ["target.txt", "missing.txt"] {
+            symlink(outside.path().join(name), root.path().join(name)).unwrap();
+            let result = rename_workspace_path_impl(&WorkspacePathRenameRequest {
+                workspace_path: root.path().display().to_string(),
+                from_path: name.into(),
+                to_path: format!("renamed {name}"),
+            })
+            .unwrap();
+            assert_eq!(result.path, format!("renamed {name}"));
+            assert!(root.path().join(&result.path).is_symlink());
+            assert!(!root.path().join(name).is_symlink());
         }
-        // Unreadable entries are skipped; the fallback is best-effort.
-        let Ok(entry) = entry else {
-            continue;
-        };
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let Ok(metadata) = entry.metadata() else {
-            continue;
-        };
-        if metadata.len() > MAX_WORKSPACE_FILE_PREVIEW_BYTES as u64 {
-            continue;
-        }
-        if scanned_bytes.saturating_add(metadata.len()) > MAX_WORKSPACE_SEARCH_FALLBACK_BYTES {
-            break;
-        }
-        scanned_files += 1;
-        scanned_bytes = scanned_bytes.saturating_add(metadata.len());
-        let Ok((bytes, _)) = read_bounded_regular_file(
-            entry.path(),
-            MAX_WORKSPACE_FILE_PREVIEW_BYTES,
-            "workspace search file",
-        ) else {
-            continue;
-        };
-        if bytes.len() > MAX_WORKSPACE_FILE_PREVIEW_BYTES {
-            continue;
-        }
-        if bytes.contains(&0) {
-            continue;
-        }
-        let content = String::from_utf8_lossy(&bytes);
-        for (index, line) in content.lines().enumerate() {
-            let ranges = match &folded_query {
-                Some(folded) => {
-                    let folded_line = line.to_ascii_lowercase();
-                    if !folded_line.contains(folded.as_str()) {
-                        continue;
-                    }
-                    literal_search_ranges(&folded_line, folded)
-                }
-                None if line.contains(query) => literal_search_ranges(line, query),
-                None => continue,
-            };
-            {
-                let path = entry
-                    .path()
-                    .strip_prefix(root)?
-                    .to_string_lossy()
-                    .to_string();
-                results.push(WorkspaceSearchResult {
-                    path,
-                    line_number: index + 1,
-                    line: line.to_string(),
-                    ranges,
-                });
-                if results.len() >= max_results {
-                    return Ok(results);
-                }
-            }
-        }
+        assert_eq!(
+            std::fs::read_to_string(outside.path().join("target.txt")).unwrap(),
+            "outside"
+        );
     }
-    Ok(results)
+
+    #[test]
+    fn missing_open_file_has_an_explicit_stat_state() {
+        let root = tempfile::tempdir().unwrap();
+        let result =
+            stat_workspace_file_impl(root.path().to_str().unwrap(), "missing ü.txt").unwrap();
+        assert_eq!(result.kind, "missing");
+        assert_eq!(result.content_hash, None);
+    }
+
+    #[test]
+    fn search_preserves_whitespace_and_rejects_invalid_patterns() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("café notes.txt"),
+            "needle\n needle \nneedles\n",
+        )
+        .unwrap();
+        let mut request = WorkspaceSearchRequest {
+            workspace_path: root.path().display().to_string(),
+            query: " needle ".into(),
+            globs: None,
+            max_results: None,
+            regex: None,
+            case_sensitive: None,
+            whole_word: None,
+        };
+        let results = search_workspace_impl(&request).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].line_number, 2);
+        assert_eq!(results[0].path, "café notes.txt");
+        request.query = "[".into();
+        request.regex = Some(true);
+        assert!(
+            search_workspace_impl(&request).is_err(),
+            "An invalid regex must not become literal search"
+        );
+        request.query = "needle".into();
+        request.regex = Some(false);
+        request.globs = Some(vec!["[".into()]);
+        assert!(
+            search_workspace_impl(&request).is_err(),
+            "Invalid filters must not broaden search"
+        );
+    }
 }
 
 /// Deleting a workspace entry must always land in a trash, whichever volume it

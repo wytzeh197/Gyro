@@ -20,7 +20,7 @@ use crate::{
     state::provider_run::BoundProviderCapabilityContext,
     stores::open_store,
     workspace::{
-        files::read_bounded_regular_file,
+        files::read_workspace_bytes,
         paths::create_workspace_path_impl,
         types::{FileMutationProposalRequest, WorkspacePathCreateRequest},
     },
@@ -49,7 +49,7 @@ pub(super) fn execute(
         &bound.workspace,
         Path::new(MEMORY_PATH),
     )?;
-    let snapshot = read_memory(&candidate)?;
+    let snapshot = read_memory(&bound.workspace, &candidate)?;
     let content = snapshot.as_deref().unwrap_or_default();
     match request.capability_id {
         CapabilityId::MemoryRead => {
@@ -181,9 +181,9 @@ fn memory_read_result(content: &str, exists: bool, arguments: &Value) -> anyhow:
     }
 }
 
-fn read_memory(candidate: &Path) -> anyhow::Result<Option<String>> {
+fn read_memory(root: &Path, candidate: &Path) -> anyhow::Result<Option<String>> {
     let (bytes, _) =
-        match read_bounded_regular_file(candidate, MAX_MEMORY_FILE_BYTES, "project memory") {
+        match read_workspace_bytes(root, candidate, MAX_MEMORY_FILE_BYTES, "project memory") {
             Ok(value) => value,
             Err(error)
                 if error
@@ -271,15 +271,16 @@ mod tests {
     #[test]
     fn reading_memory_distinguishes_absent_empty_and_invalid_files() {
         let temp = tempfile::tempdir().unwrap();
-        let target = temp.path().join("memory.md");
-        assert_eq!(read_memory(&target).unwrap(), None);
+        let root = temp.path().canonicalize().unwrap();
+        let target = root.join("memory.md");
+        assert_eq!(read_memory(&root, &target).unwrap(), None);
         std::fs::write(&target, "").unwrap();
-        assert_eq!(read_memory(&target).unwrap(), Some(String::new()));
+        assert_eq!(read_memory(&root, &target).unwrap(), Some(String::new()));
         for invalid in [vec![0], vec![0xff], vec![b'x'; MAX_MEMORY_FILE_BYTES + 1]] {
             std::fs::write(&target, invalid).unwrap();
-            assert!(read_memory(&target).is_err());
+            assert!(read_memory(&root, &target).is_err());
         }
-        assert!(read_memory(temp.path()).is_err());
+        assert!(read_memory(&root, &root).is_err());
     }
 
     #[cfg(unix)]
@@ -287,12 +288,13 @@ mod tests {
     fn reading_memory_refuses_symlinks_including_dangling_ones() {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source.md");
-        let target = temp.path().join("memory.md");
+        let root = temp.path().canonicalize().unwrap();
+        let target = root.join("memory.md");
         std::fs::write(&source, "- note").unwrap();
         std::os::unix::fs::symlink(&source, &target).unwrap();
-        assert!(read_memory(&target).is_err());
+        assert!(read_memory(&root, &target).is_err());
         std::fs::remove_file(source).unwrap();
-        assert!(read_memory(&target).is_err());
+        assert!(read_memory(&root, &target).is_err());
     }
 
     #[test]

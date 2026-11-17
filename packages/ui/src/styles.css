@@ -7653,7 +7653,7 @@ textarea:focus-visible {
 .gyro-app-shell:has(.gyro-workspace-route.is-code)
   .gyro-sidebar-explorer-toolbar {
   border: 0;
-  gap: 0;
+  gap: var(--gyro-space-compact);
   margin: 0;
   min-height: 0;
   padding: 0;
@@ -10685,14 +10685,36 @@ body {
 
 .gyro-xterm-frame {
   contain: layout paint;
+  display: flex;
+  flex-direction: column;
   height: 100%;
   min-height: 0;
   overflow: hidden;
   position: relative;
 }
 
+.gyro-xterm-frame > .gyro-model-terminal-notice {
+  flex: 0 0 auto;
+}
+
+.gyro-xterm-frame > .gyro-xterm-host {
+  flex: 1;
+  height: auto;
+}
+
+/* FitAddon measures its direct parent. Keep padding on the outer host. */
+.gyro-xterm-mount {
+  height: 100%;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
 .gyro-xterm-host {
   contain: strict;
+  font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-font-micro);
+  line-height: var(--gyro-terminal-line-height);
   height: 100%;
   min-height: 0;
   overflow: hidden !important;
@@ -10702,7 +10724,6 @@ body {
 }
 
 .gyro-xterm-host .xterm,
-.gyro-xterm-host .xterm-viewport,
 .gyro-xterm-host .xterm-screen {
   max-height: 100%;
   max-width: 100%;
@@ -10716,6 +10737,10 @@ body {
  */
 .gyro-xterm-host .xterm-helpers {
   overflow: visible !important;
+}
+
+.gyro-xterm-host .xterm-viewport {
+  overflow-y: scroll;
 }
 
 .gyro-terminal-reconnect {
@@ -11181,6 +11206,23 @@ body {
 
 .gyro-explorer-context-menu button.is-danger {
   color: var(--gyro-danger);
+}
+
+.gyro-toolbar-overflow-menu {
+  max-width: calc(100vw - var(--gyro-space-standard));
+  max-height: calc(100dvh - var(--gyro-space-standard));
+  overflow: auto;
+  padding: var(--gyro-space-compact);
+}
+.gyro-toolbar-overflow-menu button {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  min-height: var(--gyro-control-height);
+  padding: var(--gyro-space-compact) var(--gyro-space-standard);
+}
+.gyro-toolbar-overflow-menu button:disabled {
+  opacity: 0.45;
 }
 
 .gyro-sidebar-scm-identity {
@@ -24795,8 +24837,9 @@ textarea:focus-visible,
   font-size: var(--gyro-font-micro);
 }
 .gyro-terminal-recovery {
-  position: absolute;
-  inset: auto 10px 10px;
+  position: static;
+  flex: 0 0 auto;
+  margin: 0 var(--gyro-space-comfortable) var(--gyro-space-standard);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -24920,7 +24963,6 @@ textarea:focus-visible,
   color: var(--gyro-text);
 }
 :root[data-theme] .gyro-terminal-recovery {
-  inset: auto 16px 12px;
   padding: 6px 0;
   border: 0;
   border-radius: 0;
@@ -25257,13 +25299,13 @@ textarea:focus-visible,
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 10px;
+  gap: var(--gyro-space-standard);
   width: 100%;
   min-width: 0;
-  height: 30px;
-  min-height: 30px;
+  height: var(--gyro-control-height);
+  min-height: var(--gyro-control-height);
   margin: 0;
-  padding: 0 10px;
+  padding: 0 var(--gyro-space-standard);
   border: 0;
   border-radius: var(--gyro-radius-xs);
   background: transparent;

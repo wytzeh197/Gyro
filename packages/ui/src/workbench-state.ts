@@ -27,6 +27,7 @@ import type {
   CommandProfile,
   DiffApprovalState,
   DiffFileState,
+  DiffLine,
   DiffSource,
   DebugSessionState,
   EditorBuffer,
@@ -1742,6 +1743,7 @@ export type WorkbenchAction =
   | { type: "ide-toggle-minimap" }
   | { type: "ide-toggle-assistant" }
   | { type: "ide-upsert-buffer"; buffer: EditorBuffer }
+  | { type: "ide-refresh-buffer"; before: EditorBuffer; buffer: EditorBuffer }
   | { type: "ide-apply-buffer-batch"; updates: EditorBufferBatchUpdate[] }
   | { type: "ide-update-buffer"; path: string; content: string }
   | {
@@ -1752,6 +1754,7 @@ export type WorkbenchAction =
       sizeBytes: number;
     }
   | { type: "ide-mark-buffer-error"; path: string; error: string }
+  | { type: "ide-replace-buffer-saved"; path: string; before: string; beforeHash?: string; buffer: EditorBuffer }
   | { type: "ide-set-selection"; selection?: EditorSelection }
   | { type: "ide-record-assistant-request"; request: IdeAssistantRequest }
   | { type: "ide-set-search-query"; query: WorkspaceSearchQuery }
@@ -1826,6 +1829,8 @@ export type WorkbenchAction =
     }
   | {
       type: "sync-terminal-pane-snapshot";
+      outputCursor?: TerminalPane["outputCursor"];
+      outputComplete?: boolean;
       paneId: string;
       output: string;
       status: TerminalPaneStatus;
@@ -1894,11 +1899,14 @@ export type WorkbenchAction =
     }
   | {
       type: "sync-diff-event";
+      proposalId?: string;
+      lines?: DiffLine[];
       path: string;
       message: string;
       source?: DiffSource;
       turnId?: string;
     }
+  | { type: "set-diff-preview"; proposalId: string; path: string; lines: DiffLine[] }
   | { type: "select-diff-file"; path: string }
   | { type: "toggle-diff-directory"; directory: string }
   | { type: "start-git-review-action"; actionId: GitReviewActionId }
@@ -2914,7 +2922,9 @@ export function workbenchReducer(
       if (!action.path) {
         return state;
       }
-      const keepPath = (path: string) => !editorPathMatches(path, action.path);
+      // A backend deletion is not permission to discard text that only exists in memory.
+      const keepPath = (path: string) => !editorPathMatches(path, action.path) ||
+        Boolean(state.ide.buffers[path] && state.ide.buffers[path]!.content !== state.ide.buffers[path]!.savedContent);
       const groups = state.ide.layout.groups.map((group) => {
         const tabs = group.tabs.filter((tab) => keepPath(tab.path));
         const activePath =
@@ -2944,7 +2954,10 @@ export function workbenchReducer(
       }
       const tabs = state.ide.tabs.filter((tab) => keepPath(tab.path));
       const buffers = Object.fromEntries(
-        Object.entries(state.ide.buffers).filter(([path]) => keepPath(path)),
+        Object.entries(state.ide.buffers).filter(([path]) => keepPath(path)).map(([path, buffer]) => [path,
+          editorPathMatches(path, action.path) ? { ...buffer, status: "error" as const,
+            error: "File was removed from disk. Your unsaved text has been retained." } : buffer,
+        ]),
       );
       return {
         ...state,
@@ -3238,6 +3251,14 @@ export function workbenchReducer(
           activeView: state.ide.activeView === "ai" ? "explorer" : "ai",
         },
       };
+    case "ide-refresh-buffer": {
+      const existing = state.ide.buffers[action.before.path];
+      if (!existing || existing.status === "saving" || existing.content !== action.before.content ||
+          existing.contentHash !== action.before.contentHash || existing.content !== existing.savedContent) return state;
+      return { ...state, ide: { ...state.ide,
+        buffers: { ...state.ide.buffers, [action.before.path]: action.buffer },
+      }};
+    }
     case "ide-upsert-buffer": {
       const buffer = action.buffer;
       const dirty = buffer.status === "dirty";
@@ -3341,6 +3362,15 @@ export function workbenchReducer(
           }),
         },
       };
+    }
+    case "ide-replace-buffer-saved": {
+      const existing = state.ide.buffers[action.path];
+      if (!existing) return state;
+      if (existing.content !== action.before || existing.contentHash !== action.beforeHash) {
+        return workbenchReducer(state, { type: "ide-mark-buffer-error", path: action.path,
+          error: "File changed on disk during replacement. Your newer edits have been retained." });
+      }
+      return workbenchReducer(state, { type: "ide-upsert-buffer", buffer: action.buffer });
     }
     case "ide-mark-buffer-saved": {
       const existing = state.ide.buffers[action.path];
@@ -3985,6 +4015,10 @@ export function workbenchReducer(
         existingPane.workingDirectory === nextWorkingDirectory &&
         existingPane.hasForegroundJob === nextHasForegroundJob &&
         existingPane.lastEvent === action.event &&
+        existingPane.outputComplete === action.outputComplete &&
+        existingPane.outputCursor?.generation === action.outputCursor?.generation &&
+        existingPane.outputCursor?.end === action.outputCursor?.end &&
+        existingPane.outputCursor?.start === action.outputCursor?.start &&
         existingPane.output === action.output &&
         existingPane.status === action.status &&
         existingPane.governedSessionId === nextGovernedSessionId &&
@@ -4002,6 +4036,8 @@ export function workbenchReducer(
                 command: action.command ?? pane.command,
                 lastEvent: action.event,
                 output: action.output,
+                outputCursor: action.outputCursor,
+                outputComplete: action.outputComplete,
                 status: action.status,
                 hasForegroundJob: nextHasForegroundJob,
                 attention:
@@ -4106,6 +4142,8 @@ export function workbenchReducer(
                 command: action.command,
                 lastEvent: "command queued",
                 output: action.output,
+                outputCursor: undefined,
+                outputComplete: undefined,
                 profileId: action.profileId,
                 status: "waiting",
                 hasForegroundJob: undefined,
@@ -4281,6 +4319,13 @@ export function workbenchReducer(
             : automation,
         ),
       };
+    case "set-diff-preview":
+      return { ...state, diffReview: { ...state.diffReview,
+        files: state.diffReview.files.map(file => file.path === action.path && file.proposalId === action.proposalId
+          ? { ...file, lines: action.lines, countsKnown: true,
+              additions: action.lines.filter(line => line.kind === "added").length,
+              deletions: action.lines.filter(line => line.kind === "removed").length } : file),
+      }};
     case "sync-diff-event": {
       if (
         state.activeTurn?.id &&
@@ -4298,6 +4343,11 @@ export function workbenchReducer(
               ? {
                   ...file,
                   source: action.source ?? file.source,
+                  lines: action.lines ?? [],
+                  proposalId: action.proposalId,
+                  additions: 0,
+                  deletions: 0,
+                  countsKnown: false,
                   state: "pending" as const,
                   turnId: action.turnId ?? file.turnId,
                 }
@@ -4314,7 +4364,8 @@ export function workbenchReducer(
               state: "pending" as const,
               turnId: action.turnId,
               comments: 0,
-              lines: [],
+              lines: action.lines ?? [],
+              proposalId: action.proposalId,
             },
           ];
 

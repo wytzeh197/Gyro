@@ -5,7 +5,7 @@ use gyro_remote::{store::Peer, Operation, RemoteEvent, Request};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Listener, Manager};
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -84,7 +84,7 @@ pub(crate) async fn remote_access_status(app: tauri::AppHandle) -> Result<Value,
     let mut snapshot = tauri::async_runtime::spawn_blocking(move || {
         if let Some(runtime) = runtime { return runtime.snapshot(); }
         let s = store()?;
-        Ok(json!({"settings":s.settings().map_err(err)?,"deviceId":null,"hostingActive":false,"sshHostingActive":false,"invitationActive":false,"peers":s.peers().map_err(err)?,"pending":s.pending().map_err(err)?,"projects":s.projects().map_err(err)?,"controls":{}}))
+        Ok(json!({"activity":s.activity().map_err(err)?,"settings":s.settings().map_err(err)?,"deviceId":null,"hostingActive":false,"sshHostingActive":false,"invitationActive":false,"peers":s.peers().map_err(err)?,"pending":s.pending().map_err(err)?,"projects":s.projects().map_err(err)?,"controls":{}}))
     }).await.map_err(err)??;
     #[cfg(unix)]
     state.ssh.snapshot(&mut snapshot)?;
@@ -108,35 +108,90 @@ pub(crate) async fn remote_access_action(
     if let LocalAction::Configure {
         enabled: false,
         name,
-    } = request
+    } = &request
     {
-        let was_enabled = tauri::async_runtime::spawn_blocking(move || {
-            let s = store()?;
-            let previous = s.settings().map_err(err)?.enabled;
-            s.save_settings(&Settings {
-                enabled: false,
-                name,
-            })
-            .map_err(err)?;
-            Ok::<_, String>(previous)
-        })
-        .await
-        .map_err(err)??;
-        if !was_enabled {
-            return Ok(Value::Null);
-        }
-        let runtime = app.state::<RemoteAccess>().runtime.lock().await.take();
-        *app.state::<RemoteAccess>().active.write().map_err(err)? = None;
-        if let Some(runtime) = runtime {
-            runtime.stop_ssh_hosting();
-            if let Some(node) = runtime.node.get() {
-                node.close().await;
+        let name = name.clone();
+        let state = app.state::<RemoteAccess>();
+        let mut slot = state.runtime.lock().await;
+        state
+            .disabled
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let runtime = slot.take();
+        *state
+            .active
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        if let Some(runtime) = &runtime {
+            // Reject new and already queued requests immediately.
+            runtime
+                .stopped
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            if let Some(task) = runtime.terminal_task.get() {
+                task.abort();
             }
-            runtime.close_terminals(|_| true);
-            for (_, watch) in runtime.watches.lock().map_err(err)?.drain() {
+            if let Some(listener) = runtime.provider_listener.get() {
+                app.unlisten(*listener);
+            }
+            runtime.stop_ssh_hosting();
+            for (_, watch) in runtime
+                .watches
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .drain()
+            {
                 watch.abort();
             }
         }
+        // Persist before potentially slow shell termination so a crash during
+        // teardown cannot restore opt-in on the next launch. Still finish all
+        // teardown when persistence fails, then surface that failure.
+        let saved = tauri::async_runtime::spawn_blocking(move || {
+            store()?
+                .save_settings(&Settings {
+                    enabled: false,
+                    name,
+                })
+                .map_err(err)
+        })
+        .await
+        .map_err(err)
+        .and_then(|result| result);
+        if let Some(runtime) = runtime {
+            if let Some(node) = runtime.node.get() {
+                node.close().await;
+            }
+            tauri::async_runtime::spawn_blocking(move || runtime.close_terminals(|_| true))
+                .await
+                .map_err(err)?;
+        }
+        drop(slot);
+        let _ = app.emit("gyro://remote-access-changed", ());
+        saved?;
+        return Ok(Value::Null);
+    }
+    if let LocalAction::Configure {
+        enabled: true,
+        name,
+    } = &request
+    {
+        let state = app.state::<RemoteAccess>();
+        let slot = state.runtime.lock().await;
+        let name = name.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            store()?
+                .save_settings(&Settings {
+                    enabled: true,
+                    name,
+                })
+                .map_err(err)
+        })
+        .await
+        .map_err(err)??;
+        state
+            .disabled
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        drop(slot);
+        state.ensure(&app).await?;
         return Ok(Value::Null);
     }
     let state = app.state::<RemoteAccess>();
@@ -297,7 +352,14 @@ pub(crate) async fn remote_host_request(
             .map_err(err)?
             .into_result();
     }
-    let runtime = state.ensure(&app).await?;
+    let runtime = if matches!(&request.operation, Operation::Release { .. }) {
+        let Some(runtime) = state.runtime.lock().await.clone() else {
+            return Ok(Value::Null);
+        };
+        runtime
+    } else {
+        state.ensure(&app).await?
+    };
     if !runtime.store.trusts(&host_id, "host") {
         return Err("Host is not paired".into());
     }
@@ -332,7 +394,14 @@ pub(crate) async fn remote_host_watch(
             .watch(app.clone(), host_id, session_id, watch_id)
             .await;
     }
-    let runtime = state.ensure(&app).await?;
+    let runtime = if session_id.is_none() {
+        let Some(runtime) = state.runtime.lock().await.clone() else {
+            return Ok(());
+        };
+        runtime
+    } else {
+        state.ensure(&app).await?
+    };
     if !runtime.store.trusts(&host_id, "host") {
         return Err("Host is not paired".into());
     }

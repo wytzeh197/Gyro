@@ -2,7 +2,7 @@ use crate::git::read as git_read;
 use crate::{
     command_execution::bounded_command_error,
     git::{commands::git_command, main_comparison::git_main_comparison_base},
-    workspace::files::{assert_workspace_path, workspace_root},
+    workspace::files::{assert_workspace_path, read_workspace_bytes, workspace_root},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -212,7 +212,7 @@ fn too_large_for_editor(original: &str, modified: &str) -> bool {
         || modified.lines().any(|line| line.len() > 20_000)
 }
 
-fn read_worktree_file(file: &Path) -> anyhow::Result<String> {
+fn read_worktree_file(root: &Path, file: &Path) -> anyhow::Result<String> {
     match fs::symlink_metadata(file) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
         Err(error) => Err(error.into()),
@@ -225,11 +225,7 @@ fn read_worktree_file(file: &Path) -> anyhow::Result<String> {
                 metadata.len() <= MAX_REVIEW_BYTES as u64,
                 "This file exceeds the 2 MB text review limit."
             );
-            use std::io::Read;
-            let mut bytes = Vec::new();
-            fs::File::open(file)?
-                .take((MAX_REVIEW_BYTES + 1) as u64)
-                .read_to_end(&mut bytes)?;
+            let (bytes, _) = read_workspace_bytes(root, file, MAX_REVIEW_BYTES, "Git review file")?;
             anyhow::ensure!(
                 bytes.len() <= MAX_REVIEW_BYTES,
                 "This file exceeds the 2 MB text review limit."
@@ -257,6 +253,7 @@ fn git_unified_diff(
         "diff".into(),
         "--no-color".into(),
         "--no-ext-diff".into(),
+        "--no-textconv".into(),
         "--unified=3".into(),
         "--no-renames".into(),
     ];
@@ -365,7 +362,7 @@ fn review_content(request: &ReviewRequest) -> anyhow::Result<ReviewContent> {
                 .ok_or_else(|| anyhow::anyhow!("Could not resolve main for this comparison."))?;
             let original =
                 blob_from_commit(&repo, base, original_path, deadline)?.unwrap_or_default();
-            let modified = read_worktree_file(&file)?;
+            let modified = read_worktree_file(&workspace, &file)?;
             return Ok((original, modified));
         }
         let original = if kind == "index" {
@@ -383,7 +380,7 @@ fn review_content(request: &ReviewRequest) -> anyhow::Result<ReviewContent> {
         let modified = if kind == "index" {
             blob(&repo, path, false, deadline)?.unwrap_or_default()
         } else {
-            read_worktree_file(&file)?
+            read_worktree_file(&workspace, &file)?
         };
         Ok((original, modified))
     })();
@@ -509,6 +506,46 @@ mod tests {
             staged,
             comparison: None,
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn review_refuses_a_parent_replaced_after_validation() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        fs::create_dir(root.join("src")).unwrap();
+        fs::create_dir(root.join("outside")).unwrap();
+        fs::write(root.join("src/file.txt"), b"approved\n").unwrap();
+        fs::write(root.join("outside/file.txt"), b"outside sentinel\n").unwrap();
+        let file = assert_workspace_path(&root, "src/file.txt").unwrap();
+        fs::rename(root.join("src"), root.join("old")).unwrap();
+        std::os::unix::fs::symlink(root.join("outside"), root.join("src")).unwrap();
+        assert!(read_worktree_file(&root, &file).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn review_unified_diff_does_not_run_textconv() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = repo();
+        let root = dir.path();
+        fs::write(root.join("file.txt"), "before\n").unwrap();
+        fs::write(root.join(".gitattributes"), "*.txt diff=fixture\n").unwrap();
+        git(root, &["add", "."], 4096).unwrap();
+        git(root, &["commit", "-m", "base"], 4096).unwrap();
+        let hook = root.join("textconv.sh");
+        fs::write(
+            &hook,
+            "#!/bin/sh\nprintf called > \"$(dirname \"$0\")/called\"\ncat \"$1\"\n",
+        )
+        .unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o700)).unwrap();
+        let quoted = format!("'{}'", hook.to_string_lossy().replace('\'', "'\\''"));
+        git(root, &["config", "diff.fixture.textconv", &quoted], 4096).unwrap();
+        fs::write(root.join("file.txt"), "after\n").unwrap();
+        let result = review_content(&request(root, "file.txt", false)).unwrap();
+        assert!(!root.join("called").exists());
+        assert!(result.unified.unwrap().contains("+after"));
     }
 
     #[test]

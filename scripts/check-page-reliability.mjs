@@ -98,8 +98,16 @@ async function runBoot(surface, failure) {
       }
       if (id === failure) throw new Error("failed module");
       if (id === "./dictation-access") return {};
+      if (id === "./editor/durable-edit-recovery")
+        return {
+          initializeDurableEditRecovery: async () => {
+            if (failure === "draft-recovery")
+              throw new Error("draft storage failed");
+          },
+        };
       if (id === "@gyro-dev/ui/tooltips") return { installGyroTooltips() {} };
-      if (id === "./remote-access/root") return { RemoteWorkspaceRoot: "remote-root" };
+      if (id === "./remote-access/root")
+        return { RemoteWorkspaceRoot: "remote-root" };
       if (id === "./App") return { App: "app" };
       if (id === "./MenuBarPopover") return { MenuBarPopover: "menu" };
       if (id.endsWith(".css")) return {};
@@ -113,7 +121,12 @@ for (const [surface, module] of [
   ["main", "./App"],
   ["menu-bar", "./MenuBarPopover"],
 ]) {
-  for (const failed of [module, "@gyro-dev/ui/styles.css", "@gyro-dev/ui/tooltips", ...(surface === "main" ? ["./remote-access/root"] : [])]) {
+  for (const failed of [
+    module,
+    "@gyro-dev/ui/styles.css",
+    "@gyro-dev/ui/tooltips",
+    ...(surface === "main" ? ["./remote-access/root", "draft-recovery"] : []),
+  ]) {
     const result = await runBoot(surface, failed);
     const fallback = result.renders.at(-1);
     assert.equal(
@@ -231,11 +244,19 @@ await flush();
 assert.equal(usageCalls, 1, "unfocused windows must not wake provider CLIs");
 assert.equal(ledgerCalls, 1);
 await refreshProviderUsage("openai");
-assert.equal(usageCalls, 2, "explicit and post-turn reads work while unfocused");
+assert.equal(
+  usageCalls,
+  2,
+  "explicit and post-turn reads work while unfocused",
+);
 focused = true;
 listeners.get("focus")();
 await flush();
-assert.equal(usageCalls, 3, "focus catches up without waiting for the poll interval");
+assert.equal(
+  usageCalls,
+  3,
+  "focus catches up without waiting for the poll interval",
+);
 assert.equal(ledgerCalls, 2);
 // Reset counters to keep the visibility/offline scenarios independent.
 usageCalls = 1;

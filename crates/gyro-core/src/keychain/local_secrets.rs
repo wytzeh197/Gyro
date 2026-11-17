@@ -1,8 +1,5 @@
-//! Credentials Gyro keeps on this Mac.
-//!
-//! The file is inside the Gyro data directory and is readable only by the
-//! user who owns it. Nothing here goes through the login keychain, so macOS
-//! does not show a Keychain sheet when a key is saved or read.
+//! Legacy credential file and cross-process migration lock. On macOS new
+//! credentials go to Keychain; a legacy entry is removed only after verification.
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -14,9 +11,9 @@ use std::path::{Path, PathBuf};
 const FILE_NAME: &str = "secrets.json";
 const LOCK_NAME: &str = "secrets.lock";
 const STORE_VERSION: u32 = 1;
-#[cfg_attr(test, allow(dead_code))]
+#[allow(dead_code)]
 const MAX_ACCOUNT_BYTES: usize = 4096;
-#[cfg_attr(test, allow(dead_code))]
+#[allow(dead_code)]
 const MAX_SECRET_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -34,18 +31,34 @@ impl Default for Store {
     }
 }
 
-#[cfg_attr(test, allow(dead_code))]
+#[allow(dead_code)]
 pub(super) fn get(account: &str) -> Result<Option<String>> {
     let dir = data_dir()?;
     with_store(&dir, false, |store| Ok(store.entries.get(account).cloned()))
 }
 
-#[cfg_attr(test, allow(dead_code))]
+#[allow(dead_code)]
 pub(super) fn set(account: &str, value: &str) -> Result<()> {
     validate(account, value)?;
     let dir = data_dir()?;
     with_store(&dir, true, |store| {
         store.entries.insert(account.to_string(), value.to_string());
+        Ok(())
+    })
+}
+
+#[allow(dead_code)]
+pub(super) fn migrate_all(write_verified: impl Fn(&str, &str) -> Result<()>) -> Result<()> {
+    let dir = data_dir()?;
+    // Do not create or rewrite a legacy file on every ordinary startup/read.
+    if !dir.join(FILE_NAME).exists() {
+        return Ok(());
+    }
+    with_store(&dir, true, |store| {
+        for (account, value) in &store.entries {
+            write_verified(account, value)?;
+        }
+        store.entries.clear();
         Ok(())
     })
 }
@@ -58,6 +71,7 @@ pub(super) fn get_or_insert_with(
     let dir = data_dir()?;
     get_or_insert_at(&dir, account, create)
 }
+#[allow(dead_code)]
 fn get_or_insert_at(
     dir: &Path,
     account: &str,
@@ -74,7 +88,7 @@ fn get_or_insert_at(
     })
 }
 
-#[cfg_attr(test, allow(dead_code))]
+#[allow(dead_code)]
 pub(super) fn delete(account: &str) -> Result<()> {
     let dir = data_dir()?;
     with_store(&dir, true, |store| {
@@ -83,13 +97,13 @@ pub(super) fn delete(account: &str) -> Result<()> {
     })
 }
 
-#[cfg_attr(test, allow(dead_code))]
+#[allow(dead_code)]
 fn data_dir() -> Result<PathBuf> {
     Ok(crate::paths::GyroPaths::for_current_user()?.base_dir)
 }
 
-#[cfg_attr(test, allow(dead_code))]
-fn validate(account: &str, value: &str) -> Result<()> {
+#[allow(dead_code)]
+pub(super) fn validate(account: &str, value: &str) -> Result<()> {
     if account.is_empty()
         || account.len() > MAX_ACCOUNT_BYTES
         || account.contains('\0')
@@ -100,6 +114,28 @@ fn validate(account: &str, value: &str) -> Result<()> {
         bail!("invalid saved credential");
     }
     Ok(())
+}
+
+/// Keep creation, migration and deletion serialized across Gyro processes.
+/// The callback must verify durable secure storage before returning success.
+#[allow(dead_code)]
+pub(super) fn secure_transaction<T>(
+    account: &str,
+    body: impl FnOnce(Option<&str>) -> Result<T>,
+) -> Result<T> {
+    secure_transaction_at(&data_dir()?, account, body)
+}
+
+fn secure_transaction_at<T>(
+    dir: &Path,
+    account: &str,
+    body: impl FnOnce(Option<&str>) -> Result<T>,
+) -> Result<T> {
+    with_store(dir, true, |store| {
+        let result = body(store.entries.get(account).map(String::as_str))?;
+        store.entries.remove(account);
+        Ok(result)
+    })
 }
 
 fn with_store<T>(
@@ -119,8 +155,9 @@ fn with_store<T>(
     lock_exclusive(&lock)?;
     let path = dir.join(FILE_NAME);
     let mut store = read_store(&path)?;
+    let previous = store.entries.clone();
     let result = body(&mut store)?;
-    if write_back {
+    if write_back && store.entries != previous {
         write_store(&path, &store)?;
     }
     Ok(result)
@@ -199,6 +236,37 @@ fn lock_exclusive(file: &File) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn secure_migration_keeps_plaintext_until_verified_and_never_reimports_deleted_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        get_or_insert_at(dir.path(), "key", || Ok("original".into())).unwrap();
+        assert!(secure_transaction_at(dir.path(), "key", |_| -> Result<()> {
+            bail!("Keychain unavailable")
+        })
+        .is_err());
+        let mut secure = None;
+        secure_transaction_at(dir.path(), "key", |plain| {
+            assert_eq!(plain, Some("original"));
+            secure = plain.map(str::to_owned);
+            Ok(())
+        })
+        .unwrap();
+        assert!(!fs::read_to_string(dir.path().join(FILE_NAME))
+            .unwrap()
+            .contains("original"));
+        secure_transaction_at(dir.path(), "key", |plain| {
+            assert!(plain.is_none());
+            secure = None;
+            Ok(())
+        })
+        .unwrap();
+        secure_transaction_at(dir.path(), "key", |plain| {
+            assert!(plain.is_none() && secure.is_none());
+            Ok(())
+        })
+        .unwrap();
+    }
 
     #[test]
     fn identity_creation_is_atomic_and_failed_migration_does_not_replace_it() {

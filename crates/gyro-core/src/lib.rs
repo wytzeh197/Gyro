@@ -60,6 +60,7 @@ pub mod workflows;
 pub mod workspace_check;
 pub mod workspace_roots;
 pub mod workspace_sandbox;
+pub mod workspace_write;
 pub mod worktrees;
 
 pub use account::{

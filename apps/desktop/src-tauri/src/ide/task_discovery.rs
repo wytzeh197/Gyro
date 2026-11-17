@@ -7,7 +7,7 @@ use crate::{
     },
     workspace::files::{
         assert_workspace_path, atomic_write_workspace_file, read_bounded_regular_file,
-        workspace_root,
+        read_workspace_bytes, workspace_root,
     },
 };
 use anyhow::Context;
@@ -866,12 +866,14 @@ pub(crate) fn custom_tasks_path(root: &Path) -> PathBuf {
 }
 
 pub(crate) fn read_custom_tasks(root: &Path) -> anyhow::Result<Vec<CustomTaskRecord>> {
-    let path = custom_tasks_path(root);
+    let root = root.canonicalize()?;
+    let path = custom_tasks_path(&root);
     if !path.exists() {
         return Ok(Vec::new());
     }
+    let path = gyro_core::security::assert_path_inside_workspace(&root, &path)?;
     let (bytes, _) =
-        read_bounded_regular_file(&path, MAX_CUSTOM_TASK_FILE_BYTES, "saved commands")?;
+        read_workspace_bytes(&root, &path, MAX_CUSTOM_TASK_FILE_BYTES, "saved commands")?;
     if bytes.len() > MAX_CUSTOM_TASK_FILE_BYTES {
         anyhow::bail!("saved commands file exceeds the 128 KiB size limit");
     }
@@ -888,6 +890,30 @@ pub(crate) fn read_custom_tasks(root: &Path) -> anyhow::Result<Vec<CustomTaskRec
         })
         .take(MAX_CUSTOM_WORKSPACE_TASKS)
         .collect())
+}
+
+#[cfg(all(test, unix))]
+mod saved_command_boundary_tests {
+    #[test]
+    fn saved_commands_allow_internal_aliases_but_reject_outside_links() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let root = base.join("workspace");
+        let inside = root.join("config");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(&inside).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        let tasks = br#"{"version":1,"tasks":[{"id":"test","label":"Test","command":"echo"}]}"#;
+        std::fs::write(inside.join("tasks.json"), tasks).unwrap();
+        std::fs::write(outside.join("tasks.json"), tasks).unwrap();
+        std::os::unix::fs::symlink(&inside, root.join(".gyro")).unwrap();
+        let loaded =
+            super::read_custom_tasks(&root).expect("an alias inside the workspace stays readable");
+        assert_eq!(loaded[0].id, "test");
+        std::fs::remove_file(root.join(".gyro")).unwrap();
+        std::os::unix::fs::symlink(outside, root.join(".gyro")).unwrap();
+        assert!(super::read_custom_tasks(&root).is_err());
+    }
 }
 
 pub(crate) fn write_custom_tasks(root: &Path, tasks: &[CustomTaskRecord]) -> anyhow::Result<()> {

@@ -62,6 +62,7 @@ import {
 import "@xterm/xterm/css/xterm.css";
 import { lazy } from "react";
 import { recoverWorkspaceBuffers } from "./editor/edit-recovery";
+import { recoverDurableEditRecovery } from "./editor/durable-edit-recovery";
 import {
   MODEL_DEFAULT_SUGGESTION_MAX_STORAGE_CHARS,
   MODEL_DEFAULT_SUGGESTION_STORAGE_KEY,
@@ -121,6 +122,8 @@ export type ProviderCapabilityResourceEvent = {
 };
 
 export type TerminalPaneSnapshot = {
+  outputCursor?: TerminalPane["outputCursor"];
+  outputComplete?: boolean;
   paneId: string;
   title: string;
   profileId?: string | null;
@@ -373,7 +376,7 @@ export const WORKBENCH_PERSIST_DEBOUNCE_MS = 500;
 
 export const WORKBENCH_PERSIST_IDLE_TIMEOUT_MS = 1_500;
 
-export const TERMINAL_POLL_INTERVAL_MS = 1_000;
+export const TERMINAL_POLL_INTERVAL_MS = 100;
 
 export type BrowserPreviewCheck = {
   reachable: boolean;
@@ -395,7 +398,7 @@ export type OllamaDiscovery = {
   }>;
 };
 
-export const TERMINAL_CHAT_BUSY_POLL_INTERVAL_MS = 4_000;
+export const TERMINAL_CHAT_BUSY_POLL_INTERVAL_MS = 100;
 
 export const MAX_PERSISTED_TERMINAL_OUTPUT_CHARS = 8_000;
 
@@ -494,10 +497,10 @@ export type BrowserOwner = {
 export function loadInitialWorkbenchState(): WorkbenchState {
   const stored = loadStoredWorkbenchState();
   return applyLaunchView(
-    recoverWorkspaceBuffers({
+    recoverDurableEditRecovery(recoverWorkspaceBuffers({
       ...stored,
       preferences: { ...stored.preferences, ...readStoredAppearance() },
-    }),
+    })),
   );
 }
 
@@ -1087,10 +1090,11 @@ export function flushPersistedWorkbenchState(
   if (!pending) {
     return;
   }
-  ref.current = undefined;
-  const saved = saveAppearancePreferences(pending.preferences);
+  const appearanceSaved = saveAppearancePreferences(pending.preferences);
+  const workbenchSaved = safeSetLocalStorage(WORKBENCH_STORAGE_KEY, JSON.stringify(pending));
+  const saved = appearanceSaved && workbenchSaved;
+  if (saved && ref.current === pending) ref.current = undefined;
   onPersisted?.(pending.preferences, saved);
-  safeSetLocalStorage(WORKBENCH_STORAGE_KEY, JSON.stringify(pending));
 }
 
 export function schedulePersistedWorkbenchStateFlush(
@@ -1183,12 +1187,12 @@ export function persistableDirtyEditorBuffers(
   const persisted: WorkbenchState["ide"]["buffers"] = {};
   let remainingChars = MAX_PERSISTED_DIRTY_BUFFERS_TOTAL_CHARS;
   for (const buffer of Object.values(buffers)) {
-    if (buffer.status !== "dirty") continue;
+    if (buffer.content === buffer.savedContent) continue;
     const chars = buffer.content.length + buffer.savedContent.length;
     if (chars > MAX_PERSISTED_DIRTY_BUFFER_CHARS || chars > remainingChars) {
       continue;
     }
-    persisted[buffer.path] = buffer;
+    persisted[buffer.path] = { ...buffer, status: "dirty" };
     remainingChars -= chars;
   }
   return persisted;
@@ -1462,7 +1466,7 @@ export function terminalProcessForProfile(
 ) {
   if (commandOverride) {
     return {
-      args: ["-lc", commandOverride],
+      args: ["-ilc", commandOverride],
       command: "zsh",
       displayCommand: commandOverride,
     };
@@ -1524,6 +1528,8 @@ export function terminalPaneFromSnapshot(
         ? snapshot.status
         : `${snapshot.status} (${snapshot.exitCode})`,
     output: snapshot.output ?? "",
+    outputCursor: snapshot.outputCursor,
+    outputComplete: snapshot.outputComplete,
     hasForegroundJob: snapshot.hasForegroundJob ?? undefined,
   };
 }
@@ -1538,6 +1544,9 @@ export function terminalSnapshotFromCapabilityData(
   const command = stringFromRecord(pane, "command");
   const status = stringFromRecord(pane, "status");
   const outputRevision = pane?.outputRevision;
+  const cursor = recordFromUnknown(pane?.outputCursor);
+  const outputCursor = typeof cursor?.generation === "string" && typeof cursor.start === "number" && typeof cursor.end === "number"
+    ? { generation: cursor.generation, start: cursor.start, end: cursor.end } : undefined;
   if (
     !paneId ||
     !title ||
@@ -1554,6 +1563,8 @@ export function terminalSnapshotFromCapabilityData(
     command,
     output: stringFromRecord(pane, "output"),
     outputRevision,
+    outputCursor,
+    outputComplete: typeof pane?.outputComplete === "boolean" ? pane.outputComplete : undefined,
     status: status as TerminalPaneSnapshot["status"],
     hasForegroundJob:
       typeof pane?.hasForegroundJob === "boolean"

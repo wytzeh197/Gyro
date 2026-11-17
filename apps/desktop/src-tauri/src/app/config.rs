@@ -16,6 +16,18 @@ pub(crate) async fn load_config() -> Result<GyroConfig, String> {
         .map_err(|error| format!("config load worker failed: {error}"))?
 }
 
+#[tauri::command]
+pub(crate) async fn recover_config() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let paths = GyroPaths::for_current_user().map_err(to_string)?;
+        GyroConfig::recover(&paths)
+            .map(|path| path.map(|p| p.to_string_lossy().into_owned()))
+            .map_err(to_string)
+    })
+    .await
+    .map_err(to_string)?
+}
+
 /// Warm local storage so the shell can open the chat UI while this finishes.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,6 +55,8 @@ pub(crate) fn warm_desktop_shell_blocking() -> Result<WarmDesktopShellReport, St
     let started = std::time::Instant::now();
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     paths.ensure().map_err(to_string)?;
+
+    gyro_core::keychain::migrate_legacy_credentials().map_err(to_string)?;
 
     // Config first so provider count is available even if store warm fails later.
     let config = GyroConfig::load(&paths).map_err(to_string)?;

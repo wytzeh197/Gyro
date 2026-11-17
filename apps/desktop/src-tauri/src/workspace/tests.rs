@@ -708,3 +708,38 @@ fn workspace_watch_cache_evicts_old_roots() {
         MAX_WORKSPACE_WATCH_CACHES
     );
 }
+
+#[test]
+fn editor_save_waits_for_agent_commit_and_then_rechecks_its_hash() {
+    let workspace = tempfile::tempdir().unwrap();
+    let path = workspace.path().join("race.txt");
+    std::fs::write(&path, "base").unwrap();
+    let original = read_workspace_file_with_limit(
+        workspace.path().to_str().unwrap(),
+        "race.txt",
+        MAX_WORKSPACE_FILE_EDIT_BYTES,
+    )
+    .unwrap();
+    let agent_lock = gyro_core::mutations::acquire_workspace_write_lock().unwrap();
+    let request = WorkspaceFileWriteRequest {
+        workspace_path: workspace.path().to_string_lossy().into(),
+        path: "race.txt".into(),
+        content: "editor".into(),
+        expected_hash: Some(original.content_hash),
+    };
+    let (send, receive) = std::sync::mpsc::channel();
+    let writer = std::thread::spawn(move || {
+        send.send(write_workspace_file_impl(&request)).unwrap();
+    });
+    assert!(receive
+        .recv_timeout(std::time::Duration::from_millis(50))
+        .is_err());
+    std::fs::write(&path, "agent").unwrap();
+    drop(agent_lock);
+    let result = receive
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap();
+    assert!(result.unwrap_err().to_string().contains("changed on disk"));
+    writer.join().unwrap();
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "agent");
+}

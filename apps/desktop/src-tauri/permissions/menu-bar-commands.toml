@@ -1,0 +1,11 @@
+[[permission]]
+identifier = "menu-bar-commands"
+description = "Only the commands used by the menu bar popover."
+commands.allow = [
+  "get_menu_bar_snapshot",
+  "hide_menu_bar_popover",
+  "open_menu_bar_target",
+  "show_main_window",
+  "stop_provider_chat",
+  "resolve_provider_approval",
+]

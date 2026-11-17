@@ -511,6 +511,26 @@ async fn run(app: &tauri::AppHandle, directory: &Path) -> anyhow::Result<Value> 
     )
     .await?;
     let pane_id = pane["paneId"].as_str().unwrap().to_string();
+    let (pushed, mut output_events) = tokio::sync::mpsc::unbounded_channel();
+    let output_watch = client
+        .watch(
+            &host_id,
+            Request {
+                id: Uuid::new_v4(),
+                lease: None,
+                operation: Operation::Watch {
+                    session_id: session.clone(),
+                },
+            },
+            Arc::new(move |event| {
+                if event.topic == "terminal" {
+                    let _ = pushed.send(event);
+                }
+            }),
+        )
+        .await?;
+    let input_started = std::time::Instant::now();
+
     call(
         &client,
         &host_id,
@@ -554,6 +574,23 @@ async fn run(app: &tauri::AppHandle, directory: &Path) -> anyhow::Result<Value> 
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     assert!(pty_ok);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while let Some(event) = output_events.recv().await {
+            assert_eq!(event.payload["recipient"], client.id());
+            if event.payload["snapshot"]["output"]
+                .as_str()
+                .unwrap_or("")
+                .contains("GYRO_REMOTE_PTY_OK")
+            {
+                return;
+            }
+        }
+        panic!("Terminal push ended before output");
+    })
+    .await?;
+    let terminal_push_ms = input_started.elapsed().as_millis();
+    output_watch.abort();
+
     host.controls
         .lock()
         .unwrap()
@@ -604,10 +641,50 @@ async fn run(app: &tauri::AppHandle, directory: &Path) -> anyhow::Result<Value> 
     assert!(call(&client, &host_id, Operation::Projects, None)
         .await
         .is_err());
+    assert!(!host.store.activity()?.is_empty());
+    let state = app.state::<super::RemoteAccess>();
+    super::commands::remote_access_action(
+        app.clone(),
+        super::commands::LocalAction::Configure {
+            enabled: false,
+            name: String::new(),
+        },
+    )
+    .await
+    .map_err(anyhow::Error::msg)?;
+    assert!(!host.store.settings()?.enabled);
+    assert!(host.terminals.lock().unwrap().is_empty());
+    assert!(state.runtime.lock().await.is_none());
+    super::commands::remote_host_watch(app.clone(), host_id.clone(), None, "late-cleanup".into())
+        .await
+        .map_err(anyhow::Error::msg)?;
+    super::commands::remote_host_request(
+        app.clone(),
+        host_id.clone(),
+        Request {
+            id: Uuid::new_v4(),
+            lease: None,
+            operation: Operation::Release {
+                session_id: "late-cleanup".into(),
+            },
+        },
+    )
+    .await
+    .map_err(anyhow::Error::msg)?;
+    assert!(state.runtime.lock().await.is_none());
+    assert!(state.ensure(app).await.is_err());
+    super::commands::remote_access_action(
+        app.clone(),
+        super::commands::LocalAction::Configure {
+            enabled: false,
+            name: String::new(),
+        },
+    )
+    .await
+    .map_err(anyhow::Error::msg)?;
     client.close().await;
     other.close().await;
-    host.node.get().unwrap().close().await;
     Ok(
-        json!({"ok":true,"checks":["host-model-persistence","chunked-image-upload","host-image-preview","cross-session-image-denied","attachment-transcript","unpaired-denied","host-approval-required","create-idempotent","shared-paths","automatic-device-control","file-conflict","approval-turn-fencing","approval-routing","git-stage-commit","git-stale-revision","worktree-session","worktree-scope-revocation","submit-idempotent","disconnect-keeps-running","remote-pty","stale-control-denied","other-device-denied","revocation"],"regressions":regressions,"provider":"deterministic fixture; no provider calls","transport":"two loopback endpoints; no public relay"}),
+        json!({"ok":true,"terminalPushMs":terminal_push_ms,"settingsFixes":["invalid-name-disable","late-cleanup-no-rebind","disabled-runtime-refused","repeated-off","audit-recorded","terminal-output-push"],"checks":["host-model-persistence","chunked-image-upload","host-image-preview","cross-session-image-denied","attachment-transcript","unpaired-denied","host-approval-required","create-idempotent","shared-paths","automatic-device-control","file-conflict","approval-turn-fencing","approval-routing","git-stage-commit","git-stale-revision","worktree-session","worktree-scope-revocation","submit-idempotent","disconnect-keeps-running","remote-pty","stale-control-denied","other-device-denied","revocation"],"regressions":regressions,"provider":"deterministic fixture; no provider calls","transport":"two loopback endpoints; no public relay"}),
     )
 }

@@ -100,6 +100,7 @@ impl Store {
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         }
         db.execute_batch("pragma journal_mode=WAL; pragma synchronous=FULL;
+          create table if not exists audit(id integer primary key,peer text not null,action text not null,session text not null,at integer not null,ok integer not null,count integer not null default 1);
           create table if not exists settings(id integer primary key check(id=1),value text not null);
           create table if not exists peers(id text primary key,name text not null,role text not null);
           create table if not exists pending(id text primary key,name text not null,expires integer not null);
@@ -108,11 +109,44 @@ impl Store {
           create table if not exists receipts(peer text not null,id text not null,hash text not null,status text not null,value text,primary key(peer,id));
           create table if not exists ssh_hosts(id text primary key,value text not null);
           create table if not exists ssh_meta(key text primary key,value text not null);
-          create table if not exists submitted_turns(session text not null,turn text not null,primary key(session,turn));")?;
+          create table if not exists submitted_turns(session text not null,turn text not null,primary key(session,turn));
+          create index if not exists audit_recent on audit(at desc,id desc);
+          create index if not exists audit_bucket on audit(peer,action,session,ok,at desc,id desc);")?;
         Ok(Self {
             db: Mutex::new(db),
             invitation: Mutex::new(None),
         })
+    }
+    /// Metadata only. Repeated reads/input within a minute are counted, not
+    /// copied into an unbounded ledger; no paths, prompts or terminal bytes.
+    pub fn audit(&self, peer: &str, action: &str, session: Option<&str>, ok: bool) -> Result<()> {
+        if peer.len() > 128 || action.len() > 64 || session.is_some_and(|s| s.len() > 64) {
+            bail!("Invalid audit metadata");
+        }
+        let mut db = self.db()?;
+        let tx = db.transaction()?;
+        let changed = tx.execute("update audit set at=?4,count=count+1 where id=(select max(id) from audit where peer=?1 and action=?2 and session=?3 and ok=?5 and at>=?6)",
+            params![peer, action, session.unwrap_or(""), now(), ok, now().saturating_sub(60)])?;
+        if changed == 0 {
+            tx.execute(
+                "insert into audit(peer,action,session,at,ok) values(?1,?2,?3,?4,?5)",
+                params![peer, action, session.unwrap_or(""), now(), ok],
+            )?;
+            // Only an insertion can exceed the retained-row bound. Repeated
+            // input updates keep the same row and must not scan/prune it all.
+            tx.execute("delete from audit where id not in (select id from audit order by at desc,id desc limit 1000)", [])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+    pub fn activity(&self) -> Result<Vec<Value>> {
+        let db = self.db()?;
+        let mut query = db.prepare("select id,peer,action,session,at,ok,count from audit order by at desc,id desc limit 50")?;
+        let rows = query.query_map([], |r| Ok(serde_json::json!({
+            "id":r.get::<_, i64>(0)?,"peerId":r.get::<_, String>(1)?,"action":r.get::<_, String>(2)?,
+            "sessionId":r.get::<_, String>(3)?,"at":r.get::<_, u64>(4)?,"ok":r.get::<_, bool>(5)?,"count":r.get::<_, u64>(6)?
+        })))?;
+        rows.map(|r| r.map_err(Into::into)).collect()
     }
     fn db(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
         self.db
@@ -172,6 +206,18 @@ impl Store {
             .unwrap_or_else(|| Ok(Settings::default()))
     }
     pub fn save_settings(&self, value: &Settings) -> Result<()> {
+        // Shutdown is independent of the editable name draft.
+        let invalid_name = value.name.trim().is_empty()
+            || value.name.chars().count() > 80
+            || value.name.chars().any(char::is_control);
+        let value = if !value.enabled && invalid_name {
+            Settings {
+                enabled: false,
+                name: self.settings()?.name,
+            }
+        } else {
+            value.clone()
+        };
         if value.name.trim().is_empty()
             || value.name.chars().count() > 80
             || value.name.chars().any(char::is_control)
@@ -180,7 +226,7 @@ impl Store {
         }
         self.db()?.execute(
             "insert or replace into settings values(1,?1)",
-            [serde_json::to_string(value)?],
+            [serde_json::to_string(&value)?],
         )?;
         if value.enabled {
             self.promote_approved_clients()?;
@@ -560,6 +606,103 @@ mod tests {
     fn by_path(s: &Store, path: &Path) -> Project {
         let found = s.projects().unwrap().into_iter().find(|p| p.path == path);
         found.unwrap()
+    }
+    #[test]
+    fn stopping_ignores_an_invalid_name_draft_and_clears_pairing() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        store
+            .save_settings(&Settings {
+                enabled: true,
+                name: "My Mac".into(),
+            })
+            .unwrap();
+        store.invite("host".into()).unwrap();
+        store
+            .save_settings(&Settings {
+                enabled: false,
+                name: "".into(),
+            })
+            .unwrap();
+        assert!(!store.settings().unwrap().enabled);
+        assert_eq!(store.settings().unwrap().name, "My Mac");
+        assert!(!store.invitation_active().unwrap());
+        store
+            .save_settings(&Settings {
+                enabled: false,
+                name: "Renamed while off".into(),
+            })
+            .unwrap();
+        assert_eq!(store.settings().unwrap().name, "Renamed while off");
+    }
+
+    #[test]
+    fn audit_is_metadata_only_coalesces_repeats_and_is_bounded() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        for _ in 0..10 {
+            store
+                .audit("device", "terminal:Input", Some("session"), true)
+                .unwrap();
+        }
+        let entries = store.activity().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["count"], 10);
+        for i in 0..1005 {
+            store
+                .audit(&format!("device-{i}"), "readFile", None, false)
+                .unwrap();
+        }
+        assert_eq!(store.activity().unwrap().len(), 50);
+        assert_eq!(
+            store
+                .db()
+                .unwrap()
+                .query_row("select count(*) from audit", [], |r| r.get::<_, u64>(0))
+                .unwrap(),
+            1000
+        );
+    }
+
+    #[test]
+    #[ignore = "explicit local performance measurement"]
+    fn benchmark_coalesced_audit_writes() {
+        let mut durations = Vec::new();
+        for _ in 0..5 {
+            let dir = tempfile::tempdir().unwrap();
+            let store = Store::open(dir.path()).unwrap();
+            {
+                let mut db = store.db().unwrap();
+                let tx = db.transaction().unwrap();
+                for index in 0..1000 {
+                    tx.execute("insert into audit(peer,action,session,at,ok) values(?1,'read','session',?2,1)", params![format!("fixture-{index}"), now()]).unwrap();
+                }
+                tx.commit().unwrap();
+            }
+            // Add the repeatedly updated bucket once, leaving 1,000 rows.
+            store
+                .audit("fixture-hot", "terminal:Input", Some("session"), true)
+                .unwrap();
+            let start = std::time::Instant::now();
+            for _ in 0..200 {
+                store
+                    .audit("fixture-hot", "terminal:Input", Some("session"), true)
+                    .unwrap();
+            }
+            durations.push(start.elapsed().as_micros());
+            let count: u64 = store
+                .db()
+                .unwrap()
+                .query_row("select count(*) from audit", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(count, 1000);
+            assert_eq!(store.activity().unwrap()[0]["count"], 201);
+        }
+        durations.sort_unstable();
+        println!(
+            "coalesced-audit rows=1000 writes=200 trials=5 median_us={}",
+            durations[2]
+        );
     }
     #[test]
     fn invitations_are_single_use_and_require_explicit_approval() {

@@ -22,9 +22,11 @@ use tauri::Emitter;
 use walkdir::WalkDir;
 #[tauri::command]
 pub(crate) async fn list_workspace_files(
+    app: tauri::AppHandle,
     workspace_path: String,
 ) -> Result<Vec<WorkspaceFile>, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        super::access::require_root(&app, &workspace_path)?;
         list_workspace_tree_blocking(workspace_path, Some(3))
     })
     .await
@@ -33,10 +35,12 @@ pub(crate) async fn list_workspace_files(
 
 #[tauri::command]
 pub(crate) async fn list_workspace_tree(
+    app: tauri::AppHandle,
     workspace_path: String,
     depth: Option<usize>,
 ) -> Result<Vec<WorkspaceFile>, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        super::access::require_root(&app, &workspace_path)?;
         list_workspace_tree_blocking(workspace_path, depth)
     })
     .await
@@ -371,7 +375,13 @@ pub(crate) fn workspace_watch_event_is_relevant(root: &Path, event: &NotifyEvent
             };
             let first = first.as_os_str().to_string_lossy();
             if first == ".git" {
-                return false;
+                // Index/ref changes alter badges and branch identity without touching source files.
+                let tail = relative.strip_prefix(".git").unwrap_or(relative);
+                return matches!(
+                    tail.to_str(),
+                    Some("HEAD" | "index" | "packed-refs" | "config")
+                ) || tail.starts_with("refs")
+                    || tail.starts_with("reftable");
             }
             // Dependency and tool caches churn at any depth (`pnpm install`,
             // a test run); only their appearance at the top level counts.

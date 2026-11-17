@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-commands",
+  "permissions": [
+    "main-commands",
+    "dialog:default",
+    "updater:default"
+  ],
+  "webviews": [
+    "main"
+  ]
+}

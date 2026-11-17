@@ -1,6 +1,31 @@
 use super::*;
 
 #[test]
+fn acp_rejects_an_unread_or_changed_base_before_approval_or_full_access() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = temp.path().canonicalize().unwrap();
+    let file = workspace.join("file.txt");
+    fs::write(&file, "user saved this").unwrap();
+    let old_hash = gyro_core::mutations::content_hash(b"agent read this");
+    for require_approval in [false, true] {
+        for observed in [None, Some(old_hash.as_str())] {
+            let result = apply_acp_workspace_write(
+                &workspace,
+                &file,
+                "stale replacement",
+                observed,
+                false,
+                require_approval,
+                &gyro_core::CancellationToken::default(),
+                |_, _| panic!("a stale edit must not reach approval"),
+            );
+            assert!(result.is_err());
+            assert_eq!(fs::read_to_string(&file).unwrap(), "user saved this");
+        }
+    }
+}
+
+#[test]
 fn acp_workspace_write_requires_its_exact_review_and_does_not_reapply() {
     let temp = tempfile::tempdir().unwrap();
     let workspace = temp.path().canonicalize().unwrap();
@@ -13,6 +38,7 @@ fn acp_workspace_write_requires_its_exact_review_and_does_not_reapply() {
         &workspace,
         &b,
         "different\n",
+        Some(&gyro_core::mutations::content_hash(b"before\n")),
         false,
         true,
         &cancellation,
@@ -31,6 +57,7 @@ fn acp_workspace_write_requires_its_exact_review_and_does_not_reapply() {
         &workspace,
         &b,
         "reviewed\n",
+        Some(&gyro_core::mutations::content_hash(b"before\n")),
         false,
         true,
         &cancellation,
@@ -46,6 +73,7 @@ fn acp_workspace_write_requires_its_exact_review_and_does_not_reapply() {
         &workspace,
         &b,
         "plan write",
+        None,
         true,
         false,
         &cancellation,

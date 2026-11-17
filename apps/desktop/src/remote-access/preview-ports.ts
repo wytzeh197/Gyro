@@ -74,6 +74,8 @@ export function createPreviewPorts() {
   const running = new Set<string>();
   const frames = new Map<string, ProviderChatStreamEvent[]>();
   const requests: HostRequest[] = [];
+  let holdFileReads = false;
+  const pendingFileReads: Array<() => void> = [];
   let watchedSession: string | undefined;
   let watchedHost = hostId;
   let approvals: Snapshot["approvals"] = [];
@@ -398,6 +400,8 @@ export function createPreviewPorts() {
             truncated: false,
             sizeBytes: files.get(op.path)?.length ?? 0,
           };
+          if (holdFileReads)
+            await new Promise<void>((resolve) => pendingFileReads.push(resolve));
           break;
         case "writeFile": {
           if (request.lease !== control?.generation)
@@ -445,6 +449,8 @@ export function createPreviewPorts() {
                 };
           break;
         case "terminal": {
+          if (op.action === "input" && new TextEncoder().encode(op.input ?? "").length > 64 * 1024)
+            throw new Error("Terminal input exceeds the host frame limit (fixture)");
           if (op.action === "create") {
             const terminal: TerminalSnapshot = {
               paneId: crypto.randomUUID(),
@@ -519,6 +525,12 @@ export function createPreviewPorts() {
     port,
     syncedProjects,
     requests,
+    pauseFileReads() { holdFileReads = true; },
+    pendingFileReadCount() { return pendingFileReads.length; },
+    resumeFileReads() {
+      holdFileReads = false;
+      for (const resolve of pendingFileReads.splice(0)) resolve();
+    },
     startHostRun(sessionId = "existing-chat") {
       running.add(sessionId);
       frames.set(sessionId, []);

@@ -21,6 +21,7 @@ export function writeEditRecovery(
   const serialized = JSON.stringify({
     version: 1,
     writtenAt: Date.now(),
+    revision: crypto.randomUUID(),
     buffers: persistableDirtyEditorBuffers(buffers),
   });
   if (serialized.length > MAX_JOURNAL_CHARS)

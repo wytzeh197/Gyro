@@ -11,7 +11,8 @@ fn terminal_output_is_redacted_and_framed_as_untrusted_output() {
 
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("output.snapshot.txt");
-    fs::write(&path, "error[E0425]: cannot find value `x`").unwrap();
+    let output = "error[E0425]: cannot find value `x`";
+    fs::write(&path, output).unwrap();
     let mut request = anthropic_provider_request();
     request.provider_id = "openai".into();
     request.attachments = vec![ChatAttachmentRequest {
@@ -21,7 +22,7 @@ fn terminal_output_is_redacted_and_framed_as_untrusted_output() {
         path: path.display().to_string(),
         relative_path: None,
         mime_type: Some("text/plain".into()),
-        size: 36,
+        size: output.len() as u64,
         content_hash: None,
         modified_at: None,
         preview_url: None,

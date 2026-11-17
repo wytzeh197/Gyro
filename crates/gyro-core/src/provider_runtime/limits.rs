@@ -20,6 +20,8 @@ pub const PROVIDER_STOP_MARKER: &str = "chat cancelled by";
 pub const PROVIDER_STALL_MARKER: &str = "the provider sent nothing for";
 
 pub const MAX_CHAT_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
+pub const MAX_CHAT_WORKSPACE_ATTACHMENT_BYTES: u64 = 32 * 1024 * 1024;
+pub const MAX_CHAT_IDE_SNAPSHOT_BYTES: u64 = 128 * 1024;
 
 pub const MAX_CHAT_RESPONSE_BYTES: usize = MAX_CHAT_RESPONSE_CHARS * 4 + 4;
 

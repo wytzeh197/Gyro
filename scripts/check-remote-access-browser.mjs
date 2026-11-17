@@ -767,6 +767,21 @@ try {
       ),
     "file conflict recovery",
   );
+  // Hold the production reload request while a real keyboard edit reaches
+  // Monaco. The delayed snapshot must not replace the newer editor buffer.
+  await evaluate("window.gyroRemoteFixture.pauseFileReads()");
+  await click("Reload from host");
+  await until(() => evaluate("window.gyroRemoteFixture.pendingFileReadCount() === 1"), "held remote file reload");
+  await evaluate("document.querySelector('.monaco-editor textarea.inputarea').focus()");
+  await call("Input.insertText", { text: "// typed during delayed reload\n" });
+  const typedDuringReload = "/typed\\s+during\\s+delayed\\s+reload/.test(document.querySelector('.monaco-editor')?.innerText ?? '')";
+  await until(() => evaluate(typedDuringReload), "Monaco typing during host reload");
+  await evaluate("window.gyroRemoteFixture.resumeFileReads()");
+  await until(() => evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Save on host' && !b.disabled)"), "reload response settled");
+  assert.equal(await evaluate(typedDuringReload), true, "A delayed reload preserves newer Monaco edits");
+  await shot("files-reload-race.png");
+  await click("Save on host");
+  await until(() => evaluate("window.gyroRemoteFixture.requests.some(r=>r.operation.op==='writeFile' && r.operation.content.includes('typed during delayed reload'))"), "preserved edit saved to host fixture");
   // Let Monaco's debounced diagnostics finish before disposing the editor.
   await pause(1500);
   await tool("Source Control");
@@ -793,6 +808,16 @@ try {
     "production terminal component",
   );
   await shot("terminal-dark.png");
+  const terminalPaste = "p".repeat(60 * 1024 - 1) + "😀" + "q".repeat(14 * 1024);
+  await evaluate("window.__gyroPasteStart = window.gyroRemoteFixture.requests.length; document.querySelector('.xterm-helper-textarea').focus()");
+  await call("Input.insertText", { text: terminalPaste });
+  const pasteInputs = "window.gyroRemoteFixture.requests.slice(window.__gyroPasteStart).filter(r=>r.operation.op==='terminal' && r.operation.action==='input').map(r=>r.operation.input)";
+  await until(() => evaluate(`(${pasteInputs}).join('').length === ${terminalPaste.length}`), "large Unicode paste delivered through the production terminal");
+  const terminalPasteFrames = await evaluate(pasteInputs);
+  assert.equal(terminalPasteFrames.join(""), terminalPaste);
+  assert.equal(terminalPasteFrames.length, 2);
+  assert.ok(terminalPasteFrames.every((text) => new TextEncoder().encode(text).length <= 60 * 1024));
+  console.log("Remote terminal: large Unicode keyboard paste preserved in two bounded input frames.");
   await evaluate("window.gyroRemoteFixture.setOnline(false)");
   await until(
     () =>
@@ -1156,9 +1181,11 @@ try {
           "submit",
           "files-editor",
           "stale-file-save",
-          "reload-file-conflict",
+        "reload-file-conflict",
+        "slow-reload-preserves-typing",
           "git-diff",
-          "terminal",
+        "terminal",
+        "large-unicode-terminal-paste",
           "disconnect",
           "reconnect",
           "machine-switch",

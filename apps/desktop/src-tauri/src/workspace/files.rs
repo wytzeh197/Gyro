@@ -20,10 +20,12 @@ use std::{
 use uuid::Uuid;
 #[tauri::command]
 pub(crate) async fn read_workspace_file(
+    app: tauri::AppHandle,
     workspace_path: String,
     path: String,
 ) -> Result<WorkspaceFileContent, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        super::access::require_path(&app, &workspace_path, &path, false)?;
         read_workspace_file_impl(&workspace_path, &path).map_err(to_string)
     })
     .await
@@ -32,10 +34,12 @@ pub(crate) async fn read_workspace_file(
 
 #[tauri::command]
 pub(crate) async fn read_workspace_file_full(
+    app: tauri::AppHandle,
     workspace_path: String,
     path: String,
 ) -> Result<WorkspaceFileContent, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        super::access::require_path(&app, &workspace_path, &path, false)?;
         read_workspace_file_with_limit(&workspace_path, &path, MAX_WORKSPACE_FILE_EDIT_BYTES)
             .map_err(to_string)
     })
@@ -45,10 +49,12 @@ pub(crate) async fn read_workspace_file_full(
 
 #[tauri::command]
 pub(crate) async fn stat_workspace_file(
+    app: tauri::AppHandle,
     workspace_path: String,
     path: String,
 ) -> Result<WorkspaceFileStat, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        super::access::require_path(&app, &workspace_path, &path, false)?;
         stat_workspace_file_impl(&workspace_path, &path).map_err(to_string)
     })
     .await
@@ -114,9 +120,11 @@ mod dropped_path_kind_tests {
 
 #[tauri::command]
 pub(crate) async fn write_workspace_file(
+    app: tauri::AppHandle,
     request: WorkspaceFileWriteRequest,
 ) -> Result<WorkspaceFileContent, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        super::access::require_path(&app, &request.workspace_path, &request.path, false)?;
         write_workspace_file_impl(&request).map_err(to_string)
     })
     .await
@@ -135,11 +143,28 @@ pub(crate) async fn create_file_mutation_proposal(
 }
 
 #[tauri::command]
+pub(crate) async fn preview_file_mutation_proposal(
+    proposal_id: String,
+) -> Result<gyro_core::MutationReview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = crate::stores::open_store()?;
+        let proposal = store
+            .get_mutation_proposal(Uuid::parse_str(&proposal_id).map_err(to_string)?)
+            .map_err(to_string)?
+            .ok_or_else(|| "unknown proposal".to_string())?;
+        gyro_core::review_mutation_proposal(proposal).map_err(to_string)
+    })
+    .await
+    .map_err(to_string)?
+}
+
+#[tauri::command]
 pub(crate) async fn resolve_file_mutation_proposal(
+    app: tauri::AppHandle,
     request: FileMutationDecisionRequest,
 ) -> Result<FileMutationDecisionResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        resolve_file_mutation_proposal_impl(request).map_err(to_string)
+        resolve_file_mutation_proposal_impl(&app, request).map_err(to_string)
     })
     .await
     .map_err(|error| format!("file mutation decision worker failed: {error}"))?
@@ -160,7 +185,7 @@ pub(crate) fn read_workspace_file_with_limit(
     let root = PathBuf::from(workspace_path).canonicalize()?;
     let candidate = gyro_core::security::assert_path_inside_workspace(&root, Path::new(path))?;
     let (mut bytes, size_bytes) =
-        read_bounded_regular_file(&candidate, max_bytes, "workspace file")?;
+        read_workspace_bytes(&root, &candidate, max_bytes, "workspace file")?;
     let truncated = bytes.len() > max_bytes;
     if truncated {
         bytes.truncate(max_bytes);
@@ -195,6 +220,31 @@ pub(crate) fn decode_workspace_utf8(bytes: &[u8], truncated: bool) -> anyhow::Re
 #[cfg(test)]
 mod workspace_utf8_tests {
     use super::decode_workspace_utf8;
+
+    #[cfg(unix)]
+    #[test]
+    fn approved_read_cannot_follow_a_parent_replaced_after_path_validation() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let root = base.join("workspace");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(root.join("src/file.txt"), b"approved content").unwrap();
+        std::fs::write(outside.join("file.txt"), b"outside sentinel").unwrap();
+        let approved = gyro_core::security::assert_path_inside_workspace(
+            &root,
+            std::path::Path::new("src/file.txt"),
+        )
+        .unwrap();
+        std::fs::rename(root.join("src"), root.join("old")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("src")).unwrap();
+        let result = super::read_workspace_bytes(&root, &approved, 1024, "workspace file");
+        assert!(
+            result.is_err(),
+            "validated read followed a replaced parent: {result:?}"
+        );
+    }
 
     #[cfg(unix)]
     #[test]
@@ -278,32 +328,67 @@ pub(crate) fn read_bounded_regular_file(
     Ok((bytes, metadata.len()))
 }
 
+pub(crate) fn read_workspace_bytes(
+    root: &Path,
+    path: &Path,
+    max_bytes: usize,
+    label: &str,
+) -> anyhow::Result<(Vec<u8>, u64)> {
+    let parent = gyro_core::workspace_write::WorkspaceWriteParent::open(root, path)?;
+    let mut file = parent
+        .open_read()
+        .with_context(|| format!("open {label} {}", path.display()))?;
+    let metadata = file.metadata()?;
+    anyhow::ensure!(metadata.is_file(), "{label} is not a regular file");
+    let mut bytes = Vec::with_capacity(max_bytes.min(metadata.len() as usize));
+    Read::by_ref(&mut file)
+        .take(max_bytes.saturating_add(1) as u64)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("read {label} {}", path.display()))?;
+    parent.verify()?;
+    Ok((bytes, metadata.len()))
+}
+
 pub(crate) fn stat_workspace_file_impl(
     workspace_path: &str,
     path: &str,
 ) -> anyhow::Result<WorkspaceFileStat> {
     let root = PathBuf::from(workspace_path).canonicalize()?;
     let candidate = gyro_core::security::assert_path_inside_workspace(&root, Path::new(path))?;
-    let metadata = std::fs::metadata(&candidate)?;
+    let metadata = match std::fs::metadata(&candidate) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(WorkspaceFileStat {
+                path: path.to_string(),
+                kind: "missing".into(),
+                size_bytes: 0,
+                content_hash: None,
+            });
+        }
+        Err(error) => return Err(error.into()),
+    };
     let kind = if metadata.is_dir() {
         "directory"
     } else {
         "file"
     }
     .to_string();
-    let content_hash = if metadata.is_file()
-        && metadata.len() <= MAX_WORKSPACE_FILE_EDIT_BYTES as u64
-    {
-        let (bytes, _) =
-            read_bounded_regular_file(&candidate, MAX_WORKSPACE_FILE_EDIT_BYTES, "workspace file")?;
-        if bytes.len() > MAX_WORKSPACE_FILE_EDIT_BYTES || bytes.contains(&0) {
-            None
+    let content_hash =
+        if metadata.is_file() && metadata.len() <= MAX_WORKSPACE_FILE_EDIT_BYTES as u64 {
+            let (bytes, _) = read_workspace_bytes(
+                &root,
+                &candidate,
+                MAX_WORKSPACE_FILE_EDIT_BYTES,
+                "workspace file",
+            )?;
+            if bytes.len() > MAX_WORKSPACE_FILE_EDIT_BYTES || bytes.contains(&0) {
+                None
+            } else {
+                Some(content_hash(&bytes))
+            }
         } else {
-            Some(content_hash(&bytes))
-        }
-    } else {
-        None
-    };
+            None
+        };
 
     Ok(WorkspaceFileStat {
         path: path.to_string(),
@@ -316,6 +401,8 @@ pub(crate) fn stat_workspace_file_impl(
 pub(crate) fn write_workspace_file_impl(
     request: &WorkspaceFileWriteRequest,
 ) -> anyhow::Result<WorkspaceFileContent> {
+    // Share the agent transaction lock from hash validation through replacement.
+    let _write_lock = gyro_core::mutations::acquire_workspace_write_lock()?;
     let root = PathBuf::from(&request.workspace_path).canonicalize()?;
     let candidate = validated_workspace_file_target(&root, &request.path)?;
     if candidate.is_dir() {
@@ -328,27 +415,39 @@ pub(crate) fn write_workspace_file_impl(
     if content_bytes.contains(&0) {
         anyhow::bail!("binary workspace files cannot be edited");
     }
-    if let Some(expected_hash) = request.expected_hash.as_deref() {
-        let (current, _) =
-            read_bounded_regular_file(&candidate, MAX_WORKSPACE_FILE_EDIT_BYTES, "workspace file")?;
-        if current.len() > MAX_WORKSPACE_FILE_EDIT_BYTES {
-            anyhow::bail!("workspace file is too large to edit in Gyro");
+    let validate_current = || -> anyhow::Result<()> {
+        if let Some(expected_hash) = request.expected_hash.as_deref() {
+            let (current, _) = read_workspace_bytes(
+                &root,
+                &candidate,
+                MAX_WORKSPACE_FILE_EDIT_BYTES,
+                "workspace file",
+            )?;
+            if current.len() > MAX_WORKSPACE_FILE_EDIT_BYTES {
+                anyhow::bail!("workspace file is too large to edit in Gyro");
+            }
+            if current.contains(&0) {
+                anyhow::bail!("binary workspace files cannot be edited");
+            }
+            let current_hash = content_hash(&current);
+            if current_hash != expected_hash {
+                anyhow::bail!("file changed on disk; reload before saving");
+            }
         }
-        if current.contains(&0) {
-            anyhow::bail!("binary workspace files cannot be edited");
-        }
-        let current_hash = content_hash(&current);
-        if current_hash != expected_hash {
-            anyhow::bail!("file changed on disk; reload before saving");
-        }
-    }
+        Ok(())
+    };
+    validate_current()?;
 
-    atomic_write_workspace_file(&candidate, content_bytes)?;
-    read_workspace_file_with_limit(
-        &request.workspace_path,
-        &request.path,
-        MAX_WORKSPACE_FILE_EDIT_BYTES,
-    )
+    atomic_write_workspace_file_at_root(&root, &candidate, content_bytes, validate_current)?;
+    // Return the committed snapshot, never a later writer's content paired with
+    // this save completion. The next disk reconciliation detects later writes.
+    Ok(WorkspaceFileContent {
+        path: request.path.clone(),
+        content: request.content.clone(),
+        truncated: false,
+        size_bytes: content_bytes.len() as u64,
+        content_hash: content_hash(content_bytes),
+    })
 }
 
 pub(crate) fn validated_workspace_file_target(root: &Path, path: &str) -> anyhow::Result<PathBuf> {
@@ -370,6 +469,20 @@ pub(crate) fn validated_workspace_file_target(root: &Path, path: &str) -> anyhow
 }
 
 pub(crate) fn atomic_write_workspace_file(path: &Path, content: &[u8]) -> anyhow::Result<()> {
+    atomic_write_workspace_file_at_root(
+        path.parent().ok_or_else(|| anyhow::anyhow!("no parent"))?,
+        path,
+        content,
+        || Ok(()),
+    )
+}
+
+fn atomic_write_workspace_file_at_root(
+    root: &Path,
+    path: &Path,
+    content: &[u8],
+    before_commit: impl FnOnce() -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| anyhow::anyhow!("workspace file path has no parent"))?;
@@ -380,23 +493,26 @@ pub(crate) fn atomic_write_workspace_file(path: &Path, content: &[u8]) -> anyhow
             .unwrap_or("mutation"),
         Uuid::new_v4()
     ));
+    let directory = gyro_core::workspace_write::WorkspaceWriteParent::open(root, path)?;
     let result = (|| -> anyhow::Result<()> {
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)?;
+        let mut file = directory.create(temporary.file_name().unwrap())?;
         if let Ok(metadata) = fs::metadata(path) {
             file.set_permissions(metadata.permissions())?;
         }
         file.write_all(content)?;
         file.flush()?;
         file.sync_all()?;
-        fs::rename(&temporary, path)?;
-        fs::File::open(parent)?.sync_all()?;
+        before_commit()?;
+        directory.rename_to(
+            temporary.file_name().unwrap(),
+            &directory,
+            path.file_name().unwrap(),
+        )?;
+        directory.sync()?;
         Ok(())
     })();
     if result.is_err() {
-        let _ = fs::remove_file(&temporary);
+        let _ = directory.remove(temporary.file_name().unwrap());
     }
     result
 }
@@ -414,4 +530,62 @@ pub(crate) fn assert_workspace_path(root: &Path, path: &str) -> anyhow::Result<P
 /// Lifecycle and Git actions act on the entry itself, never a symlink's target.
 pub(crate) fn assert_workspace_entry(root: &Path, path: &str) -> anyhow::Result<PathBuf> {
     gyro_core::security::assert_entry_inside_workspace(root, Path::new(path))
+}
+
+#[cfg(test)]
+mod save_race_tests {
+    use super::*;
+
+    #[test]
+    fn workspace_save_revalidates_after_staging_and_cleans_temporary_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let path = root.join("café notes.txt");
+        fs::write(&path, b"original").unwrap();
+        let expected = content_hash(b"original");
+        let result = atomic_write_workspace_file_at_root(&root, &path, b"editor", || {
+            // A different process writes while Gyro is staging/syncing its save.
+            fs::write(&path, b"external")?;
+            anyhow::ensure!(
+                content_hash(&fs::read(&path)?) == expected,
+                "file changed on disk"
+            );
+            Ok(())
+        });
+        assert!(result.unwrap_err().to_string().contains("changed on disk"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "external");
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn workspace_concurrent_saves_cannot_both_commit_the_same_base() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        fs::write(root.join("notes.txt"), b"base").unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let workers: Vec<_> = ["first", "second"]
+            .into_iter()
+            .map(|text| {
+                let barrier = barrier.clone();
+                let request = WorkspaceFileWriteRequest {
+                    workspace_path: root.display().to_string(),
+                    path: "notes.txt".into(),
+                    content: text.into(),
+                    expected_hash: Some(content_hash(b"base")),
+                };
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    write_workspace_file_impl(&request)
+                })
+            })
+            .collect();
+        let results: Vec<_> = workers.into_iter().map(|w| w.join().unwrap()).collect();
+        assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+        let winner = results.into_iter().find_map(Result::ok).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("notes.txt")).unwrap(),
+            winner.content
+        );
+        assert_eq!(winner.content_hash, content_hash(winner.content.as_bytes()));
+    }
 }
