@@ -26,7 +26,8 @@ use std::{
     time::Duration,
 };
 // Metadata-only wakeups. Remote subscribers batch output reads off the UI thread.
-static OUTPUT_CHANGES: std::sync::OnceLock<tokio::sync::broadcast::Sender<String>> = std::sync::OnceLock::new();
+static OUTPUT_CHANGES: std::sync::OnceLock<tokio::sync::broadcast::Sender<String>> =
+    std::sync::OnceLock::new();
 pub(crate) fn output_changes() -> &'static tokio::sync::broadcast::Sender<String> {
     OUTPUT_CHANGES.get_or_init(|| tokio::sync::broadcast::channel(256).0)
 }
@@ -695,7 +696,7 @@ where
                     Ok(count) => {
                         append_terminal_output(&output, &chunk[..count]);
                         let _ = output_changes().send(pane_id.clone());
-                    },
+                    }
                     Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                     Err(_) => break,
                 }

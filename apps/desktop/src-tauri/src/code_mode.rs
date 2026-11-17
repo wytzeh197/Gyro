@@ -39,34 +39,23 @@ const MAX_CALLS: usize = 32;
 const MAX_DATA: usize = 512 * 1024;
 const LIMIT: Duration = Duration::from_secs(60);
 
-/// macOS task_info layout from the platform SDK. RSS bounds script allocations
-/// that would otherwise fit neither the tool-data nor returned-output budget.
+/// Include compressed allocations in the worker's memory budget. Resident size
+/// alone can fall below the limit while the worker retains a larger footprint.
 #[cfg(target_os = "macos")]
-fn worker_resident_bytes(pid: u32) -> Option<u64> {
-    #[link(name = "proc")]
-    unsafe extern "C" {
-        fn proc_pidinfo(
-            pid: i32,
-            flavor: i32,
-            arg: u64,
-            buffer: *mut libc::c_void,
-            size: i32,
-        ) -> i32;
-    }
-    let mut info = [0u64; 12];
-    let read = unsafe {
-        proc_pidinfo(
+fn worker_memory_bytes(pid: u32) -> Option<u64> {
+    // This SDK structure contains only integers; zero is valid for every field.
+    let mut info: libc::rusage_info_v0 = unsafe { std::mem::zeroed() };
+    let result = unsafe {
+        libc::proc_pid_rusage(
             pid as i32,
-            4,
-            0,
-            info.as_mut_ptr().cast(),
-            std::mem::size_of_val(&info) as i32,
+            libc::RUSAGE_INFO_V0,
+            (&mut info as *mut libc::rusage_info_v0).cast(),
         )
     };
-    (read >= 16).then_some(info[1])
+    (result == 0).then_some(info.ri_resident_size.max(info.ri_phys_footprint))
 }
 #[cfg(not(target_os = "macos"))]
-fn worker_resident_bytes(_pid: u32) -> Option<u64> {
+fn worker_memory_bytes(_pid: u32) -> Option<u64> {
     None
 }
 
@@ -541,8 +530,7 @@ fn run_worker(
         let outcome = loop {
             if memory_check.elapsed() >= Duration::from_millis(100) {
                 memory_check = Instant::now();
-                if worker_resident_bytes(child.id()).is_some_and(|bytes| bytes > 256 * 1024 * 1024)
-                {
+                if worker_memory_bytes(child.id()).is_some_and(|bytes| bytes > 256 * 1024 * 1024) {
                     break failure(
                         "MemoryLimitExceeded",
                         "Workflow exceeded its 256 MiB memory limit",

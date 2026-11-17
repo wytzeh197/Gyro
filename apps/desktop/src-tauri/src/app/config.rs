@@ -20,8 +20,12 @@ pub(crate) async fn load_config() -> Result<GyroConfig, String> {
 pub(crate) async fn recover_config() -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let paths = GyroPaths::for_current_user().map_err(to_string)?;
-        GyroConfig::recover(&paths).map(|path| path.map(|p| p.to_string_lossy().into_owned())).map_err(to_string)
-    }).await.map_err(to_string)?
+        GyroConfig::recover(&paths)
+            .map(|path| path.map(|p| p.to_string_lossy().into_owned()))
+            .map_err(to_string)
+    })
+    .await
+    .map_err(to_string)?
 }
 
 /// Warm local storage so the shell can open the chat UI while this finishes.

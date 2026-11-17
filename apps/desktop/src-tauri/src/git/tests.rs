@@ -187,7 +187,12 @@ fn workspace_watcher_ignores_git_internals_and_dependency_churn() {
     let source = NotifyEvent::new(notify::EventKind::Any).add_path(root.join("src/app.ts"));
 
     assert!(!workspace_watch_event_is_relevant(&root, &ignored));
-    for path in [".git/HEAD", ".git/index", ".git/packed-refs", ".git/refs/heads/main"] {
+    for path in [
+        ".git/HEAD",
+        ".git/index",
+        ".git/packed-refs",
+        ".git/refs/heads/main",
+    ] {
         let changed = NotifyEvent::new(notify::EventKind::Any).add_path(root.join(path));
         assert!(workspace_watch_event_is_relevant(&root, &changed), "{path}");
     }

@@ -105,7 +105,11 @@ pub(crate) async fn remote_access_action(
     ) {
         return super::ssh::action(&app, request).await;
     }
-    if let LocalAction::Configure { enabled: false, name } = &request {
+    if let LocalAction::Configure {
+        enabled: false,
+        name,
+    } = &request
+    {
         let name = name.clone();
         let state = app.state::<RemoteAccess>();
         let mut slot = state.runtime.lock().await;
@@ -113,24 +117,52 @@ pub(crate) async fn remote_access_action(
             .disabled
             .store(true, std::sync::atomic::Ordering::SeqCst);
         let runtime = slot.take();
-        *state.active.write().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        *state
+            .active
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         if let Some(runtime) = &runtime {
             // Reject new and already queued requests immediately.
-            runtime.stopped.store(true, std::sync::atomic::Ordering::SeqCst);
-            if let Some(task) = runtime.terminal_task.get() { task.abort(); }
-            if let Some(listener) = runtime.provider_listener.get() { app.unlisten(*listener); }
+            runtime
+                .stopped
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            if let Some(task) = runtime.terminal_task.get() {
+                task.abort();
+            }
+            if let Some(listener) = runtime.provider_listener.get() {
+                app.unlisten(*listener);
+            }
             runtime.stop_ssh_hosting();
-            for (_, watch) in runtime.watches.lock().unwrap_or_else(std::sync::PoisonError::into_inner).drain() { watch.abort(); }
+            for (_, watch) in runtime
+                .watches
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .drain()
+            {
+                watch.abort();
+            }
         }
         // Persist before potentially slow shell termination so a crash during
         // teardown cannot restore opt-in on the next launch. Still finish all
         // teardown when persistence fails, then surface that failure.
         let saved = tauri::async_runtime::spawn_blocking(move || {
-            store()?.save_settings(&Settings { enabled: false, name }).map_err(err)
-        }).await.map_err(err).and_then(|result| result);
+            store()?
+                .save_settings(&Settings {
+                    enabled: false,
+                    name,
+                })
+                .map_err(err)
+        })
+        .await
+        .map_err(err)
+        .and_then(|result| result);
         if let Some(runtime) = runtime {
-            if let Some(node) = runtime.node.get() { node.close().await; }
-            tauri::async_runtime::spawn_blocking(move || runtime.close_terminals(|_| true)).await.map_err(err)?;
+            if let Some(node) = runtime.node.get() {
+                node.close().await;
+            }
+            tauri::async_runtime::spawn_blocking(move || runtime.close_terminals(|_| true))
+                .await
+                .map_err(err)?;
         }
         drop(slot);
         let _ = app.emit("gyro://remote-access-changed", ());

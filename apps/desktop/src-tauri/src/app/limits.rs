@@ -21,8 +21,8 @@ pub(crate) const MAX_CHAT_IMAGES: usize = 10;
 pub(crate) const MAX_CHAT_VIDEO_BYTES: u64 = 200 * 1024 * 1024;
 pub(crate) const MAX_CHAT_VIDEOS: usize = 2;
 pub(crate) const MAX_CHAT_ATTACHMENTS: usize = 16;
-pub(crate) use gyro_core::provider_runtime::limits::MAX_CHAT_WORKSPACE_ATTACHMENT_BYTES;
 pub(crate) use gyro_core::provider_runtime::limits::MAX_CHAT_IDE_SNAPSHOT_BYTES;
+pub(crate) use gyro_core::provider_runtime::limits::MAX_CHAT_WORKSPACE_ATTACHMENT_BYTES;
 pub(crate) const MAX_CHAT_ATTACHMENT_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 // A chat keeps its files for as long as its transcript points at them, so these
 // limits last its whole life. Bytes are the budget. The file count only guards

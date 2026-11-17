@@ -546,12 +546,32 @@ mod tests {
     async fn terminal_watch_only_delivers_output_to_the_owner() {
         let (host, client) = watch_pair().await;
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-        let watch = client.watch(&host.id(), watch_request("s"), Arc::new(move |event| { let _ = sender.send(event); })).await.unwrap();
+        let watch = client
+            .watch(
+                &host.id(),
+                watch_request("s"),
+                Arc::new(move |event| {
+                    let _ = sender.send(event);
+                }),
+            )
+            .await
+            .unwrap();
         host.events.send(RemoteEvent { session_id: "s".into(), topic: "terminal".into(), payload: serde_json::json!({"recipient":"another-device","snapshot":{"output":"private"}}) }).unwrap();
-        host.events.send(RemoteEvent { session_id: "s".into(), topic: "terminal".into(), payload: serde_json::json!({"recipient":client.id(),"snapshot":{"output":"own"}}) }).unwrap();
-        let event = tokio::time::timeout(Duration::from_secs(2), receiver.recv()).await.unwrap().unwrap();
+        host.events
+            .send(RemoteEvent {
+                session_id: "s".into(),
+                topic: "terminal".into(),
+                payload: serde_json::json!({"recipient":client.id(),"snapshot":{"output":"own"}}),
+            })
+            .unwrap();
+        let event = tokio::time::timeout(Duration::from_secs(2), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(event.payload["snapshot"]["output"], "own");
-        watch.abort(); client.close().await; host.close().await;
+        watch.abort();
+        client.close().await;
+        host.close().await;
     }
 
     #[tokio::test]

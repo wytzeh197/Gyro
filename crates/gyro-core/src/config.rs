@@ -523,13 +523,18 @@ impl GyroConfig {
     /// private backup name before replacing them; never reset readable config.
     pub fn recover(paths: &GyroPaths) -> Result<Option<PathBuf>> {
         let _lock = acquire_config_lock(paths)?;
-        if Self::load_unlocked(paths).is_ok() { return Ok(None); }
+        if Self::load_unlocked(paths).is_ok() {
+            return Ok(None);
+        }
         reject_unsafe_config_target(&paths.config_path)?;
-        let backup = paths.config_path.with_file_name(format!("config.recovery-{}.json", Uuid::new_v4()));
+        let backup = paths
+            .config_path
+            .with_file_name(format!("config.recovery-{}.json", Uuid::new_v4()));
         crate::paths::secure_private_file(&paths.config_path)?;
         std::fs::rename(&paths.config_path, &backup).context("back up unreadable configuration")?;
         if let Err(error) = Self::default().save_unlocked(paths) {
-            std::fs::rename(&backup, &paths.config_path).context("restore original configuration after failed recovery")?;
+            std::fs::rename(&backup, &paths.config_path)
+                .context("restore original configuration after failed recovery")?;
             clear_config_cache();
             return Err(error);
         }

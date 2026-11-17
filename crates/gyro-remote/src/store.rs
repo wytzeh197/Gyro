@@ -207,7 +207,9 @@ impl Store {
     }
     pub fn save_settings(&self, value: &Settings) -> Result<()> {
         // Shutdown is independent of the editable name draft.
-        let invalid_name = value.name.trim().is_empty() || value.name.chars().count() > 80 || value.name.chars().any(char::is_control);
+        let invalid_name = value.name.trim().is_empty()
+            || value.name.chars().count() > 80
+            || value.name.chars().any(char::is_control);
         let value = if !value.enabled && invalid_name {
             Settings {
                 enabled: false,
@@ -625,7 +627,12 @@ mod tests {
         assert!(!store.settings().unwrap().enabled);
         assert_eq!(store.settings().unwrap().name, "My Mac");
         assert!(!store.invitation_active().unwrap());
-        store.save_settings(&Settings { enabled: false, name: "Renamed while off".into() }).unwrap();
+        store
+            .save_settings(&Settings {
+                enabled: false,
+                name: "Renamed while off".into(),
+            })
+            .unwrap();
         assert_eq!(store.settings().unwrap().name, "Renamed while off");
     }
 
@@ -673,18 +680,29 @@ mod tests {
                 tx.commit().unwrap();
             }
             // Add the repeatedly updated bucket once, leaving 1,000 rows.
-            store.audit("fixture-hot", "terminal:Input", Some("session"), true).unwrap();
+            store
+                .audit("fixture-hot", "terminal:Input", Some("session"), true)
+                .unwrap();
             let start = std::time::Instant::now();
             for _ in 0..200 {
-                store.audit("fixture-hot", "terminal:Input", Some("session"), true).unwrap();
+                store
+                    .audit("fixture-hot", "terminal:Input", Some("session"), true)
+                    .unwrap();
             }
             durations.push(start.elapsed().as_micros());
-            let count: u64 = store.db().unwrap().query_row("select count(*) from audit", [], |row| row.get(0)).unwrap();
+            let count: u64 = store
+                .db()
+                .unwrap()
+                .query_row("select count(*) from audit", [], |row| row.get(0))
+                .unwrap();
             assert_eq!(count, 1000);
             assert_eq!(store.activity().unwrap()[0]["count"], 201);
         }
         durations.sort_unstable();
-        println!("coalesced-audit rows=1000 writes=200 trials=5 median_us={}", durations[2]);
+        println!(
+            "coalesced-audit rows=1000 writes=200 trials=5 median_us={}",
+            durations[2]
+        );
     }
     #[test]
     fn invitations_are_single_use_and_require_explicit_approval() {

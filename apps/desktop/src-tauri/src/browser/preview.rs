@@ -344,10 +344,16 @@ pub(crate) async fn capture_session_browser_preview(
         )?;
         // Ownership is written by the native session capture path, never inferred
         // from a filename supplied by a remote client or from prompt text.
-        let ownership = paths.browser_captures_dir.join(format!("{}.owner", capture.filename));
+        let ownership = paths
+            .browser_captures_dir
+            .join(format!("{}.owner", capture.filename));
         let mut options = fs::OpenOptions::new();
         options.write(true).create_new(true);
-        #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
         let mut owner = options.open(ownership).map_err(to_string)?;
         owner.write_all(session_id.as_bytes()).map_err(to_string)?;
         owner.sync_all().map_err(to_string)?;
@@ -602,7 +608,10 @@ pub(crate) fn prune_browser_preview_captures(directory: &Path) -> Result<(), Str
         .collect::<Vec<_>>();
     captures.sort_by(|left, right| right.0.cmp(&left.0));
     for (_, path) in captures.into_iter().skip(MAX_BROWSER_PREVIEW_CAPTURES) {
-        let owner = path.with_file_name(format!("{}.owner", path.file_name().unwrap().to_string_lossy()));
+        let owner = path.with_file_name(format!(
+            "{}.owner",
+            path.file_name().unwrap().to_string_lossy()
+        ));
         fs::remove_file(path).map_err(to_string)?;
         let _ = fs::remove_file(owner);
     }

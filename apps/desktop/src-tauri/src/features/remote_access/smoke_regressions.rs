@@ -91,10 +91,13 @@ async fn event(
         while let Some(event) = receiver.recv().await {
             // PTY output and mutation invalidations may already be queued.
             // These assertions inspect provider delivery and stream closure.
-            if event.topic == "provider" || event.topic == "resync" { return Ok(event); }
+            if event.topic == "provider" || event.topic == "resync" {
+                return Ok(event);
+            }
         }
         Err(anyhow::anyhow!("Watch ended without expected event"))
-    }).await?
+    })
+    .await?
 }
 
 /// Occupy exactly the resource a slow Git fetch would hold, without public network

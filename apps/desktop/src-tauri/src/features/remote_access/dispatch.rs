@@ -521,7 +521,11 @@ fn snapshot(
             })
     });
     let session_usage = open_store()?.session_usage_totals(session).map_err(err)?;
-    let live_truncated = runtime.live_events.lock().map_err(err)?.truncated(session_id);
+    let live_truncated = runtime
+        .live_events
+        .lock()
+        .map_err(err)?
+        .truncated(session_id);
     Ok(
         json!({"liveCheckpoint":true,"liveTruncated":live_truncated,"liveEvents":if include_live_events { Some(runtime.live_events.lock().map_err(err)?.snapshot(session_id)) } else { None },"providerUsage":provider_usage,"sessionUsage":session_usage,"session":stored_session,"running":runtime.app.state::<ProviderCancellationManager>().flags.lock().map_err(err)?.contains_key(session_id),"control":runtime.controls.lock().map_err(err)?.current(session_id),"approvals":provider.into_iter().chain(capabilities).collect::<Vec<_>>(),"mutations":mutations}),
     )
