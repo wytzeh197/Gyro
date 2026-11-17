@@ -129,5 +129,5 @@ try {
   socket?.close();
   browser.kill("SIGTERM");
   if (browser.exitCode === null) await new Promise(resolve=>browser.once("exit",resolve));
-  await rm(profile,{recursive:true,force:true});
+  await rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:200});
 }

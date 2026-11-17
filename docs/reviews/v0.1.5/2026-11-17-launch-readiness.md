@@ -124,6 +124,17 @@ All original content, isolation and draft assertions and the 20-second timeout
 are preserved. The corrected complete Canvas browser check passed locally
 (`/tmp/gyro-v015-canvas-frame-fix.log`). This follow-up changes only the test
 harness and this report; application code and release metadata are unchanged.
+The next [hosted run 44103045122](https://github.com/wytzeh197/Gyro/actions/runs/44103045122)
+again passed the full Rust and Tauri jobs, including native mouse acceptance.
+Its Node job passed all 172 rendering states and the Environment assertions,
+then failed during temporary Chrome-profile deletion with `ENOTEMPTY`.
+Environment cleanup now uses the same bounded removal retries as the existing
+recovery browser guard. The settings guard had the identical removal pattern
+and receives the same correction. Application code, assertions and timeouts
+remain unchanged. Both corrected checks passed locally; settings verified 73
+rendered layouts and 10 interaction checks. Logs:
+`/tmp/gyro-v015-environment-cleanup-fix.log` and
+`/tmp/gyro-v015-settings-cleanup-fix.log`.
 A fresh complete CI run is required before merge and tagging.
 
 ## Required before publication
