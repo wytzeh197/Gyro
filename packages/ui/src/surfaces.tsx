@@ -9049,19 +9049,21 @@ function ChatContextSection({
       setActivePopover((current) => (current === "branch" ? null : current));
     }
   }, [hasGitBranches]);
-  const projectLabel = composerProjectLabel(workspacePath);
+  const { composerWorkspace } = remote;
+  const projectLabel =
+    composerWorkspace?.projectName ?? composerProjectLabel(workspacePath);
   const modeChipLabel = workspaceModeLabel(workspaceMode);
   const branchLabel =
     branchName ??
     (workspaceMode === "worktree" ? "New worktree branch" : "main");
   const savedProjectItems: ComposerPopoverItem[] = (
-    remote.selectedProjectKey ? (remote.localProjects ?? []) : savedProjects
+    composerWorkspace ? (remote.localProjects ?? []) : savedProjects
   )
     .filter((project) => project.path)
     .slice(0, 6)
     .map((project) => ({
       action: `select-saved-project:${encodeURIComponent(project.path)}`,
-      active: !remote.selectedProjectKey && project.path === workspacePath,
+      active: !composerWorkspace && project.path === workspacePath,
       detail:
         "detail" in project && typeof project.detail === "string"
           ? project.detail
@@ -9069,7 +9071,7 @@ function ChatContextSection({
       icon: Folder,
       kind: "project" as const,
       label: project.label,
-      removeAction: remote.selectedProjectKey
+      removeAction: composerWorkspace
         ? undefined
         : `remove-saved-project:${encodeURIComponent(project.path)}`,
     }));
@@ -9080,10 +9082,10 @@ function ChatContextSection({
         decodeURIComponent(action.slice("select-remote-project:".length)),
         draft,
       );
-    } else if (remote.selectedProjectKey && action === "select-no-folder") {
+    } else if (composerWorkspace && action === "select-no-folder") {
       remote.selectLocalProject?.(undefined, draft);
     } else if (
-      remote.selectedProjectKey &&
+      composerWorkspace &&
       action?.startsWith("select-saved-project:")
     ) {
       remote.selectLocalProject?.(
@@ -9097,7 +9099,7 @@ function ChatContextSection({
   const items: ComposerPopoverItem[] =
     activePopover === "project"
       ? [
-          ...(!remote.selectedProjectKey && hasUserWorkspace && workspacePath
+          ...(!composerWorkspace && hasUserWorkspace && workspacePath
             ? [
                 {
                   action: `select-saved-project:${encodeURIComponent(workspacePath)}`,
@@ -9111,20 +9113,20 @@ function ChatContextSection({
             : []),
           {
             action: "select-no-folder",
-            active: !hasUserWorkspace,
+            active: !composerWorkspace && !hasUserWorkspace,
             detail: "Chat without a project folder",
             icon: HardDrive,
             label: "No folder",
           },
           ...savedProjectItems.filter(
             (project) =>
-              remote.selectedProjectKey ||
+              composerWorkspace ||
               project.action !==
                 `select-saved-project:${encodeURIComponent(workspacePath ?? "")}`,
           ),
           ...(remote.projectChoices ?? []).map((project) => ({
             action: `select-remote-project:${encodeURIComponent(project.key)}`,
-            active: remote.selectedProjectKey === project.key,
+            active: composerWorkspace?.projectKey === project.key,
             detail: `${project.hostName} · ${project.path}`,
             icon:
               deviceKind(project.hostId, project.hostName) === "laptop"
@@ -9134,7 +9136,7 @@ function ChatContextSection({
             badge: "Remote",
             kind: "project" as const,
           })),
-          ...(!remote.selectedProjectKey
+          ...(!composerWorkspace
             ? [
                 {
                   action: "select-workspace",
@@ -9193,9 +9195,13 @@ function ChatContextSection({
             [
               "project",
               Folder,
-              projectLabel,
+              composerWorkspace
+                ? `${projectLabel} on ${composerWorkspace.hostName}`
+                : projectLabel,
               "Project",
-              workspacePath ?? projectLabel,
+              composerWorkspace
+                ? `${composerWorkspace.hostName} · ${workspacePath ?? projectLabel}`
+                : (workspacePath ?? projectLabel),
             ],
             [
               "workspace-mode",

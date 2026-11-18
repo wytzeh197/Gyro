@@ -213,9 +213,6 @@ export function RemoteWorkspaceRoot({
               hostName: host.name,
             })),
           ),
-          selectedProjectKey: selection?.projectId
-            ? JSON.stringify([selection.hostId, selection.projectId])
-            : undefined,
           selectProject: (key, draft) => {
             for (const catalog of availableCatalogs) {
               const project = catalog.projects.find(
