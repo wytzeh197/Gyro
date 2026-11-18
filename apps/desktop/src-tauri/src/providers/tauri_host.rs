@@ -248,6 +248,15 @@ impl RunnerHost for TauriRunnerHost {
                 .store(false, std::sync::atomic::Ordering::Release);
         }
     }
+    fn codex_capacity_retry(
+        &self,
+        request: &ProviderChatRequest,
+        retry: gyro_core::provider_runtime::codex_client::CodexCapacityRetry,
+        waiting: bool,
+    ) {
+        super::retry_recovery::emit_codex_capacity_retry(&self.app, request, retry, waiting);
+    }
+
     fn start_heartbeat(
         &self,
         request: ProviderChatRequest,

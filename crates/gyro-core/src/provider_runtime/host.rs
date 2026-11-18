@@ -82,6 +82,13 @@ pub trait RunnerHost: Send + Sync {
     fn codex_client_options(&self) -> super::codex_client::CodexClientOptions {
         super::codex_client::CodexClientOptions::desktop()
     }
+    fn codex_capacity_retry(
+        &self,
+        _request: &ProviderChatRequest,
+        _retry: super::codex_client::CodexCapacityRetry,
+        _waiting: bool,
+    ) {
+    }
     fn supports_generated_images(&self) -> bool {
         true
     }

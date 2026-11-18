@@ -18,7 +18,8 @@ export function applyNativeProviderRetryStatus(
   const waiting = stream.phase === "retry-wait";
   if (
     waiting &&
-    (!stream.retryAt || !Number.isFinite(Date.parse(stream.retryAt)))
+    (!stream.retryAt || !Number.isFinite(Date.parse(stream.retryAt))) &&
+    !(stream.recoveryKind === "model-capacity" && !stream.retryAt)
   )
     return events;
   let index = events.findLastIndex((event) => {

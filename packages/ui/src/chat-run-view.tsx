@@ -5,6 +5,7 @@ import {
   Eye,
   FileCode2,
   Globe2,
+  HelpCircle,
   Image as ImageIcon,
   ListChecks,
   type LucideIcon,
@@ -110,7 +111,7 @@ export type ChatRunProps = {
   /** Failed status identity used to read the host's automatic retry deadline. */
   recoveryEventId?: string;
   /** Native continuation waits keep this turn's invoke and child tasks alive. */
-  nativeRetry?: { retryAt: number; attempt?: number; maxAttempts?: number; recoveryKind?: string };
+  nativeRetry?: { retryAt?: number; attempt?: number; maxAttempts?: number; recoveryKind?: string };
   onCancelNativeRetry?: () => void;
   onReconnect?: () => void;
   reconnectLabel?: string;
@@ -178,6 +179,7 @@ export function ChatRun({
   const isProblem =
     model.phase.name === "failed" || model.phase.name === "interrupted";
   const nativeWait = model.phase.name === "retrying" ? nativeRetry : undefined;
+  const capacityWait = nativeWait?.recoveryKind === "model-capacity";
   const retryAt =
     nativeWait?.retryAt ??
     (isProblem && onRetry && recoveryEventId
@@ -258,6 +260,7 @@ export function ChatRun({
     model.steps.length > 0 ||
     showThinkingPulse ||
     showFinalizingPulse ||
+    capacityWait ||
     retryPhase !== undefined;
 
   const shellClass = [
@@ -272,7 +275,7 @@ export function ChatRun({
         ? "is-problem"
         : "is-settled",
     isCancelledRunPhase(model.phase) ? "is-cancelled" : "",
-    isProblem || nativeWait ? "is-recovery" : "",
+    isProblem || (nativeWait && !capacityWait) ? "is-recovery" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -286,11 +289,13 @@ export function ChatRun({
     >
       <RunHeader
         statusLabel={
-          retryAt !== undefined
-            ? "Waiting to retry"
-            : needsApproval
-              ? "Needs approval"
-              : statusLabel
+          capacityWait
+            ? "Waiting to resume"
+            : retryAt !== undefined
+              ? "Waiting to retry"
+              : needsApproval
+                ? "Needs approval"
+                : statusLabel
         }
         canCollapse={canCollapse}
         headerActions={headerActions}
@@ -420,6 +425,14 @@ export function ChatRun({
               <RunRetry phase={retryPhase} />
             </li>
           ) : null}
+          {capacityWait ? (
+            <li className="gyro-run-row-item">
+              <RunCapacityWait
+                retryAt={nativeWait.retryAt}
+                onStop={onCancelNativeRetry}
+              />
+            </li>
+          ) : null}
         </ol>
       </MotionDisclosure>
       {agentApprovals.length > 0 && renderAsk ? (
@@ -429,7 +442,7 @@ export function ChatRun({
           ))}
         </div>
       ) : null}
-      {nativeWait ? (
+      {nativeWait && !capacityWait ? (
         <RunProblem
           onCancelAutoRetry={onCancelNativeRetry}
           retryAt={nativeWait.retryAt}
@@ -1060,6 +1073,52 @@ function RunRetry({
           <span className="gyro-run-row-detail">{text.description}</span>
         ) : null}
       </span>
+    </div>
+  );
+}
+
+function RunCapacityWait({
+  retryAt,
+  onStop,
+}: {
+  retryAt?: number;
+  onStop?: () => void;
+}) {
+  const now = useNow(retryAt !== undefined, retryAt);
+  const seconds =
+    retryAt === undefined ? undefined : Math.ceil((retryAt - now) / 1_000);
+  const detail =
+    seconds === undefined
+      ? "Will retry automatically"
+      : seconds > 0
+        ? `Retrying in ${formatRunDuration(seconds)}`
+        : "Retrying…";
+  return (
+    <div className="gyro-run-row gyro-run-capacity">
+      <span aria-hidden="true" className="gyro-run-row-icon">
+        <RotateCw size={15} />
+      </span>
+      <span className="gyro-run-row-text">
+        <span className="gyro-run-capacity-label">
+          <span className="gyro-run-row-label" role="status">
+            Model is at capacity
+            <span className="gyro-sr-only">. Will retry automatically.</span>
+          </span>
+          <span
+            aria-label="About model capacity"
+            className="gyro-run-capacity-help"
+            role="img"
+            tabIndex={0}
+            title="This model is temporarily too busy to accept more requests. Gyro will retry automatically."
+          >
+            <HelpCircle aria-hidden="true" size={13} />
+          </span>
+        </span>
+        <span aria-hidden="true" className="gyro-run-row-detail">{detail}</span>
+      </span>
+      {onStop ? (
+        <button type="button" onClick={onStop}>Stop</button>
+      ) : null}
     </div>
   );
 }

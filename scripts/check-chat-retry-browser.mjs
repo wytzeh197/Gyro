@@ -130,6 +130,14 @@ try {
   const state = `window.__gyroRetryFixture.getState()`;
   const countdown = `document.querySelector('.gyro-run-retry-countdown')?.textContent`;
   const problem = `document.querySelector('.gyro-run-problem.gyro-run-recovery')`;
+  const capacity = `document.querySelector('.gyro-run-rail .gyro-run-capacity')`;
+  const capacityDetail = `${capacity}?.querySelector('.gyro-run-row-detail').textContent`;
+  const capacityHelp = `${capacity}.querySelector('.gyro-run-capacity-help')`;
+  const visibleTooltip = `document.querySelector('.gyro-tooltip.is-visible')`;
+  const showCapacityTooltip = () => until(
+    () => evaluate(`${visibleTooltip}?.textContent`),
+    "capacity explanation tooltip",
+  );
   const header = `document.querySelector('.gyro-run-header')?.textContent`;
   const load = async (params = {}, width = 1440, height = 900) => {
     await call("Emulation.setDeviceMetricsOverride", {
@@ -425,13 +433,13 @@ try {
   // not start the host's failed-send scheduler or expose a second send action.
   await load({ theme: "light", state: "native-wait" });
   assert.equal(
-    await evaluate(countdown),
+    await evaluate(capacityDetail),
     "Retrying in 30s",
-    "native deadline starts at30s",
+    "native deadline starts at 30s",
   );
   assert.match(
     await evaluate(header),
-    /Waiting to retry/,
+    /Waiting to resume/,
     "live native wait is explicit even with an approval",
   );
   assert.equal(
@@ -440,7 +448,7 @@ try {
     "native waiting turn remains live",
   );
   assert.equal(
-    await evaluate(`${problem}.getAttribute('role')`),
+    await evaluate(`${capacity}.querySelector('[role=status]').getAttribute('role')`),
     "status",
     "native recovery announces politely",
   );
@@ -451,10 +459,10 @@ try {
   );
   assert.deepEqual(
     await evaluate(
-      `[...document.querySelectorAll('.gyro-run-problem-actions button')].map(button=>button.textContent)`,
+      `[...${capacity}.querySelectorAll('button')].map(button=>button.textContent)`,
     ),
-    ["Cancel"],
-    "native wait offers only Cancel",
+    ["Stop"],
+    "native wait offers only Stop",
   );
   assert.equal(
     await evaluate(
@@ -464,10 +472,38 @@ try {
     "countdown replaces duplicate activity pulses",
   );
   assert.match(
-    await evaluate(`${problem}.textContent`),
-    /Waiting for the provider before continuing.*Retry 1 of 3/s,
-    "continuation explains the wait and bounded attempts without claiming task liveness",
+    await evaluate(`${capacity}.textContent`),
+    /Model is at capacity.*Retrying in/s,
+    "the working process identifies the cause and automatic resume",
   );
+  assert.equal(await evaluate(`!!${problem}`), false, "capacity uses a rail row instead of the recovery card");
+  assert.equal(
+    await evaluate(`!!document.querySelector('.gyro-composer-blocker')`),
+    false,
+    "a connected provider has no setup notice during a capacity wait",
+  );
+  const hoverExplanation = await until(async () => {
+    const position = await evaluate(`(() => {
+      const help = ${capacityHelp};
+      const rect = help.getBoundingClientRect();
+      const x = rect.x + rect.width / 2;
+      const y = rect.y + rect.height / 2;
+      return help.contains(document.elementFromPoint(x, y)) ? { x, y } : null;
+    })()`);
+    if (!position) return undefined;
+    await call("Input.dispatchMouseEvent", { type: "mouseMoved", ...position });
+    return evaluate(`${visibleTooltip}?.textContent`);
+  }, "capacity tooltip opens on hover");
+  assert.match(hoverExplanation, /too busy to accept more requests.*retry automatically/i);
+  await call("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: 1 });
+  await until(() => evaluate(`!${visibleTooltip}`), "tooltip closes after hover");
+  await evaluate(`${capacityHelp}.focus()`);
+  await key("Tab", 9);
+  await key("Tab", 9, 8);
+  assert.equal(await evaluate(`document.activeElement === ${capacityHelp}`), true);
+  assert.match(await showCapacityTooltip(), /retry automatically/i);
+  await key("Escape", 27);
+  await until(() => evaluate(`!${visibleTooltip}`), "Escape dismisses the tooltip");
   assert.match(
     await evaluate(`document.querySelector('.gyro-run-rail').textContent`),
     /pnpm test/,
@@ -481,7 +517,7 @@ try {
     "existing approval stays actionable during native wait",
   );
   await inspectLayout("native-wait-light");
-  await click("Cancel");
+  await evaluate(`${capacity}.querySelector('button').click()`);
   await until(
     () => evaluate(`${state}.state==='native-cancelled'`),
     "native Cancel stops continuation",
@@ -502,7 +538,7 @@ try {
     "native cancellation does not resend",
   );
   assert.equal(
-    await evaluate(`!!${problem}`),
+    await evaluate(`!!${capacity}`),
     false,
     "stopped native wait removes recovery notice",
   );
@@ -525,11 +561,30 @@ try {
       860,
       620,
     );
+    assert.equal(await evaluate(`${capacity}.scrollWidth <= ${capacity}.clientWidth + 1`), true,
+      "the inline row fits a narrow chat with large text");
     await inspectLayout(`native-wait-${theme}-narrow-large-compact`);
   }
+  await load({ theme: "dark", state: "native-wait", unknownDeadline: "1" });
+  assert.equal(await evaluate(capacityDetail), "Will retry automatically");
+  await load({ theme: "dark", state: "native-wait", readinessPending: "1" });
+  assert.equal(
+    await evaluate(`!!document.querySelector('.gyro-composer-blocker')`),
+    false,
+    "the active capacity response takes precedence over stale readiness in the composer",
+  );
+  assert.doesNotMatch(
+    await evaluate(`document.querySelector('.gyro-composer-input textarea').placeholder`),
+    /connect/i,
+  );
+  await evaluate(`${capacity}.querySelector('button').click()`);
+  await until(
+    () => evaluate(`!!document.querySelector('.gyro-composer-blocker')`),
+    "setup guidance returns when the capacity wait ends and readiness is still missing",
+  );
   await load({ theme: "dark", state: "native-wait", seconds: "3" });
   assert.equal(
-    await evaluate(countdown),
+    await evaluate(capacityDetail),
     "Retrying in 3s",
     "native fixture uses real short deadline",
   );
@@ -543,7 +598,7 @@ try {
     "native retry-started clears notice",
   );
   assert.equal(
-    await evaluate(countdown),
+    await evaluate(capacityDetail),
     undefined,
     "native retry-started clears deadline",
   );

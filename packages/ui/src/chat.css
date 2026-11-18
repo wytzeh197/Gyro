@@ -12199,6 +12199,73 @@ button.gyro-response-changed-files:hover {
 .gyro-run-retry .gyro-run-row-detail {
   animation: gyro-run-breathe var(--gyro-chat-motion-spin) ease-in-out infinite;
 }
+
+.gyro-run-capacity .gyro-run-row-icon {
+  color: var(--gyro-status-warning);
+  opacity: 1;
+}
+
+.gyro-run-capacity .gyro-run-row-label {
+  color: var(--gyro-text);
+}
+
+.gyro-run-capacity-label {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--gyro-chat-space-1);
+}
+
+.gyro-run-capacity-help {
+  align-items: center;
+  color: var(--gyro-muted);
+  cursor: help;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 16px;
+  min-width: 16px;
+}
+
+.gyro-run-capacity-help:is(:hover, :focus-visible) {
+  color: var(--gyro-text);
+}
+
+.gyro-run-capacity-help:focus-visible {
+  border-radius: 50%;
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+
+.gyro-run-capacity .gyro-run-row-text {
+  flex-wrap: wrap;
+  gap: 0 calc(var(--gyro-chat-space-1) * 2);
+}
+
+.gyro-run-capacity:has(> button) {
+  grid-template-columns: 19px minmax(0, 1fr) auto;
+}
+
+.gyro-run-capacity .gyro-run-row-detail {
+  color: var(--gyro-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.gyro-run-capacity > button {
+  background: transparent;
+  border: 0;
+  color: var(--gyro-muted);
+  font: inherit;
+  padding: 2px 4px;
+}
+
+.gyro-run-capacity > button:hover {
+  color: var(--gyro-text);
+}
+
+.gyro-run-capacity > button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+
 .gyro-run-budget {
   align-items: baseline;
   display: flex;

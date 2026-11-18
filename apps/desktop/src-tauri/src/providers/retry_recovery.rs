@@ -206,6 +206,32 @@ pub(crate) fn emit_started(
     );
 }
 
+pub(crate) fn emit_codex_capacity_retry(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    retry: gyro_core::provider_runtime::codex_client::CodexCapacityRetry,
+    waiting: bool,
+) {
+    set_kind("model-capacity");
+    let retry_at = retry.deadline.and_then(|deadline| {
+        let delay = deadline.saturating_duration_since(std::time::Instant::now());
+        chrono::Utc::now().checked_add_signed(chrono::Duration::from_std(delay).ok()?)
+    });
+    if waiting {
+        emit_retry_event(
+            app,
+            request,
+            "retry-wait",
+            "waiting",
+            retry.attempt,
+            retry.max_attempts,
+            retry_at,
+        );
+    } else {
+        emit_started(app, request, retry.attempt, retry.max_attempts);
+    }
+}
+
 fn emit_retry_event(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
@@ -218,6 +244,9 @@ fn emit_retry_event(
     if crate::context_compaction::summary_stream_muted(&request.session_id) {
         return;
     }
+    let recovery_kind = RECOVERY_KIND.with(|kind| kind.borrow().clone());
+    let retry_attempt = (max_attempts > 0).then_some(retry_attempt);
+    let max_attempts = (max_attempts > 0).then_some(max_attempts);
     let mut payload = serde_json::json!({
         "sessionId": request.session_id,
         "turnId": request.turn_id,
@@ -227,7 +256,7 @@ fn emit_retry_event(
         "sequence": next_provider_event_sequence(app, &request.session_id),
         "phase": phase,
         "status": status,
-        "recoveryKind": RECOVERY_KIND.with(|kind| kind.borrow().clone()),
+        "recoveryKind": recovery_kind,
         "recovery": {
             "cycleId": CYCLE.with(|cycle| cycle.borrow().clone()),
             "state": if phase == "retry-wait" { "waiting" } else { "retrying" },
@@ -238,10 +267,10 @@ fn emit_retry_event(
         "retryAt": retry_at.map(|at| at.to_rfc3339()),
         "retryAttempt": retry_attempt,
         "retryMaxAttempts": max_attempts,
-        "message": if phase == "retry-wait" {
-            "Waiting for the provider to continue"
-        } else {
-            "Continuing the saved work"
+        "message": match (phase, recovery_kind.as_str()) {
+            ("retry-wait", "model-capacity") => "Model is at capacity",
+            ("retry-wait", _) => "Waiting for the provider to continue",
+            _ => "Continuing the saved work",
         },
     });
     provider_timeline::observe(app, &request.session_id, None, None).insert_into(&mut payload);

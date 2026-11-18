@@ -5878,6 +5878,16 @@ export function ChatSurface({
   const activeTurnId = isComposerSending
     ? (activeTranscriptTurnId(turns) ?? turns.at(-1)?.id)
     : undefined;
+  const activeStatusEvent = activeTurnId
+    ? turns.findLast((turn) => turn.id === activeTurnId)?.statusEvent
+    : undefined;
+  const activeProviderStatus = activeStatusEvent
+    ? providerStatusFromEvent(activeStatusEvent)
+    : undefined;
+  const capacityRetryProviderId =
+    activeProviderStatus?.nativeRetry?.recoveryKind === "model-capacity"
+      ? activeProviderStatus.providerId
+      : undefined;
   // Saving a recipe is an explicit chat action, available after a completed
   // exchange. Partial answers and active runs cannot supply a finished source.
   const canSaveWorkflow =
@@ -6897,6 +6907,7 @@ export function ChatSurface({
             maxDraftLength={maxDraftLength}
             providerReadiness={providerReadiness}
             providerStatuses={providerStatuses}
+            capacityRetryProviderId={capacityRetryProviderId}
             providerUsage={composerProviderUsage}
             providerUsageByProvider={providerUsageByProvider}
             providerLedger={composerLedger}
@@ -22185,6 +22196,7 @@ function Composer({
   config,
   providerReadiness,
   providerStatuses,
+  capacityRetryProviderId,
   providerUsage,
   providerUsageByProvider,
   providerLedger,
@@ -22249,6 +22261,7 @@ function Composer({
   config: GyroConfig;
   providerReadiness?: ProviderReadiness;
   providerStatuses?: ProviderStatus[];
+  capacityRetryProviderId?: string;
   providerUsage?: ProviderUsageState;
   providerUsageByProvider?: Partial<Record<ProviderId, ProviderUsageState>>;
   providerLedger?: ProviderLedgerSummary;
@@ -22606,6 +22619,12 @@ function Composer({
   const effectiveProviderId = boundToSession
     ? sessionModel?.providerId
     : config.selectedProviderId;
+  // A capacity response proves the live turn is reaching its provider, even
+  // when the composer's cached readiness has not caught up.
+  const isWaitingForModelCapacity = Boolean(
+    isSending && capacityRetryProviderId &&
+      (!effectiveProviderId || effectiveProviderId === capacityRetryProviderId),
+  );
   const selectedProvider = providerConfigs.find(
     (provider) => provider.id === effectiveProviderId,
   );
@@ -23427,7 +23446,7 @@ function Composer({
   }, [draftKey, onAttachProblem, onAttachMediaFiles, onAttachMediaPaths, onMediaDropError]);
 
   const showSetupNotice =
-    !isGoalComposerActive && shellReady && !canSubmitChat &&
+    !isGoalComposerActive && shellReady && !canSubmitChat && !isWaitingForModelCapacity &&
     chatMode !== "council" && !isCliUpdating &&
     (!hasUserWorkspace || needsProviderSetup || !hasSelectedProvider);
 
@@ -24009,10 +24028,10 @@ function Composer({
                   : "Edit the goal, then save it"
                 : chatMode === "council"
                   ? "Ask for architecture, review, or alternatives — models answer in parallel"
-                  : !canSubmitChat
-                    ? isCliUpdating
-                      ? "Updating a provider CLI — sending unlocks when it finishes…"
-                      : cleanMachinePath.placeholder
+                  : isCliUpdating
+                    ? "Updating a provider CLI — sending unlocks when it finishes…"
+                    : !canSubmitChat && !isWaitingForModelCapacity
+                      ? cleanMachinePath.placeholder
                     : placeholder
                       ? placeholder
                       : variant === "hero"
@@ -24608,7 +24627,9 @@ function Composer({
                   : isCliUpdating
                     ? "Wait for the CLI update to finish"
                     : !hasReadyProvider
-                      ? "Connect a provider before sending"
+                      ? isWaitingForModelCapacity
+                        ? "Waiting for the model to resume"
+                        : "Connect a provider before sending"
                       : chatMode === "council" && !hasUserWorkspace
                         ? "Choose a folder for Council"
                         : isBranchLoading
@@ -25696,7 +25717,10 @@ function ChatTurnView({
         // otherwise transport loss uses the existing reconnect beat.
         retry: nativeRetry
           ? {
-              reason: nativeRetry.recoveryKind === "rate-limit" ? "Provider rate limit reached" : "Waiting for the provider",
+              reason:
+                nativeRetry.recoveryKind === "rate-limit"
+                  ? "Provider rate limit reached"
+                  : "Waiting for the provider",
               attempt: nativeRetry.attempt,
             }
           : !isOnline
@@ -27799,17 +27823,16 @@ function providerStatusFromEvent(event: SessionEvent) {
     return undefined;
   }
   const status = stringFromEventPayload(payload, "status") ?? "queued";
-  const nativeRetryAt =
-    payload?.nativeRetry === true
-      ? Date.parse(stringFromEventPayload(payload, "retryAt") ?? "")
-      : NaN;
+  const recoveryKind = stringFromEventPayload(payload, "recoveryKind");
+  const retryAt = Date.parse(stringFromEventPayload(payload, "retryAt") ?? "");
   return {
-    nativeRetry: Number.isFinite(nativeRetryAt)
+    nativeRetry: payload?.nativeRetry === true &&
+      (Number.isFinite(retryAt) || recoveryKind === "model-capacity")
       ? {
-          retryAt: nativeRetryAt,
+          retryAt: Number.isFinite(retryAt) ? retryAt : undefined,
           attempt: numberFromEventPayload(payload, "retryAttempt"),
           maxAttempts: numberFromEventPayload(payload, "retryMaxAttempts"),
-          recoveryKind: stringFromEventPayload(payload, "recoveryKind"),
+          recoveryKind,
         }
       : undefined,
     error: stringFromEventPayload(payload, "error"),
@@ -27822,7 +27845,7 @@ function providerStatusFromEvent(event: SessionEvent) {
     providerId: stringFromEventPayload(payload, "providerId"),
     providerLabel:
       stringFromEventPayload(payload, "providerLabel") ?? "Provider",
-    recoveryKind: stringFromEventPayload(payload, "recoveryKind"),
+    recoveryKind,
     recoveryMessage: stringFromEventPayload(payload, "recoveryMessage"),
     status,
     messagePreview:

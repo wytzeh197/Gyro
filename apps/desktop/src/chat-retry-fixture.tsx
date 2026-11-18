@@ -5,12 +5,37 @@ import {
   ChatRetryContext,
   ChatRun,
   ChatSurface,
+  installGyroTooltips,
+  providersForConfig,
+  type GyroConfig,
   type RunModel,
   type SessionEvent,
 } from "@gyro-dev/ui";
 import "@gyro-dev/ui/styles.css";
 
+installGyroTooltips();
+
 const params = new URLSearchParams(location.search);
+const fixtureConfig: GyroConfig = {
+  commandProfiles: [],
+  modelProviders: [],
+  requireCommandApproval: true,
+  requireFileEditApproval: true,
+  telemetryEnabled: false,
+};
+const nativeFixtureConfig: GyroConfig = {
+  ...fixtureConfig,
+  selectedProviderId: "openai",
+  modelProviders: providersForConfig(fixtureConfig).map((provider) =>
+    provider.id === "openai"
+      ? {
+          ...provider,
+          enabled: true,
+          authStatus: params.has("readinessPending") ? "connecting" : "connected",
+        }
+      : provider,
+  ),
+};
 document.documentElement.dataset.theme =
   params.get("theme") === "light" ? "light" : "dark";
 document.documentElement.dataset.density =
@@ -249,7 +274,9 @@ function NativeRetryFixture() {
   const [cooldownAt] = useState(() => Date.now() + waitMs);
   const [state, setState] = useState(params.get("state") ?? "native-wait");
   const [retryAt, setRetryAt] = useState<number | undefined>(() =>
-    state === "native-wait" ? Date.now() + waitMs : undefined,
+    state === "native-wait" && !params.has("unknownDeadline")
+      ? Date.now() + waitMs
+      : undefined,
   );
   const [counts, setCounts] = useState({
     retries: 0,
@@ -373,10 +400,10 @@ function NativeRetryFixture() {
         providerId: "openai",
         startedAt,
         ...(isDone ? { durationMs: 5_000 } : {}),
-        ...(isWaiting && retryAt !== undefined
+        ...(isWaiting
           ? {
               nativeRetry: true,
-              retryAt: new Date(retryAt).toISOString(),
+              retryAt: retryAt === undefined ? undefined : new Date(retryAt).toISOString(),
               retryAttempt: 1,
               retryMaxAttempts: 3,
               recoveryKind: isRateLimit ? "rate-limit" : "model-capacity",
@@ -528,13 +555,8 @@ function NativeRetryFixture() {
       >
         <ChatSurface
           events={events}
-          config={{
-            commandProfiles: [],
-            modelProviders: [],
-            requireCommandApproval: true,
-            requireFileEditApproval: true,
-            telemetryEnabled: false,
-          }}
+          config={nativeFixtureConfig}
+          sessionModel={{ providerId: "openai", modelId: "gpt-6.2-sol", modelLabel: "GPT-6.2 Sol" }}
           draft={draft}
           onDraftChange={setDraft}
           onSend={() => {}}
