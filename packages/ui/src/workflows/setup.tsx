@@ -14,6 +14,7 @@ export function WorkflowSetupPanel({
   definition,
   hash,
   job,
+  scheduling = false,
   onClose,
   onLaunched,
 }: {
@@ -22,6 +23,7 @@ export function WorkflowSetupPanel({
   definition: WorkflowDefinition;
   hash: string;
   job?: WorkflowJob;
+  scheduling?: boolean;
   onClose: () => void;
   onLaunched: (destination: "run" | "schedule") => void;
 }) {
@@ -43,7 +45,7 @@ export function WorkflowSetupPanel({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const [schedule, setSchedule] = useState("manual");
+  const [schedule, setSchedule] = useState(scheduling ? "daily-at" : "manual");
   const [time, setTime] = useState("09:00");
   const [timezone, setTimezone] = useState(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
@@ -158,7 +160,10 @@ export function WorkflowSetupPanel({
   }
   return (
     <section aria-label="Workflow setup">
-      <h2>Run {definition.name}</h2>
+      <h2>
+        {job ? "Review schedule for" : scheduling ? "Schedule" : "Run"}{" "}
+        {definition.name}
+      </h2>
       <p>{project.path}</p>
       <p>
         Choose who runs each step. Your usual approvals and provider billing
@@ -226,8 +231,10 @@ export function WorkflowSetupPanel({
             change={change}
           />
           {!job ? (
-            <details>
-              <summary>Schedule (optional)</summary>
+            <details open={scheduling || undefined}>
+              <summary>
+                {scheduling ? "Schedule" : "Schedule (optional)"}
+              </summary>
               <>
                 <label>
                   Run timing
@@ -239,7 +246,9 @@ export function WorkflowSetupPanel({
                       operation.current = crypto.randomUUID();
                     }}
                   >
-                    <option value="manual">Run once now</option>
+                    {!scheduling ? (
+                      <option value="manual">Run once now</option>
+                    ) : null}
                     <option value="hourly">Hourly</option>
                     <option value="daily-at">Daily at a local time</option>
                   </select>

@@ -15360,6 +15360,22 @@ export function App() {
     isModelDefaultSaving,
   ]);
 
+  // The tour waits for an idle workspace: never over a draft the user is
+  // writing, a turn that is starting, or another dialog or suggestion.
+  const firstRunTourPaused =
+    Boolean(activeChatDraft.trim()) ||
+    activeChatAttachments.length > 0 ||
+    sendingSessionIds.length > 0 ||
+    isStartingFirstTurn ||
+    Boolean(modelStandardPrompt) ||
+    quitConfirmation.requested ||
+    isCommandPaletteOpen ||
+    Boolean(branchNameRequest) ||
+    Boolean(workspaceRename.draft) ||
+    Boolean(projectRemoveCandidate) ||
+    Boolean(terminalTerminateCandidate) ||
+    Boolean(chatCloseCandidate);
+
   const browserOverlayOccluded =
     isFirstRunTourActive ||
     quitConfirmation.requested ||
@@ -19764,8 +19780,9 @@ export function App() {
         </div>
       ) : null}
       {activeDestination === "automations" ? (
-        <WorkflowDestination runtime={isTauriRuntime()?workflowClient:undefined} initialSessionId={activeSessionId} onOpenSession={id=>{void refreshSessions().then(()=>selectSession(id));}} openSchedulesToken={automationCreateRequestToken} extractionRequest={workflowExtractionRequest} onExtractionHandled={()=>setWorkflowExtractionRequest(undefined)}>
-        <AutomationsSurface embedded
+        <WorkflowDestination runtime={isTauriRuntime()?workflowClient:undefined} initialSessionId={activeSessionId} onOpenSession={id=>{void refreshSessions().then(()=>selectSession(id));}} openSchedulesToken={automationCreateRequestToken} extractionRequest={workflowExtractionRequest} onExtractionHandled={()=>setWorkflowExtractionRequest(undefined)} renderSchedules={(renderScheduleIndex) => (
+        <AutomationsSurface
+          renderScheduleIndex={renderScheduleIndex} embedded
           providerChoices={providersForConfig(config)
             .filter(
               (provider) =>
@@ -19901,7 +19918,7 @@ export function App() {
           onToggleAutomation={toggleAutomation}
           selectedAutomationId={workbench.selectedAutomationId}
         />
-        </WorkflowDestination>
+        )} />
       ) : null}
       {activeDestination === "onboarding" ? (
         <ChatSurface
@@ -20248,20 +20265,15 @@ export function App() {
                           (provider) =>
                             provider.connectionStatus === "connected",
                         )}
-                        onNavigate={(destination) =>
-                          dispatchWorkbench({
-                            type: "select-destination",
-                            destination,
-                          })
-                        }
-                        onOpenSettings={(section) => {
+                        paused={firstRunTourPaused}
+                        onConnectProvider={() => {
                           dispatchWorkbench({
                             type: "select-destination",
                             destination: "settings",
                           });
                           dispatchWorkbench({
                             type: "set-settings-section",
-                            section,
+                            section: "providers",
                           });
                         }}
                       />

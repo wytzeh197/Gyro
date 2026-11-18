@@ -269,7 +269,12 @@ import {
   RemovedProvidersSection,
 } from "./provider-settings-fields";
 import "./scheduled-work.css";
-import { automationScheduleLabel } from "./scheduled-work.ts";
+import {
+  automationDateLabel,
+  automationScheduleLabel,
+  isRecordedAutomationRun,
+  type RenderScheduleIndex,
+} from "./scheduled-work.ts";
 import {
   SettingsGroup,
   SettingsEmptyState,
@@ -14711,6 +14716,7 @@ function isValidAutomationTimeZone(timezone: string) {
 
 export function AutomationsSurface({
   embedded = false,
+  renderScheduleIndex,
   automations = [],
   providerChoices = [],
   onChooseProject,
@@ -14732,6 +14738,7 @@ export function AutomationsSurface({
   onToggleAutomation,
 }: {
   embedded?: boolean;
+  renderScheduleIndex?: RenderScheduleIndex;
   automations?: Automation[];
   providerChoices?: Array<{
     id: string;
@@ -14874,6 +14881,11 @@ export function AutomationsSurface({
     setStopCondition("");
     setIsCreating(true);
   };
+  const openAutomation = (id: string) => {
+    onSelectAutomation?.(id);
+    setIsCreating(false);
+    setDetailOpen(true);
+  };
   const hasCalendarSchedule = ["once", "daily-at", "weekly-at"].includes(
     schedule,
   );
@@ -14956,6 +14968,16 @@ export function AutomationsSurface({
         </div>
       )}
       <div className="gyro-scheduled-body">
+        {renderScheduleIndex ? (
+          <div className="gyro-schedule-combined-index">
+            {renderScheduleIndex({
+              automations,
+              onCreatePrompt: () => beginCreate(),
+              onOpenPrompt: openAutomation,
+              busy: isSaving,
+            })}
+          </div>
+        ) : (
         <section className="gyro-scheduled-index" aria-label="Scheduled work">
           <header className="gyro-scheduled-heading">
             {embedded ? (
@@ -15021,11 +15043,7 @@ export function AutomationsSurface({
                   type="button"
                   className={`gyro-scheduled-item${detailOpen && !isCreating && automation.id === selectedAutomation?.id ? " is-selected" : ""}`}
                   key={automation.id}
-                  onClick={() => {
-                    onSelectAutomation?.(automation.id);
-                    setIsCreating(false);
-                    setDetailOpen(true);
-                  }}
+                  onClick={() => openAutomation(automation.id)}
                   disabled={isSaving}
                 >
                   <CalendarClock size={15} aria-hidden="true" />
@@ -15102,6 +15120,7 @@ export function AutomationsSurface({
             Runs on this Mac while Gyro is open.
           </p>
         </section>
+        )}
         {isCreating || detailOpen ? (
           <section
             className="gyro-scheduled-panel"
@@ -15477,15 +15496,7 @@ function AutomationDetail({
   const running = Boolean(
     automation.leaseOwner || automation.runHistory[0]?.status === "running",
   );
-  const history = automation.runHistory.filter(
-    (run) =>
-      !(
-        run.status === "queued" &&
-        run.summary === "Automation created locally" &&
-        !run.finishedAt &&
-        !run.sessionId
-      ),
-  );
+  const history = automation.runHistory.filter(isRecordedAutomationRun);
   const canRun = automation.status === "current" && !running;
   const latestRun = history[0];
   const nextRun = automation.nextRunAt
@@ -15785,26 +15796,6 @@ function AutomationRunMark({
       aria-hidden="true"
     />
   );
-}
-
-function automationDateLabel(value: string, timezone?: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Not scheduled";
-  const options: Intl.DateTimeFormatOptions = {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  };
-  try {
-    return new Intl.DateTimeFormat("en-US", {
-      ...options,
-      timeZone: timezone,
-    }).format(date);
-  } catch {
-    return new Intl.DateTimeFormat("en-US", options).format(date);
-  }
 }
 
 function relativeFutureTime(value: string) {
@@ -24394,6 +24385,7 @@ function Composer({
                cannot be the only name this control has. */
             aria-label={`Model: ${modelChipLabel}`}
             className="gyro-composer-chip gyro-model-chip gyro-composer-model-trigger"
+            data-tour="composer.model"
             onClick={(event) =>
               toggleProviderPopover("model", event.currentTarget)
             }

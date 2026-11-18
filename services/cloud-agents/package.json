@@ -1,0 +1,24 @@
+{
+  "name": "@gyro-dev/cloud-agents-prototype",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:database": "node test/database-check.mjs",
+    "test:runner": "python3 -m unittest discover -s test -p '*_test.py'",
+    "test:worker": "npm run check:worker && node test/worker-smoke.mjs",
+    "typecheck": "tsc --noEmit",
+    "types": "wrangler types",
+    "dev": "wrangler dev --local",
+    "check:bundle": "wrangler deploy --dry-run --outdir /private/tmp/gyro-cloud-agents-bundle",
+    "check:worker": "wrangler deploy --dry-run --containers-rollout none --outdir /private/tmp/gyro-cloud-agents-worker-bundle"
+  },
+  "dependencies": {
+    "@cloudflare/sandbox": "1.0.3"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "wrangler": "4.162.0"
+  }
+}

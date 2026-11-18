@@ -20,6 +20,7 @@ pub mod types;
 
 pub mod catalog;
 
+pub mod recovery;
 pub mod reliability;
 
 pub mod tool_batch;

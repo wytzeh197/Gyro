@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "gyro-cloud-agents-prototype",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-16",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": {
+    "GYRO_CLOUD_ENABLED": "0",
+    "CLOUD_AGENTS_ENABLED": "0",
+    "SUPABASE_URL": "https://configure-an-isolated-project.supabase.co",
+    "SUPABASE_PUBLISHABLE_KEY": "configure-an-isolated-project",
+    "CLOUD_AGENTS_USER_IDS": "",
+  },
+  "secrets": {
+    "required": ["SUPABASE_SERVICE_ROLE_KEY", "CLOUD_AGENTS_ENCRYPTION_KEY"],
+  },
+  "containers": [
+    {
+      "class_name": "CloudRun",
+      "scheduling_policy": "durable_object",
+      "images": { "agent": { "dockerfile": "./Dockerfile" } },
+    },
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "RUNS", "class_name": "CloudRun" }],
+  },
+  "exports": { "CloudRun": { "type": "durable-object", "storage": "sqlite" } },
+  "observability": { "enabled": false },
+}

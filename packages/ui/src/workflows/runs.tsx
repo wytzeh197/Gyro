@@ -14,45 +14,13 @@ import type {
   WorkflowRunSummary,
   WorkflowRuntime,
 } from "./types";
-const statusLabels: Record<string, string> = {
-  queued: "Queued",
-  running: "Running",
-  waiting: "Waiting",
-  completed: "Completed",
-  failed: "Failed",
-  cancelled: "Cancelled",
-  interrupted: "Interrupted",
-  pending: "Pending",
-};
-function statusTone(status: string, requirementsMet?: boolean | null) {
-  if (requirementsMet === false) return "warning";
-  if (status === "completed") return "success";
-  if (status === "queued" || status === "running") return "running";
-  if (status === "waiting" || status === "interrupted") return "warning";
-  if (status === "failed") return "danger";
-  return "neutral";
-}
-function StatusPill({
-  status,
-  requirementsMet,
-  label,
-}: {
-  status: string;
-  requirementsMet?: boolean | null;
-  label?: string;
-}) {
-  return (
-    <em
-      className={`gyro-workflow-pill is-${statusTone(status, requirementsMet)}`}
-    >
-      {label ?? statusLabels[status] ?? status}
-    </em>
-  );
-}
+import { attentionStep, runAttentionReason, StatusPill } from "./status";
 export function WorkflowRuns({
   runtime,
   runs,
   jobs,
+  loading,
+  loadError,
   onOpenSession,
   onRefresh,
   onBrowseWorkflows,
@@ -60,6 +28,8 @@ export function WorkflowRuns({
   runtime: WorkflowRuntime;
   runs: WorkflowRunSummary[];
   jobs: WorkflowJob[];
+  loading: boolean;
+  loadError: boolean;
   onOpenSession?: (id: string) => void;
   onRefresh: () => void;
   onBrowseWorkflows: () => void;
@@ -69,6 +39,23 @@ export function WorkflowRuns({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [deleteConfirmed, setDeleteConfirmed] = useState(false);
+  const selectedStep = useRef<HTMLLIElement>(null);
+  const runHeading = useRef<HTMLHeadingElement>(null);
+  const runList = useRef<HTMLElement>(null);
+  const returnFocus = useRef<string>();
+  useEffect(() => {
+    if (!detail) return;
+    (selectedStep.current ?? runHeading.current)?.focus();
+  }, [detail?.id]);
+  useEffect(() => {
+    if (selected || !returnFocus.current) return;
+    const row = Array.from(
+      runList.current?.querySelectorAll<HTMLButtonElement>("[data-run-id]") ??
+        [],
+    ).find((button) => button.dataset.runId === returnFocus.current);
+    (row ?? runHeading.current)?.focus();
+    returnFocus.current = undefined;
+  }, [selected]);
   const generation = useRef(0);
   const selection = useRef(selected);
   selection.current = selected;
@@ -202,6 +189,31 @@ export function WorkflowRuns({
       job.status !== "completed" &&
       !runs.some((run) => run.automationId === job.id),
   );
+  type RunGroup = {
+    label: string;
+    runs: WorkflowRunSummary[];
+    jobs: WorkflowJob[];
+  };
+  const attention: RunGroup = { label: "Needs attention", runs: [], jobs: [] };
+  const progress: RunGroup = { label: "In progress", runs: [], jobs: [] };
+  const history: RunGroup = { label: "History", runs: [], jobs: [] };
+  for (const job of pending) {
+    const group =
+      job.status === "paused" && !job.leaseOwner ? attention : progress;
+    group.jobs.push(job);
+  }
+  for (const run of [...runs].sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt),
+  )) {
+    const group = runAttentionReason(run)
+      ? attention
+      : ["queued", "running"].includes(run.status)
+        ? progress
+        : history;
+    group.runs.push(run);
+  }
+  const runGroups = [attention, progress, history];
+  const relevantStep = detail ? attentionStep(detail) : -1;
   if (selected)
     return (
       <section
@@ -216,14 +228,27 @@ export function WorkflowRuns({
           Back to runs
         </button>
         {!detail ? (
-          <p className="gyro-workflow-muted" role="status">
-            Loading run…
-          </p>
+          error ? (
+            <button
+              onClick={() => {
+                setError("");
+                void load();
+              }}
+            >
+              Retry loading run
+            </button>
+          ) : (
+            <p className="gyro-workflow-muted" role="status">
+              Loading run…
+            </p>
+          )
         ) : (
           <>
             <header className="gyro-workflow-run-header">
               <div>
-                <h2>{detail.definition.name}</h2>
+                <h2 ref={runHeading} tabIndex={-1}>
+                  {detail.definition.name}
+                </h2>
                 <p>
                   {detail.origin === "automation" ? "Scheduled" : "Manual"} ·{" "}
                   {new Date(detail.createdAt).toLocaleString()} ·{" "}
@@ -272,6 +297,11 @@ export function WorkflowRuns({
                 }
               />
             </div>
+            {runAttentionReason(detail) ? (
+              <p className="gyro-workflow-attention-reason">
+                {runAttentionReason(detail)}
+              </p>
+            ) : null}
             <FeatureUsageLine
               usage={detail.usage}
               createdAt={detail.createdAt}
@@ -324,49 +354,83 @@ export function WorkflowRuns({
             ) : null}
             <h3 className="gyro-workflow-subheading">Steps</h3>
             <ol className="gyro-workflow-steps gyro-workflow-run-steps">
-              {detail.steps.map((step, index) => (
-                <li key={step.stepId}>
-                  <div className="gyro-workflow-step-head">
-                    <span className="gyro-workflow-step-index">
-                      {index + 1}
-                    </span>
-                    <strong>{step.stepId}</strong>
-                    <StatusPill status={step.status} />
-                  </div>
-                  {step.verificationPassed !== undefined &&
-                  step.verificationPassed !== null ? (
-                    <p>
-                      Verification{" "}
-                      {step.verificationPassed
-                        ? "recorded exit code 0"
-                        : "did not pass"}
-                    </p>
-                  ) : null}
-                  {step.reviewCompleted !== undefined &&
-                  step.reviewCompleted !== null ? (
-                    <p>
-                      Review {step.reviewCompleted ? "complete" : "incomplete"}{" "}
-                      · {step.openFindings} open findings
-                    </p>
-                  ) : null}
-                  {step.error ? (
-                    <p className="gyro-workflow-alert" role="alert">
-                      {step.error}
-                    </p>
-                  ) : null}
-                  {step.sessionId && onOpenSession ? (
-                    <button onClick={() => onOpenSession(step.sessionId!)}>
-                      Open step and approvals
-                    </button>
-                  ) : null}
-                  {step.output ? (
-                    <details>
-                      <summary>Recorded output</summary>
-                      <pre>{step.output}</pre>
-                    </details>
-                  ) : null}
-                </li>
-              ))}
+              {detail.steps.map((step, index) => {
+                const kind = detail.definition.steps.find(
+                  (item) => item.id === step.stepId,
+                )?.kind;
+                const reviewNeedsAttention =
+                  step.status === "completed" &&
+                  (step.reviewCompleted === false || step.openFindings > 0);
+                return (
+                  <li
+                    key={step.stepId}
+                    ref={index === relevantStep ? selectedStep : undefined}
+                    tabIndex={index === relevantStep ? -1 : undefined}
+                    className={
+                      index === relevantStep ? "is-attention-step" : undefined
+                    }
+                  >
+                    <div className="gyro-workflow-step-head">
+                      <span className="gyro-workflow-step-index">
+                        {index + 1}
+                      </span>
+                      <strong>
+                        {kind === "verification"
+                          ? "Verify"
+                          : kind === "review"
+                            ? "Review"
+                            : step.stepId}
+                      </strong>
+                      <StatusPill
+                        status={
+                          step.verificationPassed === false
+                            ? "failed"
+                            : step.status
+                        }
+                        requirementsMet={
+                          reviewNeedsAttention ? false : undefined
+                        }
+                        label={
+                          reviewNeedsAttention ? "Needs attention" : undefined
+                        }
+                      />
+                    </div>
+                    {step.verificationPassed !== undefined &&
+                    step.verificationPassed !== null ? (
+                      <p>
+                        Verification{" "}
+                        {step.verificationPassed
+                          ? "recorded exit code 0"
+                          : "did not pass"}
+                      </p>
+                    ) : null}
+                    {step.reviewCompleted !== undefined &&
+                    step.reviewCompleted !== null ? (
+                      <p>
+                        Review{" "}
+                        {step.reviewCompleted ? "complete" : "incomplete"} ·{" "}
+                        {step.openFindings} open findings
+                      </p>
+                    ) : null}
+                    {step.error ? (
+                      <p className="gyro-workflow-alert" role="alert">
+                        {step.error}
+                      </p>
+                    ) : null}
+                    {step.sessionId && onOpenSession ? (
+                      <button onClick={() => onOpenSession(step.sessionId!)}>
+                        Open step and approvals
+                      </button>
+                    ) : null}
+                    {step.output ? (
+                      <details>
+                        <summary>Recorded output</summary>
+                        <pre>{step.output}</pre>
+                      </details>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ol>
             <details className="gyro-workflow-disclosure">
               <summary>Original inputs and recipe</summary>
@@ -429,11 +493,12 @@ export function WorkflowRuns({
       </section>
     );
   return (
-    <section aria-label="Workflow runs">
+    <section aria-label="Workflow runs" ref={runList}>
       <header className="gyro-workflow-page-heading gyro-workflow-heading-actions">
         <div>
-          <h1>Runs</h1>
-          <p>Follow progress and review the results of your workflows.</p>
+          <h1 ref={runHeading} tabIndex={-1}>
+            Runs
+          </h1>
         </div>
         <button
           className="gyro-workflow-icon-button"
@@ -444,107 +509,160 @@ export function WorkflowRuns({
           <RefreshCw size={14} aria-hidden="true" />
         </button>
       </header>
-      {!runs.length && !pending.length ? (
+      {loading ? (
+        <p className="gyro-workflow-muted" role="status">
+          Loading runs…
+        </p>
+      ) : null}
+      {loadError ? (
+        <p className="gyro-workflow-muted" role="status">
+          Runs couldn’t be refreshed. Use Refresh runs to try again.
+        </p>
+      ) : null}
+      {!loading && !loadError && !runs.length && !pending.length ? (
         <div className="gyro-workflow-empty">
           <span className="gyro-workflow-icon-tile is-large">
             <History size={20} aria-hidden="true" />
           </span>
           <h2>No workflow runs yet</h2>
-          <p>
-            Run a saved workflow to see its progress, results, and history here.
-          </p>
+          <p>Run a saved workflow to see its progress and results here.</p>
           <button className="gyro-primary-button" onClick={onBrowseWorkflows}>
             Browse workflows
           </button>
         </div>
-      ) : (
-        <ul className="gyro-workflow-rows">
-          {pending.map((job) => (
-            <li key={job.id}>
-              <span className="gyro-workflow-icon-tile">
-                <Play size={16} aria-hidden="true" />
-              </span>
-              <div className="gyro-workflow-row-body">
-                <strong>
-                  {job.title}
+      ) : null}
+      {runGroups.map((group) =>
+        !group.jobs.length && !group.runs.length ? null : (
+          <section
+            className="gyro-workflow-section"
+            key={group.label}
+            aria-label={group.label}
+          >
+            <div className="gyro-workflow-section-head">
+              <h2>{group.label}</h2>
+            </div>
+            <ul className="gyro-workflow-rows">
+              {group.jobs.map((job) => (
+                <li key={job.id}>
+                  <span className="gyro-workflow-icon-tile">
+                    <Play size={16} aria-hidden="true" />
+                  </span>
+                  <div className="gyro-workflow-row-body">
+                    <strong>{job.title}</strong>
+                    <small>
+                      Manual
+                      {job.execution.workspacePath
+                        ? ` · ${job.execution.workspacePath.split(/[\\/]/).filter(Boolean).pop()}`
+                        : ""}
+                    </small>
+                    {job.lastResult ? <p>{job.lastResult}</p> : null}
+                  </div>
                   <StatusPill
                     status={
                       job.leaseOwner
-                        ? "running"
+                        ? "starting"
                         : job.status === "paused"
                           ? "waiting"
                           : "queued"
                     }
                     label={
-                      job.leaseOwner
-                        ? "Starting"
-                        : job.status === "paused"
-                          ? "Needs attention"
-                          : "Queued"
+                      job.status === "paused" && !job.leaseOwner
+                        ? "Needs attention"
+                        : undefined
                     }
                   />
-                </strong>
-                {job.execution.workspacePath ? (
-                  <small>
-                    <code>{job.execution.workspacePath}</code>
-                  </small>
-                ) : null}
-                {job.lastResult ? <p>{job.lastResult}</p> : null}
-              </div>
-              {job.status === "current" ? (
-                <div className="gyro-workflow-row-actions">
-                  <button
-                    onClick={() =>
-                      void runtime
-                        .run("toggle-job", { jobId: job.id, paused: true })
-                        .then(onRefresh)
-                        .catch((error) => setError(String(error)))
-                    }
-                  >
-                    Cancel launch
-                  </button>
-                </div>
-              ) : null}
-            </li>
-          ))}
-          {runs.map((run) => (
-            <li key={run.id} className="is-link">
-              <button
-                className="gyro-workflow-row"
-                onClick={() => setSelected(run.id)}
-              >
-                <span className="gyro-workflow-icon-tile">
-                  {run.origin === "automation" ? (
-                    <CalendarClock size={16} aria-hidden="true" />
-                  ) : (
-                    <Play size={16} aria-hidden="true" />
-                  )}
-                </span>
-                <span className="gyro-workflow-row-body">
-                  <strong>{run.definition.name}</strong>
-                  <small>
-                    {run.origin === "automation" ? "Scheduled" : "Manual"} ·{" "}
-                    {new Date(run.createdAt).toLocaleString()} · {run.rootKey}
-                  </small>
-                </span>
-                <StatusPill
-                  status={run.status}
-                  requirementsMet={run.requirementsMet}
-                  label={
-                    run.requirementsMet === false
-                      ? "Needs attention"
-                      : undefined
-                  }
-                />
-                <ChevronRight
-                  className="gyro-workflow-row-chevron"
-                  size={16}
-                  aria-hidden="true"
-                />
-              </button>
-            </li>
-          ))}
-        </ul>
+                  {job.status === "current" ? (
+                    <div className="gyro-workflow-row-actions">
+                      <button
+                        onClick={() =>
+                          void runtime
+                            .run("toggle-job", { jobId: job.id, paused: true })
+                            .then(onRefresh)
+                            .catch((error) => setError(String(error)))
+                        }
+                      >
+                        Cancel launch
+                      </button>
+                    </div>
+                  ) : null}
+                </li>
+              ))}
+              {group.runs.map((run) => {
+                const reason = runAttentionReason(run);
+                const date = new Date(run.createdAt);
+                return (
+                  <li key={run.id} className="is-link">
+                    <button
+                      className="gyro-workflow-row"
+                      data-run-id={run.id}
+                      onClick={() => {
+                        returnFocus.current = run.id;
+                        setSelected(run.id);
+                      }}
+                    >
+                      <span className="gyro-workflow-icon-tile">
+                        {run.origin === "automation" ? (
+                          <CalendarClock size={16} aria-hidden="true" />
+                        ) : (
+                          <Play size={16} aria-hidden="true" />
+                        )}
+                      </span>
+                      <span className="gyro-workflow-row-body">
+                        <strong>{run.definition.name}</strong>
+                        {reason ? (
+                          <small className="gyro-workflow-attention-reason">
+                            {reason}
+                          </small>
+                        ) : null}
+                        <small>
+                          {run.origin === "automation" ? "Scheduled" : "Manual"}{" "}
+                          ·{" "}
+                          {run.rootKey.split(/[\\/]/).filter(Boolean).pop() ??
+                            run.rootKey}
+                        </small>
+                      </span>
+                      <span className="gyro-workflow-row-end">
+                        <StatusPill
+                          status={run.status}
+                          requirementsMet={
+                            run.status === "completed"
+                              ? run.requirementsMet
+                              : undefined
+                          }
+                          label={
+                            run.status === "completed" && reason
+                              ? "Needs attention"
+                              : undefined
+                          }
+                        />
+                        <time
+                          className="gyro-workflow-row-meta"
+                          dateTime={run.createdAt}
+                          title={date.toLocaleString()}
+                        >
+                          {date.toLocaleDateString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                          })}{" "}
+                          ·{" "}
+                          {date.toLocaleTimeString(undefined, {
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })}
+                        </time>
+                      </span>
+                      <ChevronRight
+                        className="gyro-workflow-row-chevron"
+                        size={16}
+                        aria-hidden="true"
+                      />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ),
       )}
       {error ? (
         <p className="gyro-workflow-alert" role="alert">

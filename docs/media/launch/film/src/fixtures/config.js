@@ -1,0 +1,105 @@
+const isOllamaScene=false,isOllamaEmptyScene=false;export const config={
+  telemetryEnabled: false,
+  requireCommandApproval: true,
+  requireFileEditApproval: true,
+  fullAccess: false,
+  selectedProviderId: isOllamaScene ? "ollama" : "anthropic",
+  modelProviders: [
+    {
+      id: "anthropic",
+      displayName: "Claude Code",
+      apiKeyRef: "cli",
+      enabled: true,
+      authMode: "cli",
+      authStatus: "connected",
+      defaultModelId: "claude-opus-5",
+      selectedModelId: "claude-opus-5",
+      selectedReasoningEffort: "high",
+      models: [
+        { id: "claude-opus-5", displayName: "Claude Opus 5" },
+        { id: "claude-sonnet-5", displayName: "Claude Sonnet 5" },
+      ],
+      capabilities: {
+        executionKind: "claude-code",
+        executable: true,
+        supportsApprovals: true,
+        supportsImages: true,
+        supportsResume: true,
+        supportsUsage: true,
+        visibility: "standard",
+      },
+    },
+    {
+      id: "openai",
+      displayName: "Codex CLI",
+      apiKeyRef: "cli",
+      enabled: true,
+      authMode: "cli",
+      authStatus: "connected",
+      defaultModelId: "gpt-5.6",
+      models: [{ id: "gpt-5.6", displayName: "GPT-5.6" }],
+      capabilities: {
+        executionKind: "codex-cli",
+        executable: true,
+        supportsApprovals: true,
+        supportsImages: true,
+        supportsResume: true,
+        supportsUsage: true,
+        visibility: "standard",
+      },
+    },
+    ...(isOllamaScene
+      ? [
+          {
+            id: "ollama",
+            displayName: "Ollama",
+            apiKeyRef: "local-runtime:ollama",
+            enabled: true,
+            authMode: "sdk",
+            authStatus: "connected",
+            baseUrl: "http://localhost:11434/api",
+            defaultModelId: isOllamaEmptyScene ? undefined : "qwen3-coder:30b",
+            selectedModelId: isOllamaEmptyScene ? undefined : "qwen3-coder:30b",
+            models: isOllamaEmptyScene
+              ? []
+              : [
+                  {
+                    id: "qwen3-coder:30b",
+                    displayName: "Qwen3 Coder 30B",
+                    description: "Local coding model through Ollama.",
+                    supportsTools: true,
+                  },
+                ],
+            capabilities: {
+              executionKind: "ollama-api",
+              executable: true,
+              supportsApprovals: true,
+              supportsImages: false,
+              supportsResume: true,
+              supportsUsage: false,
+              visibility: "standard",
+            },
+          },
+        ]
+      : []),
+  ],
+  commandProfiles: [
+    {
+      id: "shell",
+      displayName: "Shell",
+      command: "zsh",
+      args: ["-l"],
+      readiness: "ready",
+    },
+    {
+      id: "claude",
+      displayName: "Claude Code",
+      command: "claude",
+      args: [],
+      providerId: "anthropic",
+      readiness: "ready",
+    },
+    { id: "codex", displayName: "Codex", command: "codex", args: [], providerId: "openai", readiness: "ready" },
+    { id: "gemini", displayName: "Gemini CLI", command: "gemini", args: [], readiness: "ready" },
+  ],
+};

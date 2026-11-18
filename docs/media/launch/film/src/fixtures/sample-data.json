@@ -1,0 +1,90 @@
+{
+  "files": {
+    "src/sync.js": "import { backoff, delay } from \"./queue/backoff.js\";\n\nconst MAX_ATTEMPTS = 5;\n\nexport class SyncQueue {\n  constructor(transport) {\n    this.transport = transport;\n    this.pending = [];\n  }\n\n  enqueue(job) {\n    this.pending.push(job);\n  }\n\n  async drain() {\n    while (this.pending.length) {\n      const job = this.pending[0];\n      let attempt = 0;\n      while (attempt < MAX_ATTEMPTS) {\n        try {\n          await this.send(job);\n          this.pending.shift();\n          break;\n        } catch (error) {\n          attempt += 1;\n          if (attempt >= MAX_ATTEMPTS) throw error;\n          await delay(backoff(attempt));\n        }\n      }\n    }\n  }\n\n  send(job) {\n    return this.transport.post(\"/sync\", job);\n  }\n}\n",
+    "src/queue/backoff.js": "// Example companion file\nexport const backoff = (attempt) => 250 * 2 ** attempt;\nexport const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));",
+    "README.md": "# Aurora\n\nA sample sync queue project for this website demo.\n\nThe retry task, code change and test output are sample data.\nNo commands or agents run in this demo."
+  },
+  "diff": "@@ -1,6 +1,6 @@\n import { backoff, delay } from \"./queue/backoff.js\";\n \n-const MAX_ATTEMPTS = Infinity;\n+const MAX_ATTEMPTS = 5;\n \n export class SyncQueue {\n   constructor(transport) {",
+  "testOutput": "PASS src/sync.test.js\n  ✓ stops after 5 attempts\n  ✓ backs off exponentially\n\nTests: 2 passed, 2 total",
+  "initial": {
+    "selected": 0,
+    "mode": "sessions",
+    "provider": "Claude Opus 5",
+    "approval": "Ask for approval",
+    "file": "src/sync.js",
+    "sessions": [
+      {
+        "title": "Bound the sync queue retries",
+        "messages": [
+          [
+            "user",
+            "Limit retries. Add a test."
+          ],
+          [
+            "assistant",
+            "Added a 5-attempt limit with exponential backoff. Both tests pass."
+          ]
+        ],
+        "draft": "",
+        "tabs": [
+          "review"
+        ],
+        "active": "review",
+        "open": true
+      },
+      {
+        "title": "Fix flaky editor file tests",
+        "messages": [
+          [
+            "user",
+            "Why does the editor test fail intermittently?"
+          ],
+          [
+            "assistant",
+            "In this example, the assertion runs before the file is loaded. Wait for the editor to be ready, then assert the contents."
+          ]
+        ],
+        "draft": "",
+        "tabs": [
+          "files"
+        ],
+        "active": "files",
+        "open": true
+      },
+      {
+        "title": "Audit provider arguments",
+        "messages": [
+          [
+            "user",
+            "Check how provider arguments are passed."
+          ],
+          [
+            "assistant",
+            "Example audit: keep arguments separate from the command, and preserve spaces in the project path."
+          ]
+        ],
+        "draft": "",
+        "tabs": [
+          "terminal"
+        ],
+        "active": "terminal",
+        "open": true
+      }
+    ],
+    "terminal": "$ npm test -- sync.test.js\nPASS src/sync.test.js\n  ✓ stops after 5 attempts\n  ✓ backs off exponentially\n\nTests: 2 passed, 2 total\n",
+    "browser": {
+      "history": [
+        "overview"
+      ],
+      "index": 0
+    },
+    "sideMessages": [
+      [
+        "assistant",
+        "Ask a question about the retry change without interrupting your main task."
+      ]
+    ],
+    "canvas": "Retry limit\n\nCap retries at five attempts.\nKeep exponential backoff.\nAdd a test for the limit.\nReview src/sync.js.",
+    "agent": 0
+  }
+}

@@ -54,11 +54,9 @@ async function until(check, label) {
 const selectors = [
   '[data-tour="composer.project"]',
   '[data-tour="composer.input"]',
-  '[data-tour="settings.providers"]',
-  '[data-tour="sidebar.ide"]',
-  '[data-tour="panel.tabs"], [data-tour="panel.launcher"]',
+  '[data-tour="composer.model"]',
 ];
-const names = ["project", "composer", "models", "workspace", "panel"];
+const names = ["project", "composer", "model"];
 const captures = [];
 const checks = [];
 const errors = [];
@@ -134,7 +132,7 @@ try {
     );
     assert.equal(found, true, `tour button ${label}`);
   }
-  async function waitStep(index, total = 5) {
+  async function waitStep(index, total = 3) {
     await until(
       () =>
         evaluate(
@@ -153,6 +151,7 @@ try {
     scene = "home",
     split = false,
     missing,
+    record,
     firstTask = false,
     width = 1440,
     height = 1024,
@@ -174,6 +173,7 @@ try {
     if (split) params.set("split", "1");
     if (missing) params.set("missing", missing);
     if (firstTask) params.set("firstTask", "1");
+    if (record) params.set("record", record);
     const url = `${origin}/first-run-tour-fixture.html?${params}`;
     await call("Page.navigate", { url });
     await until(
@@ -307,199 +307,186 @@ try {
     );
     checks.push("Tab and Shift+Tab stay in the tour");
   }
+  async function mouseClick(selector) {
+    const point = await evaluate(`(() => { const nodes=[...document.querySelectorAll(${JSON.stringify(selector)})].filter(n => n.getClientRects().length); const n = nodes.find(n => n.closest('.gyro-chat-grid-slot.is-current-pane')) ?? nodes[0]; if (!n) return null; const r=n.getBoundingClientRect(); const z=Number(getComputedStyle(document.body).zoom)||1; return {x:(r.left+r.width/2)*z, y:(r.top+r.height/2)*z}; })()`);
+    assert.ok(point, `mouse target ${selector}`);
+    await mouseAt(point.x, point.y);
+  }
+  async function mouseAt(x, y) {
+    for (const type of ["mouseMoved", "mousePressed", "mouseReleased"])
+      await call("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+    await pause(120);
+  }
+  const tourOpen = () => evaluate("Boolean(document.querySelector('.gyro-tour-card'))");
+  const recordStatus = () =>
+    evaluate("JSON.parse(document.documentElement.dataset.tourFixtureRecord || 'null')?.status ?? null");
+  const primaryLabel = () =>
+    evaluate("document.querySelector('.gyro-tour-primary')?.textContent.trim()");
+
   await call("Page.enable");
   await call("Runtime.enable");
   for (const theme of ["dark", "light"])
     for (const zoom of ["1", "1.1"]) {
       const spec = await load({ theme, zoom });
-      for (let index = 0; index < 4; index++) {
-        await waitStep(index, 4);
+      for (let index = 0; index < 3; index++) {
+        await waitStep(index);
         const metric = await inspect(
           `home-${theme}-zoom-${zoom}-${names[index]}`,
           index,
           spec,
         );
-        assert.equal(
-          metric.destination,
-          index === 2 ? "settings" : "workspace",
-          `${names[index]} navigates to its actual destination`,
-        );
-        if (index === 2) assert.equal(metric.section, "providers");
+        assert.equal(metric.destination, "workspace", "the tour never leaves the workspace");
         if (index === 0) await focusContainment();
-        await click(index === 3 ? "Finish" : "Next");
+        await click(index === 2 ? "Finish" : "Next");
       }
-      await until(
-        () => evaluate("!document.querySelector('.gyro-tour-card')"),
-        "tour completion",
-      );
-      assert.equal(
-        await evaluate(
-          "JSON.parse(document.documentElement.dataset.tourFixtureRecord).status",
-        ),
-        "complete",
-      );
+      await until(async () => !(await tourOpen()), "tour completion");
+      assert.equal(await recordStatus(), "complete");
       checks.push(
-        `${theme} zoom${zoom}: all four home anchors, bounds, style and completion`,
+        `${theme} zoom${zoom}: three composer anchors, bounds, style and completion`,
       );
     }
 
   for (const theme of ["dark", "light"]) {
-    const thread = await load({
-      theme,
-      zoom: "1.1",
-      panel: "files",
-      scene: "thread",
-    });
-    for (let index = 1; index < 5; index++) {
-      await waitStep(index - 1, 4);
+    const thread = await load({ theme, zoom: "1.1", panel: "files", scene: "thread" });
+    // A thread's composer has no project chip, so the tour starts at the input.
+    for (let index = 1; index < 3; index++) {
+      await waitStep(index - 1, 2);
       await inspect(`thread-${theme}-zoom-1.1-${names[index]}`, index, thread);
-      await click(index === 4 ? "Finish" : "Next");
+      await click(index === 2 ? "Finish" : "Next");
     }
+    await until(async () => !(await tourOpen()), "thread tour completion");
   }
-  checks.push(
-    "Active chat shows input, Settings, workspace and companion steps in both themes at zoom1.1",
-  );
+  checks.push("Active chat with an open companion skips Project and shows input and model in both themes at zoom1.1");
 
   const split = await load({ split: true, panel: "none", scene: "home" });
-  // Compact split composers omit Project; the first available anchor is input.
-  await waitStep(0, 3);
-  const focused = await inspect("split-focused-composer", 1, split);
+  // Compact split composers may omit Project; the first step is whichever
+  // anchor is available.
+  const splitTotal = await until(
+    () => evaluate("document.querySelector('.gyro-tour-step-count')?.textContent.trim().match(/of (\\d+)/)?.[1]"),
+    "split tour",
+  );
+  await waitStep(0, Number(splitTotal));
+  const focused = await inspect("split-focused-composer", 3 - Number(splitTotal), split);
   assert.equal(focused.visibleAnchorCount, 2, "split fixture exposes two real inputs");
   assert.equal(focused.anchorInFocusedPane, true, "spotlight follows focused split chat");
   await key("Escape");
-  checks.push("Focused split chat wins over the first matching input; unavailable Project step is omitted");
+  checks.push("Focused split chat wins over the first matching anchor");
 
-  // Large appearance changes real component tokens, independently of body zoom.
   const large = await load({ size: "large", zoom: "1.1" });
-  for (let index = 0; index < 4; index++) {
-    await waitStep(index, 4);
+  for (let index = 0; index < 3; index++) {
+    await waitStep(index);
     await inspect(`large-zoom-1.1-${names[index]}`, index, large);
-    await click(index === 3 ? "Finish" : "Next");
+    await click(index === 2 ? "Finish" : "Next");
   }
-  checks.push(
-    "Large appearance plus body zoom1.1 preserves anchor/card geometry",
-  );
+  checks.push("Large appearance plus body zoom1.1 preserves anchor/card geometry");
 
-  const narrow = await load({
-    width: 900,
-    height: 700,
-    panel: "none",
-    scene: "home",
-  });
-  await waitStep(0, 4);
+  const narrow = await load({ width: 900, height: 700, panel: "none", scene: "home" });
+  await waitStep(0);
   await inspect("narrow-project", 0, narrow);
   await click("Next");
-  await waitStep(1, 4);
+  await waitStep(1);
   await click("Next");
-  await waitStep(2, 4);
-  await inspect("narrow-models", 2, narrow);
+  await waitStep(2);
+  await inspect("narrow-model", 2, narrow);
   await click("Back");
-  await waitStep(1, 4);
-  assert.equal(
-    await evaluate("document.documentElement.dataset.tourFixtureDestination"),
-    "workspace",
-  );
-  await click("Next");
-  await waitStep(2, 4);
+  await waitStep(1);
   await key("Escape");
-  await until(
-    () =>
-      evaluate(
-        "!document.querySelector('.gyro-tour-card') && document.documentElement.dataset.tourFixtureDestination === 'workspace'",
-      ),
-    "Escape returns from Settings",
-  );
-  assert.equal(
-    await evaluate(
-      "JSON.parse(document.documentElement.dataset.tourFixtureRecord).status",
-    ),
-    "dismissed",
-  );
-  checks.push(
-    "Back and Escape return from real Settings; dismissal is recorded",
-  );
+  await until(async () => !(await tourOpen()), "Escape dismisses");
+  assert.equal(await recordStatus(), "dismissed");
+  checks.push("Back moves within the composer; Escape dismissal is recorded");
 
-  await load({ panel: "none", missing: "panel", scene: "home" });
-  await waitStep(0, 4);
-  await key("Escape");
-  await until(
-    () => evaluate("!document.querySelector('.gyro-tour-card')"),
-    "Escape dismisses first step",
-  );
+  // The highlighted control is usable; everything around it stays inert.
+  await load({ panel: "none", scene: "home" });
+  await waitStep(0);
+  await click("Next");
+  await waitStep(1);
+  await mouseAt(4, 4);
+  assert.equal(await tourOpen(), true, "a click outside the cut-out is blocked");
+  await mouseClick('[data-tour="composer.input"]');
+  await until(async () => !(await tourOpen()), "using the highlighted input ends the tour");
   assert.equal(
-    await evaluate("document.activeElement?.getAttribute('data-tour')"),
-    "composer.project",
-    "dismissal restores original control focus",
+    await evaluate("Boolean(document.activeElement?.closest('[data-tour=\"composer.input\"]')) || document.activeElement?.dataset.tour === 'composer.input'"),
+    true,
+    "the click reaches the highlighted input",
   );
-  checks.push(
-    "Unavailable initial panel yields four steps; Escape restores focus",
-  );
+  assert.equal(await recordStatus(), "complete");
+  checks.push("Highlighted control receives the click and ends the tour; the rest of the app is blocked");
+
+  // A draft in progress holds the tour back until the composer is idle.
+  await load({ panel: "none", scene: "home" });
+  await evaluate("(document.querySelector('[data-tour=\"composer.input\"] textarea, textarea[data-tour=\"composer.input\"], [data-tour=\"composer.input\"] [contenteditable]') ?? document.querySelector('[data-tour=\"composer.input\"]')).focus()");
+  await call("Input.insertText", { text: "fix the flaky test" });
+  await pause(2600);
+  assert.equal(await tourOpen(), false, "tour waits while a draft is being written");
+  checks.push("Tour does not open over a draft in progress");
+
+  await load({ record: "v1" });
+  await pause(2600);
+  assert.equal(await tourOpen(), false, "a version 1 record still suppresses the tour");
+  checks.push("Version 1 tour record migrates without replaying the tour");
+
+  await load({ panel: "none", missing: "model", scene: "home" });
+  await waitStep(0, 2);
+  await click("Next");
+  await waitStep(1, 2);
+  assert.equal(await primaryLabel(), "Finish");
+  await click("Finish");
+  checks.push("Missing model anchor yields two steps ending in Finish");
 
   const missing = await load();
-  await waitStep(0, 4);
-  await evaluate(
-    "document.querySelector('[data-tour=\"composer.project\"]').remove()",
-  );
+  await waitStep(0);
+  await evaluate("document.querySelector('[data-tour=\"composer.project\"]').remove()");
   await until(
-    () =>
-      evaluate(
-        "document.querySelector('.gyro-tour')?.dataset.hasAnchor === 'false'",
-      ),
+    () => evaluate("document.querySelector('.gyro-tour')?.dataset.hasAnchor === 'false'"),
     "removed anchor clears spotlight",
   );
   await inspect("target-removed", 0, missing, { anchorExpected: false });
   await key("Escape");
-  checks.push(
-    "Target removal clears the old cutout and leaves a dismissible neutral card",
-  );
+  checks.push("Target removal clears the old cutout and leaves a dismissible neutral card");
 
-  const disconnected = await load({
-    provider: "none",
-    panel: "none",
-    scene: "home",
-    theme: "light",
-  });
-  await waitStep(0, 4);
-  await click("Next");
-  await waitStep(1, 4);
-  await click("Next");
-  await waitStep(2, 4);
-  await inspect("light-disconnected-models", 2, disconnected);
-  assert.match(
-    await evaluate("document.querySelector('.gyro-tour-body').textContent"),
-    /connect/i,
-  );
-  await click("Skip tour");
-  await until(
-    () => evaluate("!document.querySelector('.gyro-tour-card')"),
-    "Skip tour dismisses",
-  );
-  checks.push(
-    "Disconnected provider copy and Skip tour use actual Settings with no provider calls",
-  );
+  for (const theme of ["dark", "light"]) {
+    const disconnected = await load({ provider: "none", panel: "none", scene: "home", theme, firstTask: true });
+    await waitStep(0);
+    await click("Next");
+    await waitStep(1);
+    await click("Next");
+    await waitStep(2);
+    await inspect(`disconnected-${theme}-model`, 2, disconnected);
+    assert.match(await evaluate("document.querySelector('.gyro-tour-title').textContent"), /connect/i);
+    assert.equal(await primaryLabel(), "Connect an account", "no first task without a provider");
+    await click("Connect an account");
+    await until(async () => !(await tourOpen()), "connect exits tour");
+    assert.equal(await evaluate("document.documentElement.dataset.tourFixtureDestination"), "settings");
+    assert.equal(await evaluate("document.documentElement.dataset.tourFixtureSection"), "providers");
+    assert.equal(await recordStatus(), "complete");
+  }
+  checks.push("Disconnected users end on Connect an account, which opens Accounts and stays there");
 
-  assert.deepEqual(errors, [], "no browser exceptions or console errors");
-  // The optional first task remains an editable, unsent draft, with an exit.
   for (const theme of ["dark", "light"]) {
     const spec = await load({ theme, firstTask: true, width: 900, height: 700 });
-    for (let index = 0; index < 3; index++) {
-      await waitStep(index, 4);
+    for (let index = 0; index < 2; index++) {
+      await waitStep(index);
       await click("Next");
     }
-    await waitStep(3, 4);
-    await inspect(`first-task-${theme}`, 3, spec);
+    await waitStep(2);
+    await inspect(`first-task-${theme}`, 2, spec);
     assert.equal(await evaluate("document.querySelectorAll('.gyro-tour-primary').length"), 1);
+    assert.equal(await primaryLabel(), "Try a first task");
     await click("Try a first task");
-    await until(() => evaluate("!document.querySelector('.gyro-tour-card')"), "first task exits tour");
+    await until(async () => !(await tourOpen()), "first task exits tour");
     const prompt = await evaluate("document.documentElement.dataset.firstTaskPrompt");
     assert.match(prompt, /Wait for my approval before editing/);
     assert.match(prompt, /failed or unrun checks/);
     assert.equal(await evaluate("document.querySelector('[data-tour=\"composer.input\"]').textContent || document.querySelector('[data-tour=\"composer.input\"]').value"), prompt);
   }
-  checks.push("First-task action offers one primary, keeps Finish available, and prepares an editable prompt in both themes");
+  checks.push("Connected users end on one first-task primary that prepares an editable prompt in both themes");
+
+  assert.deepEqual(errors, [], "no browser exceptions or console errors");
   // Only remove obsolete files from this script's preliminary capture names.
   // Preserve other design evidence that may share the output directory.
-  const obsoleteNames = ["failure.png", "large-zoom-1.1-panel.png"];
+  const obsoleteNames = ["failure.png", "large-zoom-1.1-panel.png", "narrow-models.png", "light-disconnected-models.png"];
+  for (const prefix of ["home-dark-zoom-1", "home-dark-zoom-1.1", "home-light-zoom-1", "home-light-zoom-1.1", "thread-dark-zoom-1.1", "thread-light-zoom-1.1", "large-zoom-1.1"])
+    for (const old of ["models", "workspace", "panel"]) obsoleteNames.push(`${prefix}-${old}.png`);
   for (const theme of ["dark", "light"]) {
     for (const zoom of ["1", "1.1"]) {
       for (const name of names)

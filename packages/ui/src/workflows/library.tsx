@@ -1,10 +1,12 @@
 import { useState } from "react";
 import {
   AlertTriangle,
-  ArrowRight,
+  ChevronRight,
   BookOpen,
   Bug,
-  FileText,
+  AppWindow,
+  Hammer,
+  Wrench,
   GitPullRequest,
   ListChecks,
   MessageSquare,
@@ -19,12 +21,14 @@ import type {
 } from "./types";
 import { starterWorkflow, workflowStarters } from "./editor-model";
 
-const starterIcons = [GitPullRequest, Bug, BookOpen];
+const starterIcons = [GitPullRequest, Bug, BookOpen, Wrench, AppWindow, Hammer];
 
 export function WorkflowLibraryPanel({
   library,
   drafts,
   busy,
+  loadError,
+  choosingSchedule,
   onNew,
   onEdit,
   onSetup,
@@ -33,6 +37,8 @@ export function WorkflowLibraryPanel({
   library?: WorkflowLibrary;
   drafts: WorkflowDraft[];
   busy: boolean;
+  loadError: boolean;
+  choosingSchedule: boolean;
   onNew: (definition?: WorkflowDefinition) => void;
   onEdit: (item: WorkflowListing) => void;
   onSetup: (item: WorkflowListing) => void;
@@ -48,81 +54,9 @@ export function WorkflowLibraryPanel({
     <>
       {!library ? (
         <p className="gyro-workflow-muted" role="status">
-          Loading workflows…
+          {loadError ? "Workflows couldn’t be loaded." : "Loading workflows…"}
         </p>
-      ) : !library.definitions.length ? (
-        <section
-          className="gyro-workflow-get-started"
-          aria-label="Create your first workflow"
-        >
-          <div className="gyro-workflow-hero">
-            <div className="gyro-workflow-intro">
-              <span className="gyro-workflow-icon-tile is-large">
-                <Workflow size={20} aria-hidden="true" />
-              </span>
-              <div>
-                <h2>A useful task, ready to repeat</h2>
-                <p>
-                  Write the instructions once. Choose a model and run them
-                  whenever you need.
-                </p>
-              </div>
-            </div>
-            <ol className="gyro-workflow-how">
-              <li>
-                <span>1</span>
-                <div>
-                  <strong>Describe the task</strong>
-                  <small>Start from an example or a blank workflow.</small>
-                </div>
-              </li>
-              <li>
-                <span>2</span>
-                <div>
-                  <strong>Arrange the steps</strong>
-                  <small>Add work, a review, or a verification task.</small>
-                </div>
-              </li>
-              <li>
-                <span>3</span>
-                <div>
-                  <strong>Save and reuse</strong>
-                  <small>Run it on demand or set up a schedule.</small>
-                </div>
-              </li>
-            </ol>
-          </div>
-          <div className="gyro-workflow-section-head">
-            <h3>Start with an example</h3>
-            <p>
-              Examples open as editable drafts. Nothing runs until you choose to
-              start it.
-            </p>
-          </div>
-          <div className="gyro-workflow-starters">
-            {workflowStarters.map((starter, index) => {
-              const Icon = starterIcons[index] ?? FileText;
-              return (
-                <button
-                  key={starter.name}
-                  disabled={busy}
-                  onClick={() => onNew(starterWorkflow(index))}
-                >
-                  <span className="gyro-workflow-icon-tile">
-                    <Icon size={16} aria-hidden="true" />
-                  </span>
-                  <strong>{starter.name}</strong>
-                  <span>{starter.description}</span>
-                  <small>
-                    Customize workflow{" "}
-                    <ArrowRight size={14} aria-hidden="true" />
-                  </small>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      ) : (
+      ) : library.definitions.length ? (
         <section className="gyro-workflow-section" aria-label="Saved workflows">
           <div className="gyro-workflow-section-head is-row">
             <h2>
@@ -182,11 +116,10 @@ export function WorkflowLibraryPanel({
                       <button disabled={busy} onClick={() => onEdit(item)}>
                         Edit workflow
                       </button>
-                      <button
-                        className="gyro-primary-button"
-                        onClick={() => onSetup(item)}
-                      >
-                        Run workflow…
+                      <button disabled={busy} onClick={() => onSetup(item)}>
+                        {choosingSchedule
+                          ? "Schedule workflow…"
+                          : "Run workflow…"}
                       </button>
                     </div>
                   ) : null}
@@ -199,7 +132,11 @@ export function WorkflowLibraryPanel({
             </p>
           )}
         </section>
-      )}
+      ) : choosingSchedule ? (
+        <p className="gyro-workflow-inline-empty">
+          Save a workflow to schedule it.
+        </p>
+      ) : null}
       {drafts.length ? (
         <section
           className="gyro-workflow-section"
@@ -231,6 +168,54 @@ export function WorkflowLibraryPanel({
                 </div>
               </li>
             ))}
+          </ul>
+        </section>
+      ) : null}
+      {library ? (
+        <section className="gyro-workflow-section" aria-label="Templates">
+          <div className="gyro-workflow-section-head">
+            <h2>Templates</h2>
+            <p>Choose a template to open an editable draft.</p>
+          </div>
+          <ul className="gyro-workflow-rows">
+            {workflowStarters.map((starter, index) => {
+              const Icon = starterIcons[index] ?? Workflow;
+              const definition = starterWorkflow(index);
+              const steps = definition.steps
+                .map((step) => {
+                  if (step.kind === "verification") return "Verify";
+                  if (step.kind === "review") return "Review";
+                  return "Implement";
+                })
+                .join(" → ");
+              return (
+                <li key={starter.name} className="is-link">
+                  <button
+                    className="gyro-workflow-row gyro-workflow-template-row"
+                    disabled={busy}
+                    onClick={() => onNew(definition)}
+                  >
+                    <span className="gyro-workflow-icon-tile">
+                      <Icon size={16} aria-hidden="true" />
+                    </span>
+                    <span className="gyro-workflow-row-body">
+                      <strong>{starter.name}</strong>
+                      <small>{starter.description}</small>
+                    </span>
+                    <small className="gyro-workflow-row-meta">
+                      {definition.steps.length === 1
+                        ? "Read-only · 1 step"
+                        : steps}
+                    </small>
+                    <ChevronRight
+                      className="gyro-workflow-row-chevron"
+                      size={16}
+                      aria-hidden="true"
+                    />
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </section>
       ) : null}

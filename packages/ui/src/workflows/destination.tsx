@@ -1,5 +1,6 @@
 import {
   CalendarClock,
+  ChevronDown,
   FolderOpen,
   History,
   MessageSquare,
@@ -19,6 +20,8 @@ import { WorkflowEditor, emptyWorkflow } from "./editor";
 import { WorkflowSetupPanel } from "./setup";
 import { WorkflowExtractionPanel } from "./extraction";
 import { WorkflowRuns } from "./runs";
+import { WorkflowSchedules } from "./schedules";
+import type { RenderScheduleIndex } from "../scheduled-work";
 import type {
   WorkflowDefinition,
   WorkflowDraft,
@@ -40,7 +43,7 @@ type Editor = {
 };
 export function WorkflowDestination({
   runtime,
-  children,
+  renderSchedules,
   initialSessionId,
   onOpenSession,
   openSchedulesToken = 0,
@@ -48,7 +51,7 @@ export function WorkflowDestination({
   onExtractionHandled,
 }: {
   runtime?: WorkflowRuntime;
-  children: ReactNode;
+  renderSchedules?: (renderIndex: RenderScheduleIndex) => ReactNode;
   initialSessionId?: string;
   onOpenSession?: (id: string) => void;
   openSchedulesToken?: number;
@@ -63,6 +66,10 @@ export function WorkflowDestination({
     extractionRequest?.sessionId ?? initialSessionId,
   );
   const [library, setLibrary] = useState<WorkflowLibrary>();
+  const [libraryError, setLibraryError] = useState(false);
+  const [indexLoaded, setIndexLoaded] = useState(false);
+  const [indexError, setIndexError] = useState(false);
+  const [choosingSchedule, setChoosingSchedule] = useState(false);
   const [jobs, setJobs] = useState<WorkflowJob[]>([]);
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
   const [drafts, setDrafts] = useState<WorkflowDraft[]>([]);
@@ -70,6 +77,7 @@ export function WorkflowDestination({
   const [setup, setSetup] = useState<{
     listing: WorkflowListing;
     job?: WorkflowJob;
+    schedule?: boolean;
   }>();
   const [extraction, setExtraction] = useState<{
     turnId?: string;
@@ -83,6 +91,16 @@ export function WorkflowDestination({
   const project = projectId
     ? projects.find((project) => project.sessionId === projectId)
     : projects[0];
+  const projectChoices = new Map<string, WorkflowProject>();
+  for (const item of projects) {
+    if (!projectChoices.has(item.path)) projectChoices.set(item.path, item);
+  }
+  const projectNames = new Map(
+    [...projectChoices.keys()].map((path) => [
+      path,
+      path.split(/[\\/]/).filter(Boolean).pop() ?? path,
+    ]),
+  );
   const currentProject = useRef(project?.sessionId);
   currentProject.current = project?.sessionId;
   const refresh = useCallback(async () => {
@@ -106,8 +124,13 @@ export function WorkflowDestination({
       setJobs(jobs);
       setRuns(runs);
       setDrafts(drafts);
+      setIndexLoaded(true);
+      setIndexError(false);
     } catch (error) {
-      if (sequence === generation.current) setError(String(error));
+      if (sequence === generation.current) {
+        setIndexError(true);
+        setError(String(error));
+      }
     }
   }, [runtime]);
   const refreshLibrary = useCallback(async () => {
@@ -119,9 +142,15 @@ export function WorkflowDestination({
         project.sessionId,
         project.rootId,
       );
-      if (sequence === libraryGeneration.current) setLibrary(next);
+      if (sequence === libraryGeneration.current) {
+        setLibrary(next);
+        setLibraryError(false);
+      }
     } catch (error) {
-      if (sequence === libraryGeneration.current) setError(String(error));
+      if (sequence === libraryGeneration.current) {
+        setLibraryError(true);
+        setError(String(error));
+      }
     }
   }, [runtime, project?.sessionId, project?.rootId]);
   useEffect(() => {
@@ -133,6 +162,7 @@ export function WorkflowDestination({
   }, [refresh]);
   useEffect(() => {
     setLibrary(undefined);
+    setLibraryError(false);
     void refreshLibrary();
   }, [refreshLibrary]);
   useEffect(
@@ -288,6 +318,7 @@ export function WorkflowDestination({
       );
       setProjectId(project.sessionId);
       setSetup({ listing, job });
+      setChoosingSchedule(false);
       setView("workflows");
     } catch (error) {
       setError(String(error));
@@ -296,26 +327,56 @@ export function WorkflowDestination({
   async function toggle(job: WorkflowJob) {
     if (!runtime) return;
     try {
-      await runtime.run("toggle-job", {
+      setError("");
+      const updated = await runtime.run<WorkflowJob>("toggle-job", {
         jobId: job.id,
-        paused: job.status !== "paused",
+        paused: job.status === "current",
       });
+      setJobs((items) =>
+        items.map((item) => (item.id === updated.id ? updated : item)),
+      );
       void refresh();
     } catch (error) {
       setError(String(error));
     }
   }
-  const scheduledJobs = jobs.filter((job) => job.schedule !== "manual");
-  const showingLibrary = Boolean(
-    runtime && project && !editor && !setup && !extraction,
-  );
+  const showingLibrary = Boolean(runtime && !editor && !setup && !extraction);
   function changeView(view: "workflows" | "schedules" | "runs") {
     if (editor) {
       setNotice("Save or discard your workflow edits before switching views.");
       return;
     }
+    setChoosingSchedule(false);
     setView(view);
     setError("");
+    setNotice("");
+  }
+  function scheduleIndex(promptIndex?: Parameters<RenderScheduleIndex>[0]) {
+    return (
+      <WorkflowSchedules
+        jobs={jobs.filter((job) => job.schedule !== "manual")}
+        runs={runs}
+        loading={Boolean(runtime) && !indexLoaded && !indexError}
+        loadError={indexError}
+        onRefresh={() => {
+          setError("");
+          void refresh();
+        }}
+        onChooseWorkflow={
+          runtime
+            ? () => {
+                setView("workflows");
+                setChoosingSchedule(true);
+                setSetup(undefined);
+                setExtraction(undefined);
+              }
+            : undefined
+        }
+        onReviewSetup={updateJob}
+        onToggle={toggle}
+        promptIndex={promptIndex}
+      />
+    );
   }
   return (
     <div className="gyro-workflows-destination">
@@ -341,102 +402,7 @@ export function WorkflowDestination({
       </nav>
       {view === "schedules" ? (
         <div className="gyro-workflows-schedules">
-          <header className="gyro-workflow-page-heading">
-            <h1>Schedules</h1>
-            <p>
-              Run saved workflows and project automations on a regular rhythm.
-            </p>
-          </header>
-          <section
-            className="gyro-workflow-scheduled"
-            aria-label="Workflow schedules"
-          >
-            <div className="gyro-workflow-section-head is-row">
-              <h2>
-                Workflow schedules
-                {scheduledJobs.length ? (
-                  <span className="gyro-workflow-count">
-                    {scheduledJobs.length}
-                  </span>
-                ) : null}
-              </h2>
-              {scheduledJobs.length ? null : (
-                <button onClick={() => changeView("workflows")}>
-                  Browse workflows
-                </button>
-              )}
-            </div>
-            {scheduledJobs.length ? (
-              <ul className="gyro-workflow-rows">
-                {scheduledJobs.map((job) => (
-                  <li key={job.id}>
-                    <span className="gyro-workflow-icon-tile">
-                      <CalendarClock size={16} aria-hidden="true" />
-                    </span>
-                    <div className="gyro-workflow-row-body">
-                      <strong>
-                        {job.title}
-                        <em
-                          className={`gyro-workflow-pill is-${job.status === "current" ? "success" : job.status === "paused" ? "warning" : "neutral"}`}
-                        >
-                          {job.status === "current"
-                            ? "Active"
-                            : job.status === "paused"
-                              ? "Paused"
-                              : "Completed"}
-                        </em>
-                      </strong>
-                      <small>
-                        {job.schedule} ·{" "}
-                        {job.execution.calendar?.timezone ?? "local time"}
-                        {job.execution.workspacePath
-                          ? ` · ${job.execution.workspacePath}`
-                          : ""}
-                      </small>
-                      <small>
-                        Pinned version{" "}
-                        <code>
-                          {job.execution.workflowBinding.binding.definitionHash.slice(
-                            0,
-                            12,
-                          )}
-                        </code>
-                      </small>
-                      {job.lastResult ? <p>{job.lastResult}</p> : null}
-                    </div>
-                    <div className="gyro-workflow-row-actions">
-                      <button onClick={() => void updateJob(job)}>
-                        Review or update setup
-                      </button>
-                      <button
-                        onClick={() => void toggle(job)}
-                        title={
-                          job.status === "paused"
-                            ? undefined
-                            : "Pausing also stops a run that is in progress."
-                        }
-                      >
-                        {job.status === "paused"
-                          ? "Resume schedule"
-                          : "Pause schedule"}
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="gyro-workflow-schedule-empty">
-                <span className="gyro-workflow-icon-tile">
-                  <CalendarClock size={16} aria-hidden="true" />
-                </span>
-                <div>
-                  <strong>No workflow schedules yet</strong>
-                  <p>Choose a saved workflow, then set when it runs.</p>
-                </div>
-              </div>
-            )}
-          </section>
-          <div className="gyro-workflow-legacy-schedules">{children}</div>
+          {renderSchedules ? renderSchedules(scheduleIndex) : scheduleIndex()}
         </div>
       ) : (
         <div className="gyro-workflows-content">
@@ -447,8 +413,13 @@ export function WorkflowDestination({
               runtime={runtime}
               runs={runs}
               jobs={jobs}
+              loading={!indexLoaded && !indexError}
+              loadError={indexError}
               onOpenSession={onOpenSession}
-              onRefresh={() => void refresh()}
+              onRefresh={() => {
+                setError("");
+                void refresh();
+              }}
               onBrowseWorkflows={() => changeView("workflows")}
             />
           ) : (
@@ -456,13 +427,15 @@ export function WorkflowDestination({
               <header className="gyro-workflow-page-heading gyro-workflow-heading-actions">
                 <div>
                   <h1>Workflows</h1>
-                  <p>Save a task’s steps and use them again in this project.</p>
+                  {choosingSchedule ? (
+                    <p>Choose a saved workflow to schedule.</p>
+                  ) : null}
                 </div>
-                {showingLibrary ? (
+                {showingLibrary && project ? (
                   <div className="gyro-workflow-header-actions">
                     <button disabled={busy} onClick={() => setExtraction({})}>
                       <MessageSquare size={14} aria-hidden="true" />
-                      Create from a chat
+                      Create from chat
                     </button>
                     <button
                       className="gyro-primary-button"
@@ -485,34 +458,45 @@ export function WorkflowDestination({
                 <label className="gyro-workflow-project">
                   <FolderOpen size={14} aria-hidden="true" />
                   Project
-                  <select
-                    disabled={
-                      Boolean(editor) ||
-                      busy ||
-                      Boolean(setup) ||
-                      Boolean(extraction)
-                    }
-                    title={project?.path}
-                    value={project?.sessionId ?? ""}
-                    onChange={(event) => {
-                      setProjectId(event.target.value);
-                      setError("");
-                      setNotice("");
-                    }}
-                  >
-                    {projects.map((project) => (
-                      <option key={project.sessionId} value={project.sessionId}>
-                        {project.path.split(/[\\/]/).filter(Boolean).pop() ??
-                          project.path}{" "}
-                        · {project.title}
-                      </option>
-                    ))}
-                  </select>
+                  <span className="gyro-workflow-select">
+                    <select
+                      disabled={
+                        Boolean(editor) ||
+                        busy ||
+                        Boolean(setup) ||
+                        Boolean(extraction)
+                      }
+                      title={project?.path}
+                      value={project?.path ?? ""}
+                      onChange={(event) => {
+                        libraryGeneration.current++;
+                        setLibrary(undefined);
+                        setLibraryError(false);
+                        setProjectId(
+                          projectChoices.get(event.target.value)?.sessionId,
+                        );
+                        setError("");
+                        setNotice("");
+                      }}
+                    >
+                      {[...projectNames].map(([path, name]) => (
+                        <option key={path} value={path}>
+                          {[...projectNames.values()].filter(
+                            (label) => label === name,
+                          ).length > 1
+                            ? path
+                            : name}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={13} aria-hidden="true" />
+                  </span>
                 </label>
                 {showingLibrary ? (
                   <button
                     className="gyro-workflow-icon-button"
                     onClick={() => {
+                      setError("");
                       void refresh();
                       void refreshLibrary();
                     }}
@@ -524,8 +508,12 @@ export function WorkflowDestination({
                 ) : null}
               </div>
               {!project ? (
-                <p>
-                  No project session is available. Open a project chat first.
+                <p role="status">
+                  {error
+                    ? "Project chats couldn’t be loaded."
+                    : indexLoaded
+                      ? "Open a project chat to create workflows for that project."
+                      : "Loading projects…"}
                 </p>
               ) : editor ? (
                 <WorkflowEditor
@@ -548,9 +536,14 @@ export function WorkflowDestination({
                   definition={setup.listing.definition}
                   hash={setup.listing.hash}
                   job={setup.job}
-                  onClose={() => setSetup(undefined)}
+                  scheduling={setup.schedule}
+                  onClose={() => {
+                    setSetup(undefined);
+                    if (setup.job) setView("schedules");
+                  }}
                   onLaunched={(destination) => {
                     setSetup(undefined);
+                    setChoosingSchedule(false);
                     setView(destination === "schedule" ? "schedules" : "runs");
                     setNotice(
                       destination === "schedule"
@@ -565,6 +558,12 @@ export function WorkflowDestination({
                   key={`${project.sessionId}:${extraction.draft?.id ?? extraction.turnId ?? "new"}`}
                   runtime={runtime}
                   project={project}
+                  chats={
+                    !extraction.draft && !extraction.turnId
+                      ? projects.filter((item) => item.path === project.path)
+                      : undefined
+                  }
+                  onSelectChat={setProjectId}
                   turnId={extraction.turnId}
                   draft={extraction.draft}
                   onClose={() => {
@@ -586,6 +585,8 @@ export function WorkflowDestination({
                   library={library}
                   drafts={drafts}
                   busy={busy}
+                  loadError={libraryError}
+                  choosingSchedule={choosingSchedule}
                   onNew={(definition) =>
                     setEditor({
                       definition: definition ?? emptyWorkflow(),
@@ -595,7 +596,9 @@ export function WorkflowDestination({
                     })
                   }
                   onEdit={(item) => void edit(item)}
-                  onSetup={(listing) => setSetup({ listing })}
+                  onSetup={(listing) =>
+                    setSetup({ listing, schedule: choosingSchedule })
+                  }
                   onDraft={(draft) => void openDraft(draft)}
                 />
               )}
