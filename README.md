@@ -4,7 +4,10 @@ Gyro is an open-source macOS workspace for coding agents. Start a task with Clau
 
 **[Download for Mac](https://github.com/wytzeh197/Gyro/releases/latest)** · [See Gyro in action](https://usegyro.io/) · [Install the CLI](#use-the-cli) · [Build from source](#build-from-source)
 
-![A Gyro chat about a sync queue that retries forever. The agent reports a five-attempt limit, test coverage, and three changed files.](docs/screenshots/readme/chat-workflow.webp)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/readme/chat-and-review-dark.webp">
+  <img src="docs/screenshots/readme/chat-and-review-light.webp" alt="Gyro shows a coding session beside its recorded diff. In src/sync.js, the retry limit changes from Infinity to 5.">
+</picture>
 
 ## Try it on a project
 
