@@ -1,157 +1,68 @@
 # Gyro
 
-**Chat, CLI, and IDE in one place.**
+Gyro is an open-source macOS workspace for coding agents. Start a task with Claude Code, Codex, or a local model, follow the session in your terminal, and review the diff alongside the conversation. You can use Gyro without a Gyro account.
 
-Gyro is a local-first macOS workspace for agent chat, subscription CLIs, API
-providers, and local models, alongside your files, diffs, terminals, and
-scheduled work. Start in Chat, move into the CLI or Workspace, and keep the same
-session with you.
+**[Download for Mac](https://github.com/wytzeh197/Gyro/releases/latest)** · [See Gyro in action](https://usegyro.io/) · [Install the CLI](#use-the-cli) · [Build from source](#build-from-source)
 
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![CI](https://github.com/wytzeh197/Gyro/actions/workflows/ci.yml/badge.svg)](https://github.com/wytzeh197/Gyro/actions/workflows/ci.yml)
-[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111111?logo=apple)](https://github.com/wytzeh197/Gyro)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/readme/chat-and-review-dark.webp">
+  <img src="docs/screenshots/readme/chat-and-review-light.webp" alt="Gyro shows a coding session beside its recorded diff. In src/sync.js, the retry limit changes from Infinity to 5.">
+</picture>
 
-[Download](https://usegyro.io/) ·
-[Releases](https://github.com/wytzeh197/Gyro/releases/latest) ·
-[Changelog](https://usegyro.io/changelog/) ·
-[Architecture](docs/architecture.md) ·
-[Contribute](CONTRIBUTING.md)
+## Try it on a project
 
-[![Watch the Gyro launch film](docs/media/launch/gyro-launch-poster.png)](docs/media/launch/gyro-launch-film.mp4)
+1. **Install the app.** On macOS 14 or newer, choose the Apple Silicon (`aarch64`) or Intel (`x64`) DMG, open it, and drag Gyro to Applications. [macOS install guide](docs/install-macos.md)
+2. **Open a project folder and connect a provider.** In **Settings → Providers**, choose a coding CLI you already use, connect Ollama, or add an API key.
+3. **Start with a question you can check.** Try “Find where this project retries a failed request. Show me the stopping condition and the test that covers it.” Use **Plan** to investigate before editing. If you decide to make a change, choose **Implement**.
+4. **Inspect the result.** Open the changed files from the chat, read the diff, and run the relevant test in the workspace terminal. If a build or test produces a supported diagnostic, open it in **Problems** to jump to the source line.
 
-> [!IMPORTANT]
-> Gyro is an early release for macOS 14+. Stable app bundles and DMGs are
-> Developer ID signed and notarized by Apple. Follow the
-> [macOS installation guide](docs/install-macos.md).
+## Use the CLI
 
-<p align="center">
-  <img src="docs/screenshots/readme/chat-workflow.webp" alt="An active Gyro agent session showing the task, reviewed workspace actions, commands, edited files, and final result" width="100%">
-</p>
-
-## What Gyro does
-
-- **One session across surfaces.** The app and the `gyro` CLI share one local
-  session store, so a conversation can start in either place and resume in the
-  other with its run state, approvals, workspace and worktree context, and
-  history.
-- **Bring your own agent.** Use the agent subscriptions you already have, a
-  local model, or an API key, without keeping a separate workspace per provider.
-- **Approvals before mutation.** Commands, file edits, and sensitive reads stay
-  visible before they change local state. Choose **Ask for approval**,
-  **Approve for me**, or **Full access**; Plan mode keeps a chat read-only
-  while it works through a plan.
-- **Goals and plans on the composer.** Pin the outcome a session is pursuing,
-  and approve a finished plan with **Implement** or **Keep planning** before
-  any edit starts.
-- **A real workbench.** Files, Git, diffs, problems, output, test results, a
-  terminal grid, a browser, and Canvas sit in the same window as the chat.
-  Canvas items can be documents, diagrams, tables, and interactive UI pieces
-  you can try in place. A session can span several project folders, chats can
-  run side by side in a split layout, and isolated sessions can work in their
-  own Git worktree. Builds and CI commands that outlast a turn keep running
-  and report back into the chat.
-- **Search across everything.** One fuzzy search over projects, sessions,
-  actions, and workspace files, plus code intelligence from managed language
-  servers: definitions, references, hover docs, and document symbols for the
-  editor and the model alike.
-- **GitHub in the workspace.** Pull requests, Actions runs with failed-step
-  logs, and pushing the current branch sit beside Git status and diffs.
-- **A browser the agent can use.** Models open, read, and inspect pages in a
-  per-chat browser. It stays out of the way while you work, and opens beside
-  the chat when you want to watch or take over.
-- **Scheduled work.** Automations run agent tasks on a schedule with pause, stop
-  conditions, receipts, and recovery across restarts.
-- **Delegated research.** A read-only sub-agent investigates a question in its
-  own child session and returns only its final report to the chat.
-- **Menu bar and notifications.** A native menu-bar popover tracks idle,
-  working, and waiting sessions. macOS notifications cover approvals, finished
-  work, and failures while Gyro is in the background; Settings can turn each
-  kind on or off and send a test notification.
-- **Usage you can see.** Turn tokens, plan-usage meters, and provider retries
-  are reported per session, and usage limits can pause work that would run past
-  them; estimates are not hard spend ceilings.
-- **Local-first trust.** Sessions, config, worktrees, and usage stay on your
-  Mac; saved API keys stay in a private local file; logs are redacted; app
-  telemetry is off by default.
-
-## Providers
-
-- **Subscription CLIs.** Claude Code, Codex, Kimi Code, and
-  Grok Build run through their own local CLIs. Cursor and OpenCode are
-  experimental.
-- **Experimental Google integration.** Antigravity requires a separately
-  installed ACP runtime and is available through the app. See
-  [Google backends](docs/google-backends.md) for setup and current limits.
-- **Local models.** Ollama runs on your Mac, with discovered models and governed
-  Gyro tools where the model supports them. See [Local models](docs/local-models.md).
-- **API keys.** DeepSeek, Mistral, and OpenRouter ship as presets, and any
-  OpenAI-compatible endpoint can be added as a custom provider, including local
-  servers on loopback. Saved keys are stored in a private local file and sent only to the
-  endpoint you configured. Models that support images can read chat attachments
-  (PNG, JPEG, GIF, WebP). See [API-key providers](docs/api-key-providers.md).
-
-New models arrive through a validated remote catalog, so most model launches
-need no app update. See [Model catalog](docs/model-catalog.md).
-
-## Install
-
-macOS 14 or newer. Apple Silicon and Intel builds are on
-[usegyro.io](https://usegyro.io/) and
-[GitHub Releases](https://github.com/wytzeh197/Gyro/releases/latest).
-
-Homebrew installs the `gyro` CLI only, not Gyro.app:
+Homebrew installs the `gyro` command. To use the app and CLI together, install the DMG as well and keep both on the same version.
 
 ```bash
 brew tap wytzeh197/tap
 brew install wytzeh197/tap/gyro
-# Existing CLI installs:
-brew upgrade wytzeh197/tap/gyro
+gyro doctor
 ```
 
-Keep the app and CLI on the same version for session handoff.
+From a project directory, start a chat with a provider you have connected. This example uses Codex.
 
-## Status
+```bash
+gyro chat --profile codex
+```
 
-The current release is **v0.1.1**. Gyro runs locally without a Gyro account;
-Account, Plan & billing, and Cloud remain coming soon. Progress and scope are
-tracked in the [roadmap](docs/roadmap.md), with released changes in the
-[changelog](https://usegyro.io/changelog/).
+Type `/open` at the chat prompt to open that session in Gyro.app. To continue the work later, use `gyro sessions` to find its ID. Running `gyro resume <session-id>` starts a new turn in that session.
 
-Known limits:
+## Connect a provider
 
-- Provider access requires your own CLI login, subscription, API key, or local model.
-- Cursor and OpenCode are experimental and not approval-safe adapters.
-- Notebook and binary file edits are refused rather than applied.
-- Saved API keys are stored in `secrets.json` with private file permissions,
-  without encryption at rest. Provider CLI logins stay in provider-owned storage.
-- Keep the app and CLI on the same version when handing sessions between them.
+| Connection             | Options                                                                                                                                                                                                                                              |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Coding CLI             | Claude Code, Codex, Kimi Code, Grok Build, Cursor, OpenCode, and Google Antigravity. Gyro uses the credentials configured in each CLI. For Antigravity, run `agy` once to sign in. [Provider-specific behavior](docs/cursor-opencode-integration.md) |
+| Local model            | Connect Ollama on your Mac and select an installed model. Tool support depends on the model. [Ollama setup](docs/local-models.md)                                                                                                                    |
+| API key · experimental | Choose DeepSeek, Mistral, or OpenRouter, or configure a custom OpenAI-compatible endpoint. [API provider setup](docs/api-key-providers.md)                                                                                                           |
+
+Sessions and workspace settings live on your Mac. Gyro saves new API keys in macOS Keychain. When you use a hosted model, its provider receives the prompt and any files or tool output included as context. New installations start in **Ask for approval**. [Permission modes](docs/permissions.md)
+
+## Work across sessions
+
+- **Keep project decisions close to the code.** Save conventions in `.gyro/memory.md` so later chats can use the entries relevant to their task. [Project memory](docs/features/project-memory.md)
+- **Get a second opinion on a diff.** Choose a reviewer, inspect the changes it will receive, and send selected findings back to the implementing chat. Reviewers use a configured API provider or Ollama. [Second-opinion reviews](docs/features/second-opinion-reviews.md)
+- **Repeat a task.** Save a completed chat as a workflow, then run the recipe manually or on a schedule. [Workflows](docs/features/workflows.md)
+- **Work on another Mac.** Experimental remote access lets you open a shared project on a host Mac, continue its chats, and use its terminal through Gyro pairing or SSH. [Remote access setup](docs/features/remote-access-ssh.md)
 
 ## Build from source
 
-Requires macOS 14+, Node.js 22+, pnpm 11+, Rust 1.90+, and Xcode CLT.
+Use macOS 14+, Xcode Command Line Tools, Rust 1.91 or newer, Node.js 22.23.1 (the version in `.nvmrc`), and pnpm 11.7.0.
 
 ```bash
 git clone https://github.com/wytzeh197/Gyro.git
 cd Gyro
 corepack enable
 pnpm install --frozen-lockfile
-pnpm doctor
 pnpm desktop:dev
 ```
 
-```bash
-pnpm desktop:install-local   # Gyro.app → ~/Applications
-cargo run -p gyro-cli -- doctor
-```
+The development launcher checks the environment and starts the Vite server required by `target/debug/gyro-desktop`. For a standalone development build in `~/Applications`, run `pnpm desktop:install-local`. To try the CLI from source, run `cargo run -p gyro-cli -- doctor`.
 
-Changes are checked with `pnpm check`, `pnpm test`, and `cargo test --workspace`.
-Do not open `target/debug/gyro-desktop`; it expects the Vite server.
-
-## Docs
-
-- [Architecture](docs/architecture.md) · [Verification](docs/verification.md) · [Privacy](docs/privacy.md) · [Roadmap](docs/roadmap.md)
-- [Install on macOS](docs/install-macos.md) · [Homebrew](docs/homebrew.md) · [Local models](docs/local-models.md) · [API-key providers](docs/api-key-providers.md)
-- [Permissions](docs/permissions.md) · [Usage safety](docs/usage-safety.md) · [Model tools](docs/model-tools.md) · [Command waiting](docs/command-waiting.md)
-- [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Support](SUPPORT.md)
-
-Apache-2.0. Contributions use [DCO](CONTRIBUTING.md#developer-certificate-of-origin) signoff.
+Contributions use DCO sign-off and the Apache-2.0 license. [Contributing](CONTRIBUTING.md) · [Architecture](docs/architecture.md) · [License](LICENSE) · [Support](SUPPORT.md) · [Report a vulnerability](SECURITY.md)
