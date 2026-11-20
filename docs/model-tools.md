@@ -203,6 +203,24 @@ the file on disk remains unchanged. Keep its ID, continue independent work, and
 wait for review before verifying that edit. Repeating the same edit creates
 another proposal rather than applying the pending one.
 
+`gyro_workspace_edit` takes an optional `edits` array, up to 50 more
+`oldString`/`newString` pairs for the same file. They apply in order, each to the
+result of the one before, and the whole call becomes one proposal. If any pair is
+missing or ambiguous, the call fails and says which pair (`edits[2].oldString`),
+and nothing is proposed. Several changes to one file then cost one tool round
+trip instead of one per change.
+
+## Terminal input
+
+`gyro_terminal_input` types into the chat's running model-owned terminal, the one
+`gyro_terminal_open` started. `text` is sent verbatim, so a trailing newline
+presses Enter. `key` sends one named control key after the text: `enter`, `tab`,
+`escape`, `backspace`, the arrow keys, `ctrl-c`, `ctrl-d` or `ctrl-z`. The call
+waits up to `yieldTimeMs` (default and maximum 1000) and returns the new output.
+Each call is limited to 16 KiB, and NUL bytes are refused. It uses the same
+approval class as `gyro_terminal_open`, because input to a shell or REPL runs
+commands.
+
 ## Code formatting
 
 `gyro_code_format` asks the workspace language server for
@@ -258,6 +276,19 @@ with that line number to inspect the rest of a file. A nonempty file without a
 trailing newline is supported, including a single-line file. Git show disables
 external diff and text-conversion helpers so inspection does not invoke
 repository-configured programs.
+
+## Git commit
+
+`gyro_git_commit` makes a local commit in one call. Pass `paths` to stage
+those files or folders first, `all: true` to stage every change in the
+workspace (new and deleted files included), or neither to commit what is
+already staged. It is a workspace write, so it asks for approval by default and
+is never offered in Plan mode. Hooks run as they would for the user; when one
+fails, the staged changes are kept and the hook's output is the error. Paths
+that may hold secrets, such as `.env`, are refused before anything is staged,
+and the commit is refused if one is already staged. The result has the `sha`,
+`branch`, and the committed `files` (up to 100). Publishing stays a separate
+`gyro_github_push` call.
 
 ## Incomplete provider output
 

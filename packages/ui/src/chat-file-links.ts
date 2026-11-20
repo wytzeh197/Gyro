@@ -1,3 +1,7 @@
+import type { ReactNode } from "react";
+
+export type InlineLinkRenderer = (label: string, target: string) => ReactNode;
+
 export type ChatFileKind = "image" | "video" | "audio" | "pdf" | "file";
 export type ChatFileLink = {
   target: string;

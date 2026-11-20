@@ -1,3 +1,4 @@
+import { forwardRef, useImperativeHandle, type ForwardedRef } from "react";
 import { Zap } from "lucide-react";
 import { clippingBounds } from "./composer-popover-bounds";
 import {
@@ -44,7 +45,7 @@ function effortViewportRect(element: HTMLElement) {
 }
 
 /** Continuous pointer feedback, with native stepped keys and one saved choice on release. */
-export function ComposerEffortSelector({
+export const ComposerEffortSelector = forwardRef(function ComposerEffortSelector({
   id,
   labels,
   selectedIndex,
@@ -58,7 +59,7 @@ export function ComposerEffortSelector({
   placement: "up" | "down";
   onSelect: (index: number) => void;
   fastMode?: { enabled: boolean; onToggle: () => void };
-}) {
+}, surfaceRef: ForwardedRef<HTMLDivElement>) {
   const normalizedIndex = Math.max(
     0,
     Math.min(selectedIndex, labels.length - 1),
@@ -79,6 +80,7 @@ export function ComposerEffortSelector({
   const committedIndex = useRef(normalizedIndex);
   const pointer = useRef<{ id: number; offset: number }>();
   const panelRef = useRef<HTMLDivElement>(null);
+  useImperativeHandle(surfaceRef, () => panelRef.current!, []);
   useEffect(() => {
     setIndex(normalizedIndex);
     committedIndex.current = normalizedIndex;
@@ -164,6 +166,11 @@ export function ComposerEffortSelector({
     setDragProgress(undefined);
     setIndex(committedIndex.current);
   };
+  const lastFilledStop =
+    dragProgress === undefined
+      ? index
+      : Math.floor(dragProgress * (labels.length - 1));
+
   return (
     <div
       aria-label="Reasoning effort"
@@ -178,18 +185,16 @@ export function ComposerEffortSelector({
       role="dialog"
     >
       <div className="gyro-effort-slider-header">
-        <div className="gyro-effort-slider-heading">
-          <span
-            className="gyro-effort-value"
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-          >
-            {showMaxUsageNotice && isAtMaximum
-              ? "Consumes Usage Fastest"
-              : labels[index]}
-          </span>
-        </div>
+        <span
+          className="gyro-effort-value"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {showMaxUsageNotice && isAtMaximum
+            ? "Consumes Usage Fastest"
+            : labels[index]}
+        </span>
         {fastMode ? (
           <button
             aria-label="Fast mode"
@@ -220,7 +225,7 @@ export function ComposerEffortSelector({
         <div aria-hidden="true" className="gyro-effort-slider-stops">
           {labels.map((label, stop) => (
             <span
-              className={stop <= index ? "is-filled" : undefined}
+              className={stop <= lastFilledStop ? "is-filled" : undefined}
               key={label}
             />
           ))}
@@ -289,6 +294,12 @@ export function ComposerEffortSelector({
           }}
         />
       </div>
+      {labels.length > 1 ? (
+        <div aria-hidden="true" className="gyro-effort-slider-endpoints">
+          <span>{labels[0]}</span>
+          <span>{labels[labels.length - 1]}</span>
+        </div>
+      ) : null}
     </div>
   );
-}
+});

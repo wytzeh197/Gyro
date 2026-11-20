@@ -1,0 +1,49 @@
+name: "First run: where I got stuck"
+description: Tell us what stopped you from trying your first task in Gyro.
+title: "[First run]: "
+labels: ["lane:wytze"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A short description is enough. Leave out credentials, private code, and session transcripts. Follow [the private reporting instructions](https://github.com/wytzeh197/Gyro/blob/main/SECURITY.md#report-a-vulnerability) for security issues.
+  - type: dropdown
+    id: step
+    attributes:
+      label: Where did you get stuck?
+      options:
+        - Installing Gyro
+        - Opening Gyro or a project
+        - Connecting a provider
+        - Getting the first reply
+        - Making the first edit
+        - Resuming work
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: experience
+    attributes:
+      label: What happened and what did you expect?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Gyro version
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+  - type: dropdown
+    id: chip
+    attributes:
+      label: Mac chip
+      options:
+        - Apple Silicon
+        - Intel
+        - Unsure
+  - type: input
+    id: provider
+    attributes:
+      label: Provider you tried, if applicable

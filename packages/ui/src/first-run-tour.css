@@ -7,7 +7,9 @@
   font-family: inherit;
   inset: 0;
   overflow: hidden;
-  pointer-events: auto;
+  /* The blockers and card take pointer input; the cut-out passes it through
+     to the highlighted control. */
+  pointer-events: none;
   position: fixed;
   z-index: 12000;
 }
@@ -19,6 +21,16 @@
 
 .gyro-tour[data-has-anchor="false"] {
   background: var(--gyro-tour-dimmer);
+  pointer-events: auto;
+}
+
+.gyro-tour-blocker {
+  pointer-events: auto;
+  position: absolute;
+}
+
+.gyro-tour[data-has-anchor="false"] .gyro-tour-blocker {
+  display: none;
 }
 
 /* Keep the actual control visible through a neutral cut-out, without a glow. */
@@ -44,6 +56,7 @@
   outline: none;
   overflow: auto;
   padding: 18px;
+  pointer-events: auto;
   position: absolute;
   visibility: hidden;
   width: 340px;

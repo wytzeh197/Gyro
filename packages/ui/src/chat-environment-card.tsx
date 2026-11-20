@@ -1,5 +1,4 @@
 import {
-  Bot,
   Check,
   ChevronDown,
   ChevronUp,
@@ -31,6 +30,7 @@ import {
 import { reviewScopeFromSourceControl, type ReviewScope } from "./review-scope";
 import { sourceControlTotals } from "./source-control-stats";
 import { subagentsForStatus, type SubagentSurfaceState } from "./subagents";
+import { SubagentsEnvironment } from "./subagents-environment";
 import type {
   GitReviewActionId,
   SessionEvent,
@@ -85,6 +85,8 @@ export type ChatEnvironmentRemote = {
 export type ChatEnvironmentCardProps = {
   /** "panel" is the right-hand Environment panel; "stream" folds into a bar. */
   placement?: "panel" | "stream";
+  /** Panel only: the Council section, shown under the branch row. */
+  council?: ReactNode;
   /** A chat without a plan still shows its branch, processes and subagents. */
   plan?: SessionPlan;
   /** The chat is mid-turn. A step left "in progress" by a stopped turn is not. */
@@ -241,6 +243,7 @@ function SegmentBar({
 }
 
 export function ChatEnvironmentCard({
+  council,
   isRunning,
   modelLabel,
   onClose,
@@ -785,6 +788,7 @@ export function ChatEnvironmentCard({
             </button>
           </div>
         ) : null}
+        {council}
         <div id={bodyId} hidden={!isPanelExpanded}>
           {items.length ? (
             <div className="gyro-env-panel-plan">
@@ -806,46 +810,25 @@ export function ChatEnvironmentCard({
               ) : null}
             </p>
           ) : null}
-          {runningPanes.length || workingAgents.length ? (
+          {runningPanes.length ? (
             <div className="gyro-env-panel-rows">
-              {runningPanes.length ? (
-                <button
-                  className="gyro-env-panel-row"
-                  onClick={() => onOpenTab?.("terminal")}
-                  title="Open terminal"
-                  type="button"
-                >
-                  <Terminal aria-hidden="true" size={13} />
-                  <span className="gyro-env-card-grow gyro-env-card-ellipsis">
-                    {runningPanes.length === 1
-                      ? runningPanes[0]?.title
-                      : `${runningPanes.length} processes`}
-                  </span>
-                  <span
-                    aria-hidden="true"
-                    className="gyro-env-card-dot is-success"
-                  />
-                </button>
-              ) : null}
-              {workingAgents.length ? (
-                <button
-                  className="gyro-env-panel-row"
-                  onClick={() => onOpenTab?.("agents")}
-                  title="Show subagents"
-                  type="button"
-                >
-                  <Bot aria-hidden="true" size={13} />
-                  <span className="gyro-env-card-grow gyro-env-card-ellipsis">
-                    {workingAgents.length === 1
-                      ? workingAgents[0]?.name
-                      : `${workingAgents.length} subagents`}
-                  </span>
-                  <span
-                    aria-hidden="true"
-                    className="gyro-env-card-dot is-accent"
-                  />
-                </button>
-              ) : null}
+              <button
+                className="gyro-env-panel-row"
+                onClick={() => onOpenTab?.("terminal")}
+                title="Open terminal"
+                type="button"
+              >
+                <Terminal aria-hidden="true" size={13} />
+                <span className="gyro-env-card-grow gyro-env-card-ellipsis">
+                  {runningPanes.length === 1
+                    ? runningPanes[0]?.title
+                    : `${runningPanes.length} processes`}
+                </span>
+                <span
+                  aria-hidden="true"
+                  className="gyro-env-card-dot is-success"
+                />
+              </button>
             </div>
           ) : null}
           {primaryLabel && !isRunning && !remote ? (
@@ -867,6 +850,7 @@ export function ChatEnvironmentCard({
             </div>
           ) : null}
         </div>
+        {subagents ? <SubagentsEnvironment state={subagents} /> : null}
       </section>
     );
   }
@@ -1041,35 +1025,8 @@ export function ChatEnvironmentCard({
             )}
           </span>
         </button>
-        <button
-          className="gyro-env-card-cell"
-          onClick={() => onOpenTab?.("agents")}
-          title="Show subagents"
-          type="button"
-        >
-          <span className="gyro-env-card-cell-label">
-            <Bot aria-hidden="true" size={12} />
-            <span className="gyro-env-card-grow">Subagents</span>
-          </span>
-          <span className="gyro-env-card-cell-value gyro-env-card-dotted">
-            {workingAgents.length ? (
-              <>
-                <span
-                  aria-hidden="true"
-                  className="gyro-env-card-dot is-accent"
-                />
-                <span className="gyro-env-card-ellipsis">
-                  {workingAgents.length === 1
-                    ? workingAgents[0]?.name
-                    : `${workingAgents.length} working`}
-                </span>
-              </>
-            ) : (
-              <span className="is-dim">None working</span>
-            )}
-          </span>
-        </button>
       </div>
+      {subagents ? <SubagentsEnvironment state={subagents} /> : null}
       {mode === "waiting" && primaryLabel && !blockedItem ? (
         <div className="gyro-env-card-next">
           <span className="gyro-env-card-grow">{waitingTitle}</span>

@@ -1000,9 +1000,28 @@ pub(crate) fn trim_dangling_marker_prefix(text: &str) -> String {
 pub(crate) fn repair_glued_assistant_blocks(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len().saturating_add(8));
+    // A period followed by a capital is common in artifact paths. Keep
+    // Markdown destinations verbatim, including parenthesized filenames.
+    let mut destination_depth = 0;
+    let mut angle_destination = false;
     for index in 0..chars.len() {
-        out.push(chars[index]);
-        if !matches!(chars[index], '.' | '!' | '?') {
+        let ch = chars[index];
+        out.push(ch);
+        match ch {
+            '\n' => {
+                destination_depth = 0;
+                angle_destination = false;
+            }
+            '(' if destination_depth == 0 && index > 0 && chars[index - 1] == ']' => {
+                destination_depth = 1;
+                angle_destination = chars.get(index + 1) == Some(&'<');
+            }
+            '>' if angle_destination => angle_destination = false,
+            '(' if destination_depth > 0 && !angle_destination => destination_depth += 1,
+            ')' if destination_depth > 0 && !angle_destination => destination_depth -= 1,
+            _ => {}
+        }
+        if destination_depth > 0 || !matches!(ch, '.' | '!' | '?') {
             continue;
         }
         let mut look = index + 1;

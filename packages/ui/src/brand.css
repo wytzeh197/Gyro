@@ -1,7 +1,7 @@
 /* usegyro.io brand layer.
 
    The website and the app are one product, so the app wears the site's
-   typefaces, ink buttons, coral attention colour and beam light. Tokens live in
+   typefaces, ink buttons and coral attention colour. Tokens live in
    styles-foundation.css; this file holds the font faces and the few component
    rules that tokens cannot express. It loads last so it does not need
    !important to win. Keep it small: new surface styling belongs in that
@@ -23,18 +23,9 @@
   src: url("./assets/fonts/geist-mono-latin.woff2") format("woff2");
 }
 
-/* Beam light, a quiet echo of the site's hero blades. It stays faint so the
-   start screen reads as a workspace, not a landing page. Dark is a warm coral
-   glint with no violet; light runs cobalt to coral. */
 :root {
   --gyro-letter-spacing-heading: -0.022em;
   --gyro-letter-spacing-start: -0.04em;
-  --gyro-beam-1: rgb(255 150 120 / 8%);
-  --gyro-beam-2: rgb(246 124 96 / 20%);
-  --gyro-beam-3: rgb(244 116 86 / 42%);
-  --gyro-beam-4: rgb(255 150 120 / 48%);
-  --gyro-beam-drift: rgb(255 255 255 / 3%);
-  --gyro-beam-strength: 0.16;
   /* Ink is the site's main action colour. It is separate from
      --gyro-primary-bg, which follows the user's accent at runtime. */
   --gyro-ink-bg: #fafafa;
@@ -62,20 +53,7 @@ html {
   letter-spacing: var(--gyro-letter-spacing-heading);
 }
 
-/* Start screen ---------------------------------------------------------- */
-
-/* A faint beam behind the start screen only. Working surfaces stay plain. */
-
-/* The hero composer is the site's glass frame: a hairline, a soft tinted
-   drop, and a slightly larger radius than utility cards. */
-
-/* Ink send button ------------------------------------------------------- */
-
-/* Disabled send is one quiet neutral in every composer and theme. The start
-   screen's hero fill used to win here and showed a bright, clickable-looking
-   button in dark mode while the draft was empty. */
-
-/* The first-run tour leads with the same ink button as the composer. */
+/* The first-run tour uses the neutral ink action. */
 :root[data-theme] .gyro-tour-primary {
   background: var(--gyro-ink-bg);
   box-shadow: var(--gyro-lift-shadow);

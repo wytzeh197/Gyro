@@ -89,9 +89,15 @@ export class RemoteHostClient implements HostClient {
   private imageUrls = new Set<string>();
   readonly hostId: string;
   private ports: NativePorts;
-  constructor(hostId: string, ports: NativePorts) {
+  private readonly catalog: boolean;
+  constructor(
+    hostId: string,
+    ports: NativePorts,
+    options?: { catalog: boolean },
+  ) {
     this.hostId = hostId;
     this.ports = ports;
+    this.catalog = options?.catalog ?? false;
     this.target = { kind: "remote", hostId };
   }
   capabilities() {
@@ -108,12 +114,22 @@ export class RemoteHostClient implements HostClient {
       operation,
       lease: session ? this.leases.get(session) : undefined,
     };
+    const probe =
+      this.catalog && (operation.op === "hello" || operation.op === "projects");
     const send = () => {
       if (this.disposed) throw new Error("This host connection was closed");
-      return scheduled(this.hostId, () => {
-        if (this.disposed) throw new Error("This host connection was closed");
-        return this.ports.invoke<T>("remote_host_request", { hostId: this.hostId, request });
-      }, interactiveOperation(operation));
+      return scheduled(
+        this.hostId,
+        () => {
+          if (this.disposed) throw new Error("This host connection was closed");
+          return this.ports.invoke<T>("remote_host_request", {
+            hostId: this.hostId,
+            request,
+            ...(this.catalog ? { catalog: true } : {}),
+          });
+        },
+        probe || interactiveOperation(operation),
+      );
     };
     let result: T;
     if (

@@ -37,10 +37,17 @@ export function PlainDiffView({
   );
 
   if (!hunks.length) {
+    const hasPatch = Boolean(diff.trim());
     return (
       <div className="gyro-plain-diff is-empty" role="status">
-        <strong>No text changes in this comparison.</strong>
-        <span>The file is present on both sides with identical contents.</span>
+        {lead ? <span className="gyro-plain-diff-summary">{lead}</span> : null}
+        <strong>
+          {hasPatch
+            ? "No line-by-line preview for this change"
+            : "No text changes in this comparison"}
+        </strong>
+        {notice ? <span>{notice}</span> : null}
+        {actions}
         <PlainDiffActions onOpenFile={onOpenFile} onRetry={onRetry} />
       </div>
     );

@@ -9,12 +9,12 @@ separate controls. A worktree provides a separate checkout, not process isolatio
 
 | Execution path | What Gyro controls | Limit |
 | --- | --- | --- |
-| Codex app-server | `codex_app_server_policy` requests read-only or workspace-write with network access disabled; explicit Full access can select danger-full-access. | The provider enforces its native sandbox. This is not a Gyro-wide boundary for other execution paths. |
+| Codex app-server | `codex_app_server_policy` requests read-only or workspace-write with network access disabled; explicit Full access can select danger-full-access. | Bounded desktop command escalation is declined. In Ask mode Codex uses the Gyro command broker. The provider enforces its native sandbox. |
 | Codex exec fallback | `codex_chat_args` selects read-only, including resumed runs; explicit Full access can bypass approvals and sandboxing. | Provider-native tools and Gyro capabilities use different execution paths. |
-| Claude CLI | `claude_chat_args` configures Plan/default permissions and Gyro approval callbacks; explicit Full access can skip permissions. Gyro tools load up front (`ENABLE_TOOL_SEARCH=false`), and native tools that publish to claude.ai, schedule work past the run, or leave the bound workspace are disallowed (`CLAUDE_DISALLOWED_NATIVE_TOOLS`). | This launch configuration does not explicitly enable Claude's native sandbox. Permissions alone do not establish filesystem or network confinement. |
+| Claude CLI | Bounded desktop Claude uses restricted native read tools and the Gyro tool broker for commands and edits. Explicit chat Full access can enable unrestricted native tools. | The installed Claude CLI must support restricted mode. Standalone CLI runners use their own provider configuration. |
 | ACP providers | `run_kimi_acp_chat` passes workspace, mode, per-provider credential policy, and approval handling; `KimiAcpConnection::start` launches the provider process. | ACP permission requests depend on provider behavior. Gyro does not add an OS sandbox around this shared ACP launcher. |
 | Direct API / Ollama | Model-requested Gyro tools cross the capability broker, including policy, approval, ownership checks, and recorded results. API keys are used by the host-side runner. | A tool's own execution path determines its confinement; the broker is not an OS sandbox. |
-| Model terminal / background workspace task | The broker binds the PTY to its authoritative workspace, filters credentials, and selects the macOS workspace filesystem policy unless explicit Full access applies. Restart retains confinement, rechecks Full access, and gets fresh scratch space. | IP networking remains allowed. The selected policy is reported in pane results; sandbox setup failure never retries unrestricted. |
+| Model terminal / background workspace task | The broker binds the PTY to its authoritative workspace, filters credentials, and selects the macOS workspace filesystem policy unless explicit Full access applies. Restart retains confinement, rechecks Full access, and gets fresh scratch space. | Bounded commands block outbound access; approved foreground commands may use a command-scoped public HTTPS proxy. Sandbox setup failure is returned to the caller. |
 | Foreground model workspace task/test | The broker approves execution and revalidates the owning workspace. `run_model_task_output_with_cancellation` applies the same credential filtering and macOS filesystem policy as model terminals. | Explicit Full access can bypass the filesystem policy. Cancellation and output bounds still apply. |
 | Human terminal / governed provider CLI pane | Human terminal launch behavior remains unchanged. Governed CLI panes receive Gyro's provider approval bridge. | These panes retain their environment; the model-command credential policy is not inferred from a pane name or renderer input. |
 
@@ -74,7 +74,7 @@ their existing behavior. Credential filtering applies even with Full access.
 
 The [profile](../crates/gyro-core/src/workspace_sandbox.sbpl) denies operations by
 default and grants the process operations needed for child commands, PTYs,
-selected system services, and IP networking. The wrapper grants writes within
+selected system services, and the selected network policy. The wrapper grants writes within
 the bound workspace and a unique temporary directory, with exceptions protecting
 Git/Gyro/provider control metadata, known credential locations, home shell
 startup files, and Gyro private application data. Workspace and protected-path
@@ -92,11 +92,12 @@ that a descendant which detached into a different process group has exited. Its
 filesystem restrictions remain inherited. Abrupt host termination can leave
 scratch directories behind; crash recovery cleanup is not implemented here.
 
-IP network access is intentionally allowed, including localhost services.
-There is no destination allowlist, network approval enforcement, or protection
-against sending readable project data out. Unix-socket access is limited to the
-system DNS resolver; general Unix connections and Apple Events have no grant.
-This may make Docker, SSH agents, and some desktop helpers unavailable. The profile does not grant the Keychain SecurityServer service, but
+Bounded desktop commands can bind loopback for local previews. Outbound
+connections are blocked, with an exception for the invocation's own proxy
+socket when a user approves exact public HTTPS hosts. The proxy resolves each
+target before connecting and rejects private destinations. The filesystem
+profile still applies to the command and its subprocesses.
+The profile does not grant the Keychain SecurityServer service, but
 synthetic credential-file checks are not a complete Keychain security assessment.
 Broad reads outside known protected locations remain available. Arbitrary secret
 files, custom provider-auth directories, secrets in arguments, and secrets with

@@ -1,6 +1,7 @@
 #![deny(clippy::wildcard_imports)]
 pub(crate) mod branches;
 pub(crate) mod commands;
+pub(crate) mod commit_capability;
 mod detail_admission;
 pub(crate) mod github;
 pub(crate) mod history_capability;

@@ -1,6 +1,8 @@
 use crate::provider_runtime::{
     accounting,
-    codex_client::{codex_app_server_result, receive_codex_turn_response, CodexClient},
+    codex_client::{
+        codex_app_server_result, receive_codex_turn_response, CodexCapacityRetry, CodexClient,
+    },
     codex_home, codex_turn_completion, file_patch_counts,
     host::{
         self as host_services, emit_provider_activity_event, emit_provider_context_usage,
@@ -360,9 +362,16 @@ pub fn run_openai_codex_app_server_chat(
                 "features.image_generation=false"
             },
         ]);
+    if host.use_desktop_workspace_permissions() && !request.full_access {
+        process.args(["-c", "features.hooks=false"]);
+        if request.require_command_approval {
+            process.args(["-c", "features.shell_tool=false"]);
+        }
+    }
     timing::mark(TimingStage::ProcessStart);
-    let mut child = CodexClient::spawn(process, host.codex_client_options())
-        .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
+    let (mut child, capacity_retries) =
+        CodexClient::spawn_chat(process, host.codex_client_options())
+            .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
     timing::mark(TimingStage::ProcessSpawned);
     let cancellation = host.cancellation(&request.session_id).unwrap_or_default();
     let heartbeat_stop = Arc::new(AtomicBool::new(false));
@@ -413,6 +422,15 @@ pub fn run_openai_codex_app_server_chat(
             request.full_access,
             &cwd,
         );
+        let approval_policy = if host.use_desktop_workspace_permissions() {
+            if request.full_access {
+                "never"
+            } else {
+                "on-request"
+            }
+        } else {
+            approval_policy
+        };
         let thread_request = if let Some(thread_id) = resume_id {
             serde_json::json!({
                 "id": 2,
@@ -526,6 +544,7 @@ pub fn run_openai_codex_app_server_chat(
         let mut pending_usage = None;
         let mut provider_turn_id = None;
         let mut turn_started = false;
+        let mut capacity_wait = None;
         let mut protocol_messages = 0usize;
         let mut protocol_bytes = 0usize;
         loop {
@@ -543,6 +562,16 @@ pub fn run_openai_codex_app_server_chat(
             let message = match messages.recv_timeout(remaining.min(Duration::from_millis(250))) {
                 Ok(message) => message.map_err(anyhow::Error::msg)?,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
+                    for (turn_id, retry) in capacity_retries.try_iter() {
+                        if provider_turn_id.as_deref() == Some(turn_id.as_str())
+                            && retry
+                                .deadline
+                                .is_none_or(|deadline| deadline > Instant::now())
+                        {
+                            capacity_wait = Some(retry);
+                            host.codex_capacity_retry(request, retry, true);
+                        }
+                    }
                     flush_codex_app_server_commentary(
                         host,
                         request,
@@ -594,6 +623,30 @@ pub fn run_openai_codex_app_server_chat(
             }
             let Some(method) = method else { continue };
             let params = message.get("params").cloned().unwrap_or_default();
+            if generated_image_event_matches(&params, &thread_id, provider_turn_id.as_deref()) {
+                if method == "error" && codex_turn_completion::reports_capacity_retry(&params) {
+                    if capacity_wait.is_none() {
+                        // The protocol identifies the cause but can omit the retry deadline.
+                        let retry = CodexCapacityRetry {
+                            deadline: None,
+                            attempt: 0,
+                            max_attempts: 0,
+                        };
+                        capacity_wait = Some(retry);
+                        host.codex_capacity_retry(request, retry, true);
+                    }
+                } else if matches!(
+                    method,
+                    "item/started"
+                        | "item/completed"
+                        | "item/agentMessage/delta"
+                        | "item/reasoning/summaryTextDelta"
+                ) {
+                    if let Some(retry) = capacity_wait.take() {
+                        host.codex_capacity_retry(request, retry, false);
+                    }
+                }
+            }
             match method {
                 "thread/tokenUsage/updated" => {
                     if !turn_started {
@@ -1583,7 +1636,11 @@ pub fn handle_codex_app_server_request(
         .ok_or_else(|| anyhow::anyhow!("Codex approval request did not include an id"))?;
     let (decision, response) = match method {
         "item/commandExecution/requestApproval" => {
-            let decision = if request.require_command_approval {
+            let decision = if host.use_desktop_workspace_permissions() && !request.full_access {
+                // Native command approvals can take the command out of the sandbox.
+                // Scoped HTTPS access is a separate Workspace command invocation.
+                ProviderApprovalDecision::Reject
+            } else if request.require_command_approval {
                 host.request_native_approval(request, "command", params.clone())?
             } else {
                 ProviderApprovalDecision::Approve
@@ -1598,7 +1655,9 @@ pub fn handle_codex_app_server_request(
                     details["patch"] = patch.clone();
                 }
             }
-            let decision = if request.require_file_edit_approval {
+            let decision = if request.require_file_edit_approval
+                || (host.use_desktop_workspace_permissions() && !request.full_access)
+            {
                 host.request_native_approval(request, "file-change", details)?
             } else {
                 ProviderApprovalDecision::Approve
@@ -1607,7 +1666,11 @@ pub fn handle_codex_app_server_request(
             (decision, serde_json::json!({ "decision": response }))
         }
         "item/permissions/requestApproval" => {
-            let decision = host.request_native_approval(request, "permissions", params.clone())?;
+            let decision = if host.use_desktop_workspace_permissions() && !request.full_access {
+                ProviderApprovalDecision::Reject
+            } else {
+                host.request_native_approval(request, "permissions", params.clone())?
+            };
             let response = if decision != ProviderApprovalDecision::Reject {
                 serde_json::json!({
                     "permissions": params.get("permissions").cloned().unwrap_or_default(),

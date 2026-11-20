@@ -1,3 +1,4 @@
+import { SurfacePresence } from "./surface-presence";
 import { Folder, FolderPlus } from "./workspace-folder-icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -151,8 +152,8 @@ export function SidebarProjectCard({
       {expandedContent ? (
         <div className="gyro-sidebar-project-children">{expandedContent}</div>
       ) : null}
-      {position &&
-        createPortal(
+      <SurfacePresence portal="body">
+        {position ? (
           <div
             ref={card}
             role="dialog"
@@ -210,9 +211,9 @@ export function SidebarProjectCard({
               <Settings size={18} />
               Edit project
             </button>
-          </div>,
-          document.body,
-        )}
+          </div>
+        ) : null}
+      </SurfacePresence>
       {editing && settings && (
         <ProjectEditDialog
           path={path}

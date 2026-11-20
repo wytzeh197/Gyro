@@ -38,7 +38,7 @@ export function CloudSettings({
           title="Cloud is not enabled in this build"
           description="Your local workspace and your own providers remain available." />
         <SettingsGroup id="cloud-release-availability" label="Chat backup">
-          <SettingsRow label="Automatically back up chats" value="Unavailable">
+          <SettingsRow label="Automatically back up chats" detail="Available once Gyro Cloud is enabled in this build." value="Unavailable">
             <SettingsSwitch label="Automatically back up chats" checked={false} disabled onChange={() => {}} />
           </SettingsRow>
         </SettingsGroup>

@@ -280,7 +280,7 @@ console.log("environment actions checks passed");
   assert.equal(running.status, "Step 3 of 4");
   assert.equal(
     environmentFocus({ workingSubagents: 2, sourceControl: dirty }).status,
-    "2 agents working",
+    "2 agents active",
   );
   // A step left in progress by a stopped turn is not work in flight.
   assert.equal(

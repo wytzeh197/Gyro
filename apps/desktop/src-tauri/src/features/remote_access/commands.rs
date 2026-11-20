@@ -4,7 +4,7 @@ use gyro_remote::store::{Invitation, Settings, SidebarProject};
 use gyro_remote::{store::Peer, Operation, RemoteEvent, Request};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tauri::{Emitter, Listener, Manager};
 use uuid::Uuid;
 
@@ -336,6 +336,29 @@ fn approve_reciprocal_host(runtime: &Runtime, id: &str) -> Result<(), String> {
 }
 #[tauri::command]
 pub(crate) async fn remote_host_request(
+    app: tauri::AppHandle,
+    host_id: String,
+    request: Request,
+    catalog: Option<bool>,
+) -> Result<Value, String> {
+    let catalog_read = catalog.unwrap_or(false)
+        && matches!(
+            &request.operation,
+            Operation::Projects | Operation::Sessions { .. }
+        );
+    let response = request_from_host(app, host_id, request);
+    if catalog_read {
+        // Discovery is periodic and read-only. Bound the transport wait so a
+        // sleeping Mac doesn't keep its catalog visible for an action timeout.
+        tokio::time::timeout(Duration::from_secs(5), response)
+            .await
+            .map_err(|_| "Host unavailable or catalog request timed out".to_string())?
+    } else {
+        response.await
+    }
+}
+
+pub(super) async fn request_from_host(
     app: tauri::AppHandle,
     host_id: String,
     request: Request,

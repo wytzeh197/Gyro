@@ -1,13 +1,15 @@
+import { forwardRef, useImperativeHandle, type ForwardedRef } from "react";
 import { useLayoutEffect, useRef, type HTMLAttributes } from "react";
 import { clippingBounds, popoverViewportRect } from "./composer-popover-bounds";
 import { completionMenuGeometry } from "./composer-completion-geometry";
 
 /** Keep slash commands and context completions inside their owning chat pane. */
-export function ComposerCompletionMenu({
+export const ComposerCompletionMenu = forwardRef(function ComposerCompletionMenu({
   children,
   ...props
-}: HTMLAttributes<HTMLDivElement>) {
+}: HTMLAttributes<HTMLDivElement>, surfaceRef: ForwardedRef<HTMLDivElement>) {
   const panelRef = useRef<HTMLDivElement>(null);
+  useImperativeHandle(surfaceRef, () => panelRef.current!, []);
   useLayoutEffect(() => {
     const panel = panelRef.current;
     if (!panel) return;
@@ -106,4 +108,4 @@ export function ComposerCompletionMenu({
       {children}
     </div>
   );
-}
+});

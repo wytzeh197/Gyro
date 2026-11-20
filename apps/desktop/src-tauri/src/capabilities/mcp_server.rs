@@ -204,7 +204,7 @@ pub(crate) fn desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Va
     if capability_uses_workspace_root(id) {
         schema["properties"]["rootId"] = serde_json::json!({
             "type": "string",
-            "description": "Workspace root ID; required for multiple roots."
+            "description": "Root ID; only for multi-root workspaces."
         });
     }
     schema
@@ -219,6 +219,7 @@ pub(crate) fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_js
         .or_else(|| workspace_path_capability::schema(id))
         .or_else(|| workspace_open_capability::schema(id))
         .or_else(|| git_history_capability::schema(id))
+        .or_else(|| crate::git::commit_capability::schema(id))
         .or_else(|| git_branch_service::schema(id))
         .or_else(|| web_fetch_capability::schema(id))
         .or_else(|| browser_viewport::schema(id))
@@ -364,7 +365,7 @@ pub(crate) fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_js
         | CapabilityId::IdeReveal => vec!["path"],
         CapabilityId::WorkspaceRunTask | CapabilityId::WorkspaceRunTest => vec!["taskId"],
         CapabilityId::IdeOpenPanel => vec!["panel"],
-        CapabilityId::TerminalOpen => vec!["program"],
+        CapabilityId::TerminalOpen | CapabilityId::WorkspaceRunCommand => vec!["program"],
         CapabilityId::TerminalWait => vec!["resourceId"],
         CapabilityId::BrowserOpen | CapabilityId::BrowserNavigate => vec!["url"],
         CapabilityId::BrowserSelectTarget => vec!["targetId"],

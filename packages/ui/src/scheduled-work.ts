@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Automation } from "./types.ts";
 
 export function automationScheduleLabel(
@@ -34,4 +35,45 @@ export function automationScheduleLabel(
     "daily-at": "Daily",
     "weekly-at": "Weekly",
   }[automation.schedule];
+}
+
+export type RenderScheduleIndex = (options: {
+  automations: Automation[];
+  onCreatePrompt: () => void;
+  onOpenPrompt: (id: string) => void;
+  busy: boolean;
+}) => ReactNode;
+
+export function automationDateLabel(value: string, timezone?: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not scheduled";
+  const options: Intl.DateTimeFormatOptions = {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  };
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      ...options,
+      timeZone: timezone,
+    }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat("en-US", options).format(date);
+  }
+}
+
+export function isRecordedAutomationRun(
+  run: Pick<
+    Automation["runHistory"][number],
+    "summary" | "finishedAt" | "sessionId"
+  > & { status: string },
+) {
+  return !(
+    run.status === "queued" &&
+    run.summary === "Automation created locally" &&
+    !run.finishedAt &&
+    !run.sessionId
+  );
 }

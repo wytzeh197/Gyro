@@ -27,7 +27,9 @@ export async function refreshOpenEditorBuffers(options: {
         options.conflict(path, "File is missing from disk. Your editor text has been retained.");
         continue;
       }
-      if (!stat.contentHash || stat.contentHash === before.contentHash) continue;
+      if (!stat.contentHash) continue;
+      if (stat.contentHash === before.contentHash &&
+          (before.status !== "error" || before.content !== before.savedContent)) continue;
       if (before.content !== before.savedContent) {
         options.conflict(path, "File changed on disk; reload or preserve your buffer before saving.");
         continue;

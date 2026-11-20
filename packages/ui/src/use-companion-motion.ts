@@ -6,6 +6,7 @@ import {
   useState,
   type MutableRefObject,
 } from "react";
+import { surfaceExitRate } from "./surface-motion";
 
 const COMPANION_MOTION_MS = 160;
 
@@ -94,7 +95,10 @@ export function useCompanionMotion(
       parseFloat(computed.getPropertyValue("--gyro-motion-factor")) || 1;
     const easing =
       computed.getPropertyValue("--gyro-premium-ease").trim() || "ease-out";
-    const duration = COMPANION_MOTION_MS * factor;
+    const opacity = Number(start.opacity);
+    const fraction = open ? (initial || !changed ? 1 : 1 - opacity) : opacity;
+    const duration =
+      COMPANION_MOTION_MS * factor * fraction / (open ? 1 : surfaceExitRate(dock));
     const begin = () => {
       frame = undefined;
       if (completed) return;

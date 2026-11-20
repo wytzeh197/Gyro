@@ -110,11 +110,17 @@
   color: var(--gyro-muted);
 }
 .gyro-provider-allowance-tooltip {
+  --gyro-allowance-tooltip-duration: calc(var(--gyro-premium-motion-fast) * var(--gyro-exit-motion-factor));
   position: absolute;
   z-index: 30;
   bottom: calc(100% + 10px);
   left: 0;
+  /* display (not visibility) while closed: a hidden box still widens the
+     card's scroll area. allow-discrete keeps the fade. */
   display: none;
+  opacity: 0;
+  transition: opacity var(--gyro-allowance-tooltip-duration) var(--gyro-premium-ease),
+    display var(--gyro-allowance-tooltip-duration) allow-discrete;
   box-sizing: border-box;
   width: 200px;
   max-width: calc(100vw - 24px);
@@ -140,7 +146,12 @@
 }
 .gyro-provider-allowance:is(:hover, :focus-visible)
   .gyro-provider-allowance-tooltip {
+  --gyro-allowance-tooltip-duration: var(--gyro-premium-motion-fast);
   display: block;
+  opacity: 1;
+  @starting-style {
+    opacity: 0;
+  }
 }
 @media (max-width: 720px) {
   .gyro-connected-provider-strip {

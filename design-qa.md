@@ -1,3 +1,27 @@
+# App-wide design detail pass
+
+**final result: passed (2 pre-existing workbench-check failures, see Checks)**
+
+- Settings nav icons: Models & accounts uses Boxes and Data & privacy uses ShieldCheck. Before, they shared Gauge and the generic Settings cog with other entries (`surfaces.tsx`).
+- Notifications: the row label reads "Send macOS notifications" instead of repeating the group title (`desktop-notification-settings.tsx`).
+- CLI Profiles: row-header cells drop the stray divider that showed as a broken line under the table (`quiet-controls.css`).
+- Usage: a card without a usage wheel no longer reserves 190px, and a lone note card spans the grid. The tabpanel uses the 40px section rhythm (`styles.css`, `usage-settings.css`).
+- Appearance: the header uses the shared 40px bottom padding instead of a 12px one-off, and the theme cards align left with the content column instead of being pushed right (`settings-design.css`, `settings-layout.css`).
+- Tools: the Language services and Local contributions descriptions moved into their group headers, so they sit above the divider like every other group. "Install from manifest" is now the group's header action. The bundled Gyro Core contribution no longer shows a dead Disable toggle. Services and contributions cards use solid borders instead of dashed ones (`surfaces.tsx`, `settings-design.css`).
+- Workspace and Tools editor: same 40px heading-to-group and group-to-group rhythm as `.gyro-settings-section-body`. Before, it was 20px between groups, plus a one-off 20px margin under the scope card (`settings-layout.css`, `settings-design.css`).
+- Gyro Cloud: the disabled "Automatically back up chats" row explains when it becomes available (`cloud-settings.tsx`).
+- Import projects: archived rows use the shared row title and detail type (`settings-design.css`).
+- Menus reviewed and left as is: the model rail, effort slider, approval mode, branch, workspace mode, add context and chat options. The model description tooltip opens only on keyboard focus (`gyro-tooltip.ts`). It appeared in captures only because they open menus by script.
+- Checks: `tsc --noEmit` (desktop) and the Vite build pass. `check-appearance-persistence.mjs`, `check-cloud-settings-render.mjs` and `check-settings-redesign.mjs` pass. `check-workbench-ui.mjs` reports two failures (model rail; completion summaries/Goal-Plan). Both come from earlier uncommitted work, for example the `reviewFiles` → menu refactor in `surfaces.tsx`, and not from this pass.
+- Tokens only. Removed two raw px values. No new components.
+- Evidence: `artifacts/screenshots/gyro-brand-pass/detail-pass-*.png`.
+- Models & accounts: the header "Add provider" button is now the only entry. The "Add a provider" disclosure, including restoring removed providers, renders only when that button, a row's API-key action or first-run setup reveals it (`surfaces.tsx`).
+- Provider allowance tooltip: it closes with `display: none` plus `allow-discrete` instead of `visibility: hidden`. A hidden box widened the CLI accounts card by 95px and made narrow pages scroll sideways (`provider-allowance.css`). The hover fade stays.
+- Default model: setting it in both the Providers table and Per-provider model defaults is intentional. Wytze chose to keep both.
+- Not covered: the real Tauri window, compact density, the slash menu (it did not open in the capture scene), and dialogs.
+
+---
+
 # Account, Cloud and Plan & billing design upgrade
 
 **final result: passed**
@@ -330,3 +354,47 @@ The isolated production build and current component/type checks pass. Desktop Ty
 **final result: passed** (scoped browser/component review; native acceptance unverified)
 
 Implemented the approved merged sidebar concept with the hide control next to the Sessions/Workspace selector. Compact actions, project tree and pin persistence use existing production behavior. After the user correction, Project memory remains under Edit project and has no sidebar row. Detailed visual comparison, state coverage, backend paths, screenshots, checks and limits are recorded in [the sidebar review](docs/design/sidebar-implementation-review-2026-11-11.md). Full and focused light/dark captures are in `docs/screenshots/2026-11-11-sidebar-implementation/`.
+
+## Composer second opinion · 2026-11-19
+
+The existing slash menu opens the connected reviewer picker above the composer. The selected provider mark and model name sit immediately after the command in dark and light themes. The primary model stays visible in the toolbar.
+
+- [Reviewer picker](docs/screenshots/2026-11-19-composer-second-opinion/choose-reviewer.jpg)
+- [Selected reviewer in dark mode](docs/screenshots/2026-11-19-composer-second-opinion/selected-reviewer.jpg)
+- [Selected reviewer in light mode](docs/screenshots/2026-11-19-composer-second-opinion/selected-reviewer-light.jpg)
+
+These captures use the desktop composer in a browser fixture. Keyboard selection, reopening the pill, Escape, restoring a draft and sending the prompt with the exact reviewer ID passed the composer browser checks. Removing the reviewer preserved the typed prompt. A native storage test captured one builder mutation and queued the same review only once across retries. The installed Claude CLI sent a tool-free request to a loopback fixture. Live authenticated provider execution remains unverified.
+
+### Reviewer search and provider filters
+
+The desktop browser fixture exercised three connected reviewer providers. The provider buttons and search field stayed visible while the results scrolled. Switching providers preserved the search, clearing a search returned focus to the field, and arrow keys and Enter selected the expected model. The picker fit a 420 px viewport.
+
+[All providers in dark mode](docs/screenshots/2026-11-19-composer-second-opinion/reviewer-search-dark.png) · [Anthropic filtered to Opus in light mode](docs/screenshots/2026-11-19-composer-second-opinion/reviewer-search-light.png)
+
+### Second opinion in a completed turn
+
+The desktop browser fixture showed the handoff and active reviewer in the work timeline. On completion it showed the builder’s answer with the Anthropic logo and **Review Second Opinion**. Pressing Enter opened the linked review in the right panel with another review first in history. Reopening the button preserved the correct result. The same fixture exercised incomplete, cancelled, failed and deleted reviews.
+
+[Working process](docs/screenshots/2026-11-19-composer-second-opinion/second-opinion-working.png) · [Finished turn](docs/screenshots/2026-11-19-composer-second-opinion/second-opinion-finished.png) · [Right panel](docs/screenshots/2026-11-19-composer-second-opinion/second-opinion-right-panel.png)
+
+The native storage test checked the queued and running states and preserved the reviewer’s start in the cancelled history. Live provider execution remains unverified. The broader chat snapshot comparison reported color and spacing differences against the saved baseline.
+
+### Reading a second opinion and drafting fixes
+
+Opening a review from its chat turn now shows the reviewer’s text as a document. The heading pairs the recorded provider’s logo with the review model’s name on the right. File references and Markdown links can open the cited line. Earlier revisions use the captured diff.
+
+The desktop browser fixture exercises the document, the source file and line passed to the editor, and the editable prompt. **Fix in chat** preserves an existing draft and focuses its composer. Repeating the action leaves one copy. The fixture records a send only when the user presses Enter.
+
+[Earlier right panel](docs/screenshots/2026-11-19-composer-second-opinion/second-opinion-right-panel.png) · [Review document](docs/screenshots/2026-11-19-composer-second-opinion/second-opinion-document-dark.png) · [Editable fix prompt](docs/screenshots/2026-11-19-composer-second-opinion/second-opinion-fix-draft.png)
+
+## Softer chat palette · 2026-11-19
+
+**final result: passed** (desktop browser visual review)
+
+The desktop chat uses warm off-white and charcoal surfaces. The enabled composer Send button has a white arrow on muted blue-gray (`#778a97` in light mode, `#606f7c` in dark mode). An empty composer shows a gray Send button. During a response, Stop uses its neutral fill. File types, provider marks and diff lines keep their identifying colors.
+
+The browser captures show the production chat components with fixture data. The centered chat column, sidebar width and 28 px Send control follow the existing desktop layout. The comparison pairs each approved mockup with the corresponding rendered state.
+
+[Light new chat](docs/screenshots/2026-11-19-neutral-chat/light-new.jpg) · [Light completed thread](docs/screenshots/2026-11-19-neutral-chat/light-thread-empty.jpg) · [Dark Review companion](docs/screenshots/2026-11-19-neutral-chat/dark-review.jpg) · [Send detail](docs/screenshots/2026-11-19-neutral-chat/send-detail.png) · [Mockup comparison](docs/screenshots/2026-11-19-neutral-chat/comparison.jpg)
+
+The desktop frontend build, TypeScript, appearance persistence and all 48 standard chat render states passed. Four additional checks covered Send hover and keyboard focus in both themes. The checkout had three workbench smoke failures and seven token-audit failures before the palette change. Both audits reported the same issues afterward. Native macOS rendering was outside this browser review.

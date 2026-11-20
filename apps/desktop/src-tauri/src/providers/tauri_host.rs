@@ -141,6 +141,10 @@ impl RunnerHost for TauriRunnerHost {
     fn reasoning_efforts(&self, provider_id: &str, model_id: Option<&str>) -> Option<Vec<String>> {
         crate::model_catalog::catalog_reasoning_efforts(provider_id, model_id)
     }
+    fn use_desktop_workspace_permissions(&self) -> bool {
+        true
+    }
+
     fn claude_capability_tools(&self, mode: super::chat_types::ChatMode) -> String {
         super::cli_args::claude_allowed_capability_tools(
             super::binding::advertised_mcp_capability_tools(
@@ -248,6 +252,15 @@ impl RunnerHost for TauriRunnerHost {
                 .store(false, std::sync::atomic::Ordering::Release);
         }
     }
+    fn codex_capacity_retry(
+        &self,
+        request: &ProviderChatRequest,
+        retry: gyro_core::provider_runtime::codex_client::CodexCapacityRetry,
+        waiting: bool,
+    ) {
+        super::retry_recovery::emit_codex_capacity_retry(&self.app, request, retry, waiting);
+    }
+
     fn start_heartbeat(
         &self,
         request: ProviderChatRequest,

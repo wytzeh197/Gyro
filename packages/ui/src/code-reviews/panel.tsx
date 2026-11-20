@@ -6,7 +6,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import type { GyroConfig } from "../types";
 import type { ReviewScope } from "../review-scope";
+import { ReviewDocument, type ReviewMarkdownRenderer } from "./document";
 import { CodeReviewResult } from "./result";
 import {
   reviewIsActive,
@@ -22,17 +24,27 @@ import "./review.css";
 
 /** Existing Review destination: local Changes / Second opinion views. */
 export function CodeReviewPanel({
+  config,
   runtime,
   scope,
   changes,
   onComposeFix,
+  onDraftReview,
+  onOpenFile,
+  renderMarkdown = (text) => <p>{text}</p>,
   entry,
+  changesEntry,
 }: {
+  config?: GyroConfig;
   entry?: CodeReviewEntryRequest;
+  changesEntry?: number;
   runtime?: CodeReviewRuntime;
   scope: ReviewScope;
   changes: ReactNode;
   onComposeFix?: (message: string) => boolean;
+  onDraftReview?: (message: string, button: HTMLButtonElement) => void;
+  onOpenFile?: (path: string, line: number) => void;
+  renderMarkdown?: ReviewMarkdownRenderer;
 }) {
   const [tab, setTab] = useState<"changes" | "opinion">("changes");
   const [setup, setSetup] = useState<ReviewerSetup>();
@@ -87,6 +99,9 @@ export function CodeReviewPanel({
     };
   }, [runtime?.key]);
   useEffect(() => {
+    if (changesEntry !== undefined) setTab("changes");
+  }, [changesEntry]);
+  useEffect(() => {
     if (!entry) return;
     operationGeneration.current++;
     operationId.current = crypto.randomUUID();
@@ -99,13 +114,14 @@ export function CodeReviewPanel({
     setSnapshot(undefined);
     setInput(undefined);
     setPrevious(undefined);
-    setSelected(undefined);
+    setSelected(entry.reviewId);
     setDetail(undefined);
     setBusy(false);
     setError("");
   }, [entry?.token]);
+  const documentId = entry?.reviewId;
   const load = useCallback(async () => {
-    if (!runtime) return;
+    if (!runtime || documentId) return;
     const sequence = ++generation.current;
     setError("");
     try {
@@ -120,7 +136,7 @@ export function CodeReviewPanel({
       if (sequence === generation.current && alive.current)
         setError(String(error));
     }
-  }, [runtime, rootId]);
+  }, [runtime, rootId, documentId]);
   useEffect(() => {
     if (tab === "opinion") void load();
   }, [load, tab]);
@@ -131,20 +147,24 @@ export function CodeReviewPanel({
       const next = await runtime.request<CodeReviewDetail>("get", {
         reviewId: selectedId,
       });
-      if (sequence === detailGeneration.current && alive.current)
+      if (sequence === detailGeneration.current && alive.current) {
         setDetail(next);
+        if (documentId) setError("");
+      }
     } catch (error) {
-      if (sequence === detailGeneration.current && alive.current)
+      if (sequence === detailGeneration.current && alive.current) {
+        setDetail(undefined);
         setError(String(error));
+      }
     }
-  }, [runtime, selectedId]);
+  }, [runtime, selectedId, documentId]);
   useEffect(() => {
     setDetail(undefined);
     void loadDetail();
     return () => {
       detailGeneration.current++;
     };
-  }, [loadDetail]);
+  }, [loadDetail, entry?.token]);
   useEffect(
     () =>
       runtime?.subscribe(() => {
@@ -285,6 +305,18 @@ export function CodeReviewPanel({
       if (sequence === operationGeneration.current && alive.current)
         setBusy(false);
     }
+  }
+  if (documentId) {
+    return (
+      <div className="gyro-second-opinion gyro-review-reader">
+        {runtime && detail?.run.id === documentId ? (
+          <ReviewDocument key={documentId} config={config} detail={detail} runtime={runtime}
+            onOpenFile={onOpenFile} onDraft={onDraftReview} renderMarkdown={renderMarkdown} />
+        ) : (
+          <p role={error ? "alert" : "status"}>{error || "Loading second opinion…"}</p>
+        )}
+      </div>
+    );
   }
   return (
     <div className="gyro-second-opinion">
@@ -450,6 +482,8 @@ export function CodeReviewPanel({
                         {setup?.reviewers.find((item) => item.id === providerId)
                           ?.transport === "local"
                           ? "Runs locally on your machine."
+                          : setup?.reviewers.find(item => item.id === providerId)?.transport === "cli"
+                            ? "Uses your connected Claude Code account."
                           : "Starting sends this captured input to the selected provider and uses its API billing."}
                       </p>
                       <details

@@ -13,7 +13,7 @@ export type RemoteAccessContextValue = {
   action: <T = unknown>(request: Record<string, unknown>) => Promise<T>;
   openSettings: () => void;
   selectRemote: (selection: RemoteSelection) => void;
-  refreshCatalog: () => Promise<void>;
+  refreshCatalog: (hostId?: string) => Promise<void>;
   connectedHostIds: string[];
 };
 export const RemoteAccessContext =

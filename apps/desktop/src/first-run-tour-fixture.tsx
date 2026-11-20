@@ -2,8 +2,9 @@
 // state is local sample data. No IPC, account connections, or provider calls.
 // ?theme=dark|light&zoom=1|1.1&size=default|large&provider=connected|none
 // &scene=home|thread&split=1 covers real home, active-chat and split layouts.
-// &panel=files includes the real companion tab header for the panel step.
-// &missing=panel omits that anchor before the tour catalog is resolved.
+// &panel=files opens the real companion dock beside the chat.
+// &missing=model omits the model anchor before the tour catalog is resolved.
+// &record=v1 seeds a version 1 tour record to check the migration.
 // &suggestion=shown|saving|error opts into the nonmodal model-default card.
 import {
   useCallback,
@@ -144,6 +145,11 @@ function Fixture() {
   // Each page load starts a fresh tour without touching Gyro's saved tour key.
   const storage = useMemo(() => {
     const values = new Map<string, string>();
+    if (query.get("record") === "v1")
+      values.set(
+        "gyro.first-run-tour",
+        JSON.stringify({ version: 1, status: "complete", recordedAt: "2026-10-31T09:00:00.000Z" }),
+      );
     return {
       getItem: (key: string) => values.get(key) ?? null,
       setItem: (key: string, value: string) => {
@@ -221,9 +227,11 @@ function Fixture() {
     <>
       <style>{`
         .tour-fixture-stage { height:calc(100dvh / var(--tour-fixture-zoom,1)); width:calc(100vw / var(--tour-fixture-zoom,1)); min-height:0; overflow:hidden; }
+        /* The app zooms through the webview, so its 100vh rules assume no CSS zoom. */
+        .tour-fixture-stage .gyro-chat-surface.is-empty { min-height:calc(100vh / var(--tour-fixture-zoom,1)); }
         .tour-fixture-stage > .gyro-app-shell { height:100%; min-height:0; grid-template-rows:minmax(0,1fr); }
         .tour-fixture-stage .gyro-main, .tour-fixture-stage .gyro-sidebar { height:100%; max-height:100%; min-height:0; }
-        ${query.get("missing") === "panel" ? '[data-tour="panel.launcher"], [data-tour="panel.tabs"] { display:none !important; }' : ""}
+        ${query.get("missing") === "model" ? '[data-tour="composer.model"] { display:none !important; }' : ""}
       `}</style>
       <main className="tour-fixture-stage">
         <AppChrome
@@ -326,13 +334,16 @@ function Fixture() {
       ) : (
         <FirstRunTour
           destination={destination}
+          onConnectProvider={() => {
+            document.documentElement.dataset.tourConnectProvider = "true";
+            openSettings("providers");
+          }}
           onStartFirstTask={query.has("firstTask") ? (prompt) => {
             document.documentElement.dataset.firstTaskPrompt = prompt;
             setDestination("workspace");
             setDraft(prompt);
           } : undefined}
-          onNavigate={setDestination}
-          onOpenSettings={openSettings}
+          paused={Boolean(draft.trim()) && !query.has("firstTask")}
           providerConfigured={providerConfigured}
           storage={storage}
         />

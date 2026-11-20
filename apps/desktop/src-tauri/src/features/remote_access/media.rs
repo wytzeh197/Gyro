@@ -1,5 +1,5 @@
 //! Session-scoped media transfer. Network frames stay bounded even for large videos.
-use super::{commands::remote_host_request, dispatch::value, err, Runtime};
+use super::{commands::request_from_host, dispatch::value, err, Runtime};
 use crate::providers::chat_types::ChatAttachmentRequest;
 use crate::{
     app::limits::{
@@ -245,7 +245,7 @@ pub(crate) async fn remote_upload_attachment(
     })
     .await
     .map_err(err)??;
-    let control = remote_host_request(
+    let control = request_from_host(
         app.clone(),
         host_id.clone(),
         Request {
@@ -265,7 +265,7 @@ pub(crate) async fn remote_upload_attachment(
     let mut result = Value::Null;
     for (index, chunk) in bytes.chunks(CHUNK_BYTES).enumerate() {
         let offset = index * CHUNK_BYTES;
-        result = remote_host_request(
+        result = request_from_host(
             app.clone(),
             host_id.clone(),
             Request {

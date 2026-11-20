@@ -490,7 +490,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--gyro-space-comfortable);
+  gap: var(--gyro-space-compact) var(--gyro-space-comfortable);
   color: var(--gyro-muted);
   font-size: var(--gyro-font-support);
 }
@@ -508,6 +508,13 @@
 }
 .gyro-remote-hero-meta .gyro-remote-meta-hint + button {
   margin-left: 0;
+}
+.gyro-remote-hero-meta .gyro-remote-pairing-scope {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  line-height: 1.4;
 }
 .gyro-remote-sheet {
   display: grid;
@@ -597,6 +604,76 @@
   font-family: var(--gyro-font-mono);
   font-size: var(--gyro-font-body);
 }
+.gyro-remote-compare.is-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+.gyro-remote-sheet-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gyro-space-comfortable);
+}
+.gyro-remote-pair-phone {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--gyro-space-section);
+}
+.gyro-remote-pair-phone-text {
+  display: grid;
+  gap: var(--gyro-space-comfortable);
+}
+.gyro-remote-pair-phone-text > p {
+  margin: 0;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+}
+/*
+ * Scanners need dark modules on light. The ink pair inverts per theme, so
+ * dark mode reads it straight and light mode reads it swapped.
+ */
+.gyro-remote-qr {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  /* 240px at default scale (approved 2026-11-19): dense codes stay scannable. */
+  width: calc(var(--gyro-space-section) * 12);
+  aspect-ratio: 1;
+  padding: var(--gyro-space-compact);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-ink-bg);
+  color: var(--gyro-ink-text);
+  transition: opacity var(--gyro-premium-motion) var(--gyro-premium-ease);
+}
+:root[data-theme="light"] .gyro-remote-qr {
+  border: thin solid var(--gyro-border);
+  background: var(--gyro-ink-text);
+  color: var(--gyro-ink-bg);
+}
+.gyro-remote-qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.gyro-remote-qr path {
+  fill: currentColor;
+}
+/* An expired code must not scan: fade it well below a camera's threshold. */
+.gyro-remote-qr.is-faded svg {
+  opacity: 0.15;
+}
+.gyro-remote-qr.is-loading {
+  border: thin dashed var(--gyro-border);
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+}
+.gyro-remote-device-kind-fixed {
+  display: inline-grid;
+  place-items: center;
+  color: var(--gyro-muted);
+}
 @media (max-width: 720px) {
   .gyro-remote-split.has-side,
   .gyro-remote-split.has-review {
@@ -609,6 +686,10 @@
   }
   .gyro-remote-compare {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .gyro-remote-pair-phone {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
   }
 }
 

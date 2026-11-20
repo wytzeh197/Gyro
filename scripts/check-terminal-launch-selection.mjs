@@ -16,6 +16,15 @@ const app = ts.createSourceFile(
   true,
   ts.ScriptKind.TSX,
 );
+const terminalLaunch = ts.createSourceFile(
+  "use-terminal-launch.ts",
+  readFileSync(
+    new URL("../apps/desktop/src/use-terminal-launch.ts", import.meta.url),
+    "utf8",
+  ),
+  ts.ScriptTarget.Latest,
+  true,
+);
 const live = ts.createSourceFile(
   "live-terminal-pane.tsx",
   readFileSync(
@@ -31,12 +40,16 @@ function find(root, predicate) {
   return ts.forEachChild(root, (child) => find(child, predicate));
 }
 function callback(name, bindings) {
-  const node = find(
-    app,
-    (node) => ts.isVariableDeclaration(node) && node.name.getText(app) === name,
-  );
-  assert.ok(node, name);
-  return compile(node.initializer.arguments[0].getText(app), bindings);
+  for (const source of [terminalLaunch, app]) {
+    const node = find(
+      source,
+      (node) => ts.isVariableDeclaration(node) && node.name.getText(source) === name,
+    );
+    if (node?.initializer && ts.isCallExpression(node.initializer)) {
+      return compile(node.initializer.arguments[0].getText(source), bindings);
+    }
+  }
+  assert.fail(`Missing production callback: ${name}`);
 }
 function compile(expression, bindings) {
   const js = ts.transpileModule("const callback = " + expression, {

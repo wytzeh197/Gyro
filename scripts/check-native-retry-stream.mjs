@@ -72,6 +72,17 @@ assert.equal(
   "waiting survives refresh even when a persisted turn has no optimistic status yet",
 );
 assert.equal(buffered[0].payload.nativeRetry, true);
+const unknownDeadline = applyNativeProviderRetryStatus([user, event], {
+  ...wait,
+  retryAt: undefined,
+});
+assert.equal(unknownDeadline[1].payload.nativeRetry, true);
+assert.equal(unknownDeadline[1].payload.retryAt, undefined);
+assert.deepEqual(
+  controller.observe({ chat: unknownDeadline }, 1, new Set(["chat"])),
+  {},
+  "a provider-owned wait without a deadline must not schedule another send",
+);
 assert.equal(
   applyNativeProviderRetryStatus(waiting, { ...wait, retryAt: "invalid" }),
   waiting,

@@ -46,6 +46,34 @@ const tool = event("tool", "system-event", "Ran tests", {
   status: "done",
   timelineSequence: 100,
 });
+// The native formatter in older builds inserted a paragraph in the middle
+// of this artifact directory. Reopening the saved turn must yield one link.
+const image =
+  "![Gyro composer · Fixture](/workspace/artifacts/remote-workspace-composer.Bx8OfB/composer.png)";
+const savedImage = image.replace(".Bx", ".\n\nBx");
+const imageReply = (link) =>
+  [
+    "The composer now shows the remote folder.",
+    link,
+    "The browser suite passed.",
+  ].join("\n\n");
+for (const link of [image, savedImage]) {
+  const run = buildRunModel([tool, { ...answer, message: imageReply(link) }]);
+  assert.equal(run.response?.message, imageReply(image));
+}
+for (const literal of [
+  `\`\`\`md\n${savedImage}\n\`\`\``,
+  "First paragraph.\n\nNext paragraph.",
+  "![example](/workspace/first\n\nSecond.png)",
+]) {
+  assert.equal(finalAssistantResponseText(literal), literal);
+}
+const nestedImage = image.replace(
+  "remote-workspace-",
+  "Remote (QA)/remote-workspace-",
+);
+assert.equal(finalAssistantResponseText(nestedImage), nestedImage);
+
 const commentary = (turnId, sessionId = "session-1") => ({
   ...event(
     "comment-" + turnId + sessionId,
@@ -423,6 +451,17 @@ console.log("stray title marker regressions passed");
       originalError(...args);
   };
   try {
+    const savedReply = renderToStaticMarkup(
+      createElement(componentModule.exports.ChatThread, {
+        events: [user, tool, { ...answer, message: imageReply(savedImage) }],
+        isSending: false,
+        draft: "",
+        onDraftChange: () => {},
+        onSend: () => {},
+      }),
+    );
+    assert.match(savedReply, /class="gyro-reply-images"/);
+    assert.ok(!savedReply.includes("![Gyro composer"));
     for (const isSending of [true, false]) {
       for (const turnId of ["turn-1", null]) {
         const html = render(marker, isSending, turnId);

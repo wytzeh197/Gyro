@@ -1,10 +1,19 @@
 // Standalone production-component fixture; actions are recorded locally.
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ChatSurface } from "@gyro-dev/ui";
+import { ChatSurface, createModelCatalogClient, providersForConfig, type ChatMode, type ComposerReviewer, type GyroConfig } from "@gyro-dev/ui";
 import "@gyro-dev/ui/styles.css";
+import catalog from "../../../catalog/model-catalog.json";
 
-const config = {
+const reviewerPreview = new URLSearchParams(location.search).has("reviewer");
+if (reviewerPreview) {
+  createModelCatalogClient({
+    getItem: key => key.endsWith(".bucket") ? "0" : JSON.stringify(catalog),
+    setItem: () => undefined,
+  }, async () => JSON.stringify(catalog), () => 0).restore();
+}
+
+const baseConfig: GyroConfig = {
   commandProfiles: [],
   modelProviders: [],
   requireCommandApproval: false,
@@ -12,20 +21,32 @@ const config = {
   telemetryEnabled: false,
 };
 
+const config: GyroConfig = {
+  ...baseConfig,
+  selectedProviderId: "openai",
+  modelProviders: providersForConfig(baseConfig).map((provider) =>
+    (provider.id === "openai" || (reviewerPreview && ["anthropic", "deepseek", "mistral"].includes(provider.id))) ? { ...provider, enabled: true, authStatus: "connected" } : provider
+  ),
+};
+
 function Fixture() {
+  const [mode, setMode] = useState<ChatMode>("normal");
   const [theme, setTheme] = useState("dark");
   const [draft, setDraft] = useState("/");
+  const [reviewer, setReviewer] = useState<ComposerReviewer>();
   const [revision, setRevision] = useState(0);
-  const [workspace, setWorkspace] = useState(false);
+  const [workspace, setWorkspace] = useState(reviewerPreview);
   const [action, setAction] = useState("No action selected");
   const show = (value: string) => {
     setDraft(value);
+    setReviewer(undefined);
     setRevision((current) => current + 1);
   };
   const changeTheme = (value: string) => {
     document.documentElement.dataset.theme = value;
     setTheme(value);
-    show("/");
+    if (reviewerPreview) setRevision(current => current + 1);
+    else show("/");
   };
   return (
     <div className="slash-preview">
@@ -52,6 +73,7 @@ function Fixture() {
       <main className="slash-preview-stage">
         <ChatSurface
           key={revision}
+          supportsSecondOpinion={reviewerPreview}
           config={config}
           events={[{
             id: "fixture-message",
@@ -63,12 +85,24 @@ function Fixture() {
             payload: {},
           }]}
           draft={draft}
-          onDraftChange={setDraft}
-          chatMode="plan"
+          draftReviewer={reviewer}
+          onDraftChange={(text, selection) => {
+            setDraft(text);
+            setReviewer(selection);
+          }}
+          chatMode={mode}
           workspacePath={workspace ? "/fixture/gyro-project" : undefined}
           sessionModel={{ modelLabel: "GPT-6.1 Sol" }}
-          onComposerAction={(value) => setAction(value)}
-          onSend={() => setAction("Fixture send")}
+          onComposerAction={(value) => {
+            setAction(value);
+            if (value === "set-chat-mode-plan") setMode("plan");
+            if (value === "set-chat-mode-normal") setMode("normal");
+          }}
+          onSend={(message, context) => {
+            setAction(`Sent ${message}${context?.secondOpinion ? " · Reviewer: " + context.secondOpinion.modelId : ""}`);
+            setDraft("");
+            setReviewer(undefined);
+          }}
           shellReady
         />
       </main>

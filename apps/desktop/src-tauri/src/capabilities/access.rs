@@ -460,13 +460,18 @@ pub(crate) fn capability_grant_scope(
             "folder".into(),
             capability_argument_string(arguments, "path")?.to_string(),
         )),
-        CapabilityId::TerminalOpen => {
+        CapabilityId::TerminalOpen | CapabilityId::WorkspaceRunCommand => {
             let value = serde_json::json!({
                 "program": capability_argument_string(arguments, "program")?,
                 "args": capability_argument_strings(arguments, "args")?,
                 "cwd": arguments.get("cwd").and_then(serde_json::Value::as_str).unwrap_or("."),
             });
-            Ok(("command".into(), serde_json::to_string(&value)?))
+            if capability_id == CapabilityId::WorkspaceRunCommand {
+                let hosts = super::command_network::destinations(arguments)?;
+                Ok(("command".into(), serde_json::to_string(&(value, hosts))?))
+            } else {
+                Ok(("command".into(), serde_json::to_string(&value)?))
+            }
         }
         _ => {
             let mut digest = Sha256::new();

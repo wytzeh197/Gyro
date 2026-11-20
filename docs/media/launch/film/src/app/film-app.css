@@ -1,0 +1,39 @@
+/* Size the real app shell to its window frame instead of the viewport. */
+.film-app .gyro-app-shell { height: 100% !important; max-height: 100% !important; min-height: 0 !important; }
+.film-app { container-type: size; }
+.film-app .gyro-sidebar, .film-app .gyro-main { max-height: 100% !important; }
+.film-app .gyro-local-workspace-content { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.film-app .gyro-local-workspace-content > * { flex: 1 1 auto; min-height: 0; }
+
+/* Frames are rendered out of real time: settle CSS animations/transitions at their end state. */
+.film-app *, .film-app *::before, .film-app *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+}
+
+/* The app's chat/main containers use min-height: 100vh; inside the film the "viewport" is the window frame. */
+.film-app .gyro-main,
+.film-app .gyro-tools-surface,
+.film-app .gyro-chat-surface,
+.film-app .gyro-chat-surface.is-empty,
+.film-app .gyro-chat-surface.is-empty.has-environment,
+.film-app .gyro-chat-thread-canvas { min-height: 0 !important; }
+.film-app .gyro-chat-surface, .film-app .gyro-chat-thread-canvas { height: 100%; }
+/* The window frame is the size container; size the main column against it, not the browser viewport. */
+.film-app .gyro-main { height: 100cqh !important; max-height: 100cqh !important; }
+.film-app .gyro-sidebar { height: 100cqh !important; max-height: 100cqh !important; min-height: 0 !important; }
+
+/* Terminal grid: the app builds the 2x2 split by drag; the film shows it directly. */
+:root[data-theme] .film-app.film-grid4 .gyro-terminal-grid[data-terminal-count] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+:root[data-theme] .film-app.film-grid4 .gyro-terminal-pane[data-terminal-hidden="true"] {
+  display: grid !important;
+}
+.film-app.film-grid4 .gyro-terminal-grid > .gyro-terminal-pane:nth-child(1) { grid-column: 1 !important; grid-row: 1 !important; }
+.film-app.film-grid4 .gyro-terminal-grid > .gyro-terminal-pane:nth-child(2) { grid-column: 2 !important; grid-row: 1 !important; }
+.film-app.film-grid4 .gyro-terminal-grid > .gyro-terminal-pane:nth-child(3) { grid-column: 1 !important; grid-row: 2 !important; }
+.film-app.film-grid4 .gyro-terminal-grid > .gyro-terminal-pane:nth-child(4) { grid-column: 2 !important; grid-row: 2 !important; }

@@ -2,16 +2,15 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { popoverViewportRect } from "./composer-popover-bounds";
 import { useDialogDismiss } from "./use-dialog-dismiss";
-import type { AppDestination, SettingsSectionId } from "./types";
+import type { AppDestination } from "./types";
 import {
-  TOUR_STEPS,
   TOUR_VERSION,
   FIRST_TASK_PROMPT,
   logTourEvent,
+  pendingTourSteps,
   placeTourCard,
   readTourRecord,
   resolveTourAnchor,
-  shouldRunTour,
   writeTourRecord,
   type TourStep,
   type TourStorage,
@@ -20,27 +19,35 @@ import {
 export type FirstRunTourProps = {
   destination: AppDestination;
   providerConfigured: boolean;
-  onNavigate: (destination: AppDestination) => void;
-  onOpenSettings: (section: SettingsSectionId) => void;
+  /**
+   * True while the user is busy (typing a draft, a dialog or palette is open).
+   * The tour waits for an idle moment instead of opening over their work.
+   */
+  paused?: boolean;
   onActiveChange?: (active: boolean) => void;
+  /** Last-step action when no provider is connected yet. */
+  onConnectProvider?: () => void;
+  /** Last-step action once a provider is connected. */
   onStartFirstTask?: (prompt: string) => void;
   storage?: TourStorage;
 };
 
+/** How long the workspace must sit idle before the tour opens. */
+const TOUR_IDLE_DELAY_MS = 1200;
+
+type FinalAction = "first-task" | "connect" | null;
+
 export function FirstRunTour({
   destination,
   providerConfigured,
-  onNavigate,
-  onOpenSettings,
+  paused = false,
   onActiveChange,
+  onConnectProvider,
   onStartFirstTask,
   storage,
 }: FirstRunTourProps) {
   const [steps, setSteps] = useState<TourStep[]>([]);
   const [index, setIndex] = useState(0);
-  const returnTo = useRef<AppDestination>("workspace");
-  const navigated = useRef(false);
-  const requested = useRef(false);
   const finished = useRef(false);
   const store = useRef<TourStorage | null>(null);
 
@@ -56,11 +63,12 @@ export function FirstRunTour({
       store.current = null;
     }
     if (steps.length > 0 || finished.current) return;
-    if (destination !== "workspace") return;
-    if (!shouldRunTour(readTourRecord(store.current))) return;
+    if (destination !== "workspace" || paused) return;
+    const pending = pendingTourSteps(readTourRecord(store.current));
+    if (pending.length === 0) return;
     const timer = window.setTimeout(() => {
-      const resolved = TOUR_STEPS.filter((step) => {
-        if (step.navigate || resolveTourAnchor(step.anchor)) return true;
+      const resolved = pending.filter((step) => {
+        if (resolveTourAnchor(step.anchor)) return true;
         logTourEvent("tour.step.skipped.missingAnchor", { step: step.id });
         return false;
       });
@@ -68,67 +76,67 @@ export function FirstRunTour({
         logTourEvent("tour.empty");
         return;
       }
+      logTourEvent("tour.started", { steps: resolved.map((step) => step.id) });
       setSteps(resolved);
       setIndex(0);
-    }, 1800);
+    }, TOUR_IDLE_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [destination, steps.length, storage]);
+  }, [destination, paused, steps.length, storage]);
 
-  useLayoutEffect(() => {
-    const step = steps[index];
-    if (!step) return;
-    if (step.navigate && !requested.current) {
-      requested.current = true;
-      if (destination !== step.navigate.destination) {
-        returnTo.current = destination;
-        navigated.current = true;
-      }
-      onOpenSettings(step.navigate.section ?? "providers");
-    }
-  }, [destination, index, onOpenSettings, steps]);
-
-  const finish = (status: "complete" | "dismissed") => {
+  const finish = (
+    status: "complete" | "dismissed",
+    detail: Record<string, unknown> = {},
+  ) => {
     finished.current = true;
+    // Every catalog step counts as seen: a skipped tour must not come back
+    // next launch with its remaining steps.
     writeTourRecord(store.current, status);
-    logTourEvent(`tour.${status}`);
-    if (navigated.current) {
-      navigated.current = false;
-      onNavigate(returnTo.current);
-    }
+    logTourEvent(`tour.${status}`, { step: steps[index]?.id, ...detail });
     setSteps([]);
   };
 
   const move = (next: number) => {
-    if (navigated.current && steps[index]?.navigate) {
-      navigated.current = false;
-      onNavigate(returnTo.current);
-    }
-    requested.current = false;
     if (next >= steps.length) {
       finish("complete");
       return;
     }
-    if (next >= 0) {
-      setIndex(next);
-    }
+    if (next >= 0) setIndex(next);
   };
 
   const step = steps[index];
   if (!step) return null;
+  const isLast = index + 1 === steps.length;
+  // The last step ends in whatever gets this user to a first result. A first
+  // task is only offered once it could actually be sent.
+  const finalAction: FinalAction = !isLast
+    ? null
+    : providerConfigured
+      ? onStartFirstTask
+        ? "first-task"
+        : null
+      : onConnectProvider
+        ? "connect"
+        : null;
   return createPortal(
     <TourCoachmark
       destination={destination}
+      finalAction={finalAction}
       index={index}
+      onAction={() => {
+        if (finalAction === "first-task") {
+          finish("complete", { action: "first-task" });
+          onStartFirstTask?.(FIRST_TASK_PROMPT);
+        } else if (finalAction === "connect") {
+          finish("complete", { action: "connect" });
+          onConnectProvider?.();
+        }
+      }}
       onDismiss={() => finish("dismissed")}
-      onStartFirstTask={
-        onStartFirstTask
-          ? () => {
-              finish("complete");
-              onStartFirstTask(FIRST_TASK_PROMPT);
-            }
-          : undefined
-      }
+      // Using the highlighted control is the point of the step. Get out of
+      // the way so its own menu or focus is not trapped under the overlay.
+      onEngage={() => finish("complete", { action: "engaged" })}
       onMove={move}
+      onNotNow={() => finish("complete", { action: "not-now" })}
       providerConfigured={providerConfigured}
       step={step}
       total={steps.length}
@@ -139,25 +147,49 @@ export function FirstRunTour({
 
 function TourCoachmark({
   destination,
+  finalAction,
   index,
+  onAction,
   onDismiss,
+  onEngage,
   onMove,
-  onStartFirstTask,
+  onNotNow,
   providerConfigured,
   step,
   total,
 }: {
   destination: AppDestination;
+  finalAction: FinalAction;
   index: number;
+  onAction: () => void;
   onDismiss: () => void;
+  onEngage: () => void;
   onMove: (index: number) => void;
-  onStartFirstTask?: () => void;
+  onNotNow: () => void;
   providerConfigured: boolean;
   step: TourStep;
   total: number;
 }) {
+  const copyContext = {
+    providerConfigured,
+    offersFirstTask: finalAction === "first-task",
+  };
   const layerRef = useRef<HTMLDivElement>(null);
   const spotlightRef = useRef<HTMLDivElement>(null);
+  const blockerRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const engage = useRef(onEngage);
+  engage.current = onEngage;
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      const anchor = resolveTourAnchor(step.anchor);
+      if (anchor && event.target instanceof Node && anchor.contains(event.target))
+        engage.current();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () =>
+      document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [step.anchor]);
   const { ref: cardRef, dismiss } = useDialogDismiss<HTMLElement>(onDismiss);
 
   useLayoutEffect(() => {
@@ -198,6 +230,25 @@ function TourCoachmark({
           top: `${spot.top / bounds.zoom}px`,
           width: `${(spot.right - spot.left) / bounds.zoom}px`,
           height: `${(spot.bottom - spot.top) / bounds.zoom}px`,
+        });
+        // Four blockers frame the cut-out, so the rest of the app stays
+        // inert while the highlighted control itself can be clicked.
+        const z = bounds.zoom;
+        const frames = [
+          [0, 0, bounds.width, spot.top],
+          [0, spot.bottom, bounds.width, bounds.height - spot.bottom],
+          [0, spot.top, spot.left, spot.bottom - spot.top],
+          [spot.right, spot.top, bounds.width - spot.right, spot.bottom - spot.top],
+        ];
+        frames.forEach(([left, top, width, height], frame) => {
+          const blocker = blockerRefs.current[frame];
+          if (!blocker) return;
+          Object.assign(blocker.style, {
+            left: `${left! / z}px`,
+            top: `${top! / z}px`,
+            width: `${Math.max(0, width!) / z}px`,
+            height: `${Math.max(0, height!) / z}px`,
+          });
         });
       }
       const position =
@@ -240,8 +291,27 @@ function TourCoachmark({
     };
   }, [cardRef, destination, step]);
 
+  const isLast = index + 1 === total;
+  const primaryLabel =
+    finalAction === "first-task"
+      ? "Try a first task"
+      : finalAction === "connect"
+        ? "Set up a model"
+        : isLast
+          ? "Finish"
+          : "Next";
   return (
     <div className="gyro-tour" data-tour-version={TOUR_VERSION} ref={layerRef}>
+      {[0, 1, 2, 3].map((frame) => (
+        <div
+          aria-hidden="true"
+          className="gyro-tour-blocker"
+          key={frame}
+          ref={(node) => {
+            blockerRefs.current[frame] = node;
+          }}
+        />
+      ))}
       <div className="gyro-tour-spotlight" hidden ref={spotlightRef} />
       <section
         aria-describedby="gyro-tour-body"
@@ -271,20 +341,21 @@ function TourCoachmark({
           </div>
         </div>
         <h2 className="gyro-tour-title" id="gyro-tour-title">
-          {step.title}
+          {step.title(copyContext)}
         </h2>
         <p className="gyro-tour-body" id="gyro-tour-body">
-          {step.body({ providerConfigured })}
-          {index + 1 === total && onStartFirstTask
-            ? " Try a first task prepares a prompt you can edit before sending."
-            : ""}
+          {step.body(copyContext)}
         </p>
         <div className="gyro-tour-actions">
-          <button className="gyro-tour-skip" onClick={dismiss} type="button">
-            Skip tour
+          <button
+            className="gyro-tour-skip"
+            onClick={finalAction ? onNotNow : dismiss}
+            type="button"
+          >
+            {finalAction ? "Not now" : "Skip tour"}
           </button>
           <div className="gyro-tour-nav">
-            {index > 0 && !(index + 1 === total && onStartFirstTask) ? (
+            {index > 0 ? (
               <button
                 className="gyro-tour-secondary"
                 onClick={() => onMove(index - 1)}
@@ -293,29 +364,12 @@ function TourCoachmark({
                 Back
               </button>
             ) : null}
-            {index + 1 === total && onStartFirstTask ? (
-              <button
-                className="gyro-tour-secondary"
-                onClick={() => onMove(index + 1)}
-                type="button"
-              >
-                Finish
-              </button>
-            ) : null}
             <button
               className="gyro-tour-primary"
-              onClick={() =>
-                index + 1 === total && onStartFirstTask
-                  ? onStartFirstTask()
-                  : onMove(index + 1)
-              }
+              onClick={() => (finalAction ? onAction() : onMove(index + 1))}
               type="button"
             >
-              {index + 1 === total
-                ? onStartFirstTask
-                  ? "Try a first task"
-                  : "Finish"
-                : "Next"}
+              {primaryLabel}
             </button>
           </div>
         </div>

@@ -169,6 +169,7 @@ pub(crate) fn merge_renderer_config(
     // resuming a paused Gyro and erasing every budget.
     incoming.usage_guard = persisted.usage_guard.clone();
     incoming.efficiency = persisted.efficiency.clone();
+    incoming.reset_saved_full_access();
     incoming
 }
 

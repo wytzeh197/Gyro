@@ -80,6 +80,7 @@ export const CAPABILITY_UI = {
   "workspace-git-log": { label: "Git log", row: "tool" },
   "workspace-git-show": { label: "Git show", row: "tool" },
   "workspace-git-blame": { label: "Git blame", row: "tool" },
+  "workspace-git-commit": { label: "Commit changes", row: "tool" },
   "workspace-propose-edit": { label: "Propose edit", row: "file" },
   "workspace-edit": { label: "Edit file", row: "file" },
   "workspace-create-path": { label: "Create path", row: "file" },
@@ -89,6 +90,7 @@ export const CAPABILITY_UI = {
   "workspace-duplicate-path": { label: "Duplicate path", row: "file" },
   "workspace-undo-path": { label: "Undo path", row: "tool" },
   "workspace-open-folder": { label: "Open folder", row: "tool" },
+  "workspace-run-command": { label: "Run command", row: "command" },
   "workspace-run-task": { label: "Run task", row: "command" },
   "workspace-run-test": { label: "Run tests", row: "command" },
   "workspace-read-output": { label: "Read output", row: "tool" },
@@ -104,6 +106,7 @@ export const CAPABILITY_UI = {
 
   "terminal-open": { label: "Open terminal", row: "command" },
   "terminal-read": { label: "Read terminal", row: "command" },
+  "terminal-input": { label: "Send terminal input", row: "command" },
   "terminal-wait": { label: "Wait for command", row: "command" },
   "terminal-stop": { label: "Stop terminal", row: "command" },
 

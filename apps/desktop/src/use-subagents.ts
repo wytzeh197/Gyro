@@ -5,7 +5,8 @@ import {
   mergeSubagentSnapshot,
   openSubagentTab,
   closeSubagentTab,
-  pendingSubagentApprovals,
+  currentSubagentApprovals,
+  isSubagentLive,
   nativeSubagentParents,
   type SubagentSnapshot,
   type SubagentSurfaceState,
@@ -25,7 +26,10 @@ export function useSubagents({
 }: {
   parentIds: string[];
   eventsBySessionId: Record<string, SessionEvent[]>;
-  readEvents: (sessionId: string) => Promise<void>;
+  readEvents: (
+    sessionId: string,
+    reportErrorToCaller?: boolean,
+  ) => Promise<void>;
   openPanel: (paneId: string) => void;
   closePanel: (paneId: string) => void;
   hasMoreBeforeBySession: Record<string, boolean>;
@@ -40,9 +44,20 @@ export function useSubagents({
     Record<string, { message: string; detail: string } | undefined>
   >({});
   const [refreshing, setRefreshing] = useState<string[]>([]);
+  const [historyReads, setHistoryReads] = useState<
+    Record<string, { isLoading?: boolean; error?: string } | undefined>
+  >({});
+  const [stopRequests, setStopRequests] = useState<
+    Record<
+      string,
+      { runId: string; pending?: boolean; error?: string } | undefined
+    >
+  >({});
   const inFlight = useRef(new Set<string>());
   const loadedParents = useRef(new Set<string>());
-  const loadedAgents = useRef(new Set<string>());
+  const historyRequested = useRef(new Set<string>());
+  const historyInFlight = useRef(new Set<string>());
+  const stopInFlight = useRef(new Set<string>());
   const observedHistory = useRef(new Map<string, SessionEvent[]>());
   const native =
     typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -141,24 +156,48 @@ export function useSubagents({
       return result;
     });
   }, [eventsBySessionId]);
+  const readHistory = useCallback(
+    async (agentId: string) => {
+      if (historyInFlight.current.has(agentId)) return;
+      historyInFlight.current.add(agentId);
+      const firstRead = !historyRequested.current.has(agentId);
+      historyRequested.current.add(agentId);
+      setHistoryReads((current) =>
+        firstRead || current[agentId]?.error
+          ? { ...current, [agentId]: { isLoading: true } }
+          : current,
+      );
+      try {
+        await readEvents(agentId, true);
+        setHistoryReads((current) => ({ ...current, [agentId]: undefined }));
+      } catch (reason) {
+        setHistoryReads((current) => ({
+          ...current,
+          [agentId]: { error: String(reason) },
+        }));
+      } finally {
+        historyInFlight.current.delete(agentId);
+      }
+    },
+    [readEvents],
+  );
   useEffect(() => {
     for (const agent of Object.values(byId)) {
-      if (loadedAgents.current.has(agent.agentId)) continue;
-      loadedAgents.current.add(agent.agentId);
-      void readEvents(agent.agentId);
+      if (isSubagentLive(agent) && !historyRequested.current.has(agent.agentId))
+        void readHistory(agent.agentId);
     }
-  }, [byId, readEvents]);
+  }, [byId, readHistory]);
   const select = useCallback(
-    (paneId: string, agentId: string, parentSessionId?: string) => {
-      const key = `${paneId}:${parentSessionId ?? ""}`;
+    (paneId: string, agentId: string, parentSessionId: string) => {
+      const key = `${paneId}:${parentSessionId}`;
       setTabsByPane((current) => ({
         ...current,
         [key]: openSubagentTab(current[key] ?? { openAgentIds: [] }, agentId),
       }));
       openPanel(paneId);
-      void readEvents(agentId);
+      void readHistory(agentId);
     },
-    [openPanel, readEvents],
+    [openPanel, readHistory],
   );
   const forPane = (
     parentSessionId: string | undefined,
@@ -167,18 +206,29 @@ export function useSubagents({
     const key = `${paneId}:${parentSessionId ?? ""}`;
     const tabs = tabsByPane[key] ?? { openAgentIds: [] };
     const selectedAgentId = tabs.selectedAgentId;
+    const selectedAgent = selectedAgentId ? byId[selectedAgentId] : undefined;
+    const stopRequest = selectedAgentId
+      ? stopRequests[selectedAgentId]
+      : undefined;
     return {
       agents: Object.values(byId)
         .filter((agent) => agent.parentSessionId === parentSessionId)
         .map((agent) =>
-          pendingSubagentApprovals(eventsBySessionId[agent.agentId] ?? [])
-            .length && agent.status === "running"
+          agent.status === "running" &&
+          currentSubagentApprovals(
+            agent,
+            eventsBySessionId[agent.agentId] ?? [],
+          ).length
             ? { ...agent, status: "waiting" }
             : agent,
         ),
       openAgentIds: tabs.openAgentIds,
       selectedAgentId,
       history: {
+        ...(selectedAgentId ? historyReads[selectedAgentId] : undefined),
+        onRetry: selectedAgentId
+          ? () => void readHistory(selectedAgentId)
+          : undefined,
         hasMoreBefore: Boolean(hasMoreBeforeBySession[selectedAgentId ?? ""]),
         isLoadingEarlier: loadingEarlierSessionIds.includes(
           selectedAgentId ?? "",
@@ -188,30 +238,56 @@ export function useSubagents({
         },
       },
       eventsByAgentId: eventsBySessionId,
-      onSelect: (agentId) => select(paneId, agentId, parentSessionId),
+      onSelect: (agentId) => {
+        if (parentSessionId) select(paneId, agentId, parentSessionId);
+      },
       onClose: (agentId) => {
         const next = closeSubagentTab(tabs, agentId);
         setTabsByPane((current) => ({ ...current, [key]: next }));
         if (!next.openAgentIds.length) closePanel(paneId);
       },
-      onStop: (agentId) => {
-        if (!parentSessionId || !native) return;
-        setErrors((current) => ({ ...current, [parentSessionId]: undefined }));
-        void invoke<SubagentSnapshot>("stop_subagent", {
-          parentSessionId,
-          agentId,
-        })
-          .then(merge)
-          .catch((reason) =>
-            setErrors((current) => ({
-              ...current,
-              [parentSessionId]: {
-                message: "Could not stop the sub-agent.",
-                detail: String(reason),
-              },
-            })),
-          );
-      },
+      stopRequest:
+        stopRequest && stopRequest.runId === selectedAgent?.runId
+          ? stopRequest
+          : undefined,
+      onStop:
+        native && parentSessionId
+          ? (agentId) => {
+              const agent = byId[agentId];
+              if (
+                !agent ||
+                !isSubagentLive(agent) ||
+                agent.status === "stopping" ||
+                agent.parentSessionId !== parentSessionId ||
+                stopInFlight.current.has(agentId)
+              )
+                return;
+              stopInFlight.current.add(agentId);
+              const runId = agent.runId;
+              setStopRequests((current) => ({
+                ...current,
+                [agentId]: { runId, pending: true },
+              }));
+              void invoke<SubagentSnapshot>("stop_subagent", {
+                parentSessionId,
+                agentId,
+              })
+                .then((snapshot) => {
+                  merge(snapshot);
+                  setStopRequests((current) => ({
+                    ...current,
+                    [agentId]: undefined,
+                  }));
+                })
+                .catch((reason) =>
+                  setStopRequests((current) => ({
+                    ...current,
+                    [agentId]: { runId, error: String(reason) },
+                  })),
+                )
+                .finally(() => stopInFlight.current.delete(agentId));
+            }
+          : undefined,
       error: errors[parentSessionId ?? ""]?.message,
       errorDetail: errors[parentSessionId ?? ""]?.detail,
       isRefreshing: refreshing.includes(parentSessionId ?? ""),

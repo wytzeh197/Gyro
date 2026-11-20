@@ -56,7 +56,7 @@ base64.workspace = true
 chrono.workspace = true
 gyro-core = { path = "../../../crates/gyro-core" }
 gyro-remote = { path = "../../../crates/gyro-remote" }
-tokio = { version = "1", features = ["sync", "time", "rt"] }
+tokio = { version = "1", features = ["sync", "time", "rt", "net", "io-util", "macros"] }
 libc.workspace = true
 notify.workspace = true
 serde.workspace = true

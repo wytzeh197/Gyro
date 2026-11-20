@@ -46,6 +46,8 @@
 }
 :root[data-theme="light"] {
   --gyro-chat-raised: var(--gyro-surface-soft);
+  --gyro-chat-review-action-bg: color-mix(in srgb, var(--gyro-ink-bg) 75%, var(--gyro-surface));
+  --gyro-chat-review-action-text: var(--gyro-ink-text);
 }
 /* Shared block decisions. Pane rules below own geometry and state, not new design values. */
 .gyro-composer-shell {
@@ -586,7 +588,6 @@
   .gyro-chat-run-change-summary.is-complete
   > header {
   background: transparent;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
 }
 :root[data-theme]
   .gyro-chat-surface
@@ -967,13 +968,6 @@
   > .gyro-chat-start:not(.is-mission)
   > .gyro-composer-shell {
   margin-top: 0;
-}
-:root[data-theme="light"]
-  .gyro-chat-surface:is(.is-thread, .is-empty)
-  .gyro-composer-bar
-  .gyro-send-button:not(:disabled):not(.is-stop) {
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--gyro-shadow) 16%, transparent);
 }
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
@@ -1614,13 +1608,15 @@
   --gyro-popover-offset: var(--gyro-motion-distance);
 }
 
-:root .gyro-run-group-disclosure svg {
+:root .gyro-run-group-disclosure svg,
+:root .gyro-run-header-toggle > svg {
   transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
 }
 :root
   .gyro-run-group-toggle[aria-expanded="true"]
   .gyro-run-group-disclosure
-  svg {
+  svg,
+:root .gyro-run-header-toggle[aria-expanded="true"] > svg {
   transform: rotate(90deg);
 }
 :root .gyro-run-group-toggle[aria-expanded="true"] + .gyro-run-group-details {
@@ -1628,12 +1624,6 @@
     var(--gyro-premium-ease) both;
 }
 
-:root .gyro-run-header-toggle > svg {
-  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
-}
-:root .gyro-run-header-toggle[aria-expanded="true"] > svg {
-  transform: rotate(90deg);
-}
 :root
   :is(
     .gyro-settings-content,
@@ -1666,15 +1656,6 @@
     .gyro-composer-command-popover
   ) {
   animation: gyro-anchored-surface-in var(--gyro-premium-motion)
-    var(--gyro-premium-ease);
-}
-:root
-  :is(
-    .gyro-sidebar-update-tip,
-    .gyro-provider-allowance-tooltip,
-    .gyro-composer-context-tooltip
-  ) {
-  animation: gyro-dialog-backdrop-in var(--gyro-premium-motion-fast)
     var(--gyro-premium-ease);
 }
 :root .gyro-chat-companion-resizer::after,
@@ -2129,7 +2110,8 @@
   min-height: var(--gyro-chat-header-height);
   /* 1px top balances the 1px bottom hairline, so title and actions centre on
      the native traffic lights (y 23), level with the sidebar window row. */
-  padding-block: var(--gyro-chat-header-hairline-width) 0;
+  padding-block: var(--gyro-chat-header-hairline-width)
+    var(--gyro-window-header-bottom-inset);
   border-bottom: 1px solid var(--gyro-border-soft);
   box-shadow: none;
 }
@@ -2450,6 +2432,13 @@
   background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
 }
 :root[data-theme]
+  .gyro-chat-companion-content
+  .gyro-review-recovery-actions
+  > button + button {
+  border-color: transparent;
+  color: var(--gyro-muted);
+}
+:root[data-theme]
   .gyro-chat-companion
   .gyro-browser-preview.is-chat
   .gyro-browser-preview-toolbar {
@@ -2615,20 +2604,6 @@
   padding: var(--gyro-companion-content-inset);
 }
 
-:root[data-theme] .gyro-chat-companion-content .gyro-subagent-task {
-  margin-bottom: var(--gyro-space-panel);
-  padding-bottom: var(--gyro-space-panel);
-  border-bottom: 1px solid var(--gyro-border-soft);
-  font-size: var(--gyro-font-support);
-}
-
-:root[data-theme] .gyro-chat-companion-content .gyro-subagent-task > summary {
-  color: var(--gyro-text);
-  font-weight: 500;
-  min-height: var(--gyro-companion-control-height);
-  line-height: var(--gyro-companion-control-height);
-}
-
 :root[data-theme]
   .gyro-chat-companion-content
   :is(.gyro-subagent-result, .gyro-side-chat-message) {
@@ -2638,16 +2613,6 @@
 
 :root[data-theme] .gyro-chat-companion-content .gyro-subagent-result {
   margin-top: var(--gyro-space-panel);
-}
-
-:root[data-theme]
-  .gyro-chat-companion-content
-  .gyro-subagent-panel
-  .gyro-run-header-actions
-  .gyro-subagent-stop {
-  width: var(--gyro-companion-control-height);
-  height: var(--gyro-companion-control-height);
-  border-radius: var(--gyro-radius-md);
 }
 
 :root[data-theme] .gyro-chat-companion-content .gyro-side-chat-transcript {
@@ -6359,6 +6324,9 @@
 }
 
 .gyro-composer-popover {
+  transform-origin: top right;
+  animation: gyro-premium-pop-in var(--gyro-premium-motion)
+    var(--gyro-premium-ease) both;
   transition:
     background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
     border-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
@@ -6370,12 +6338,6 @@
 
 .gyro-composer-menu-item.is-provider:disabled .gyro-provider-logo.is-openai {
   color: var(--gyro-provider-openai-logo);
-}
-
-.gyro-composer-popover {
-  transform-origin: top right;
-  animation: gyro-premium-pop-in var(--gyro-premium-motion)
-    var(--gyro-premium-ease) both;
 }
 
 .gyro-composer-shell textarea:focus,
@@ -6841,7 +6803,8 @@
   color: var(--gyro-danger);
 }
 
-.gyro-chat-close-card {
+.gyro-chat-close-card,
+.gyro-chat-delete-card {
   width: min(380px, calc(100vw - 40px));
 }
 
@@ -6849,9 +6812,6 @@
   flex-wrap: wrap;
 }
 
-.gyro-chat-delete-card {
-  width: min(380px, calc(100vw - 40px));
-}
 .gyro-chat-delete-card .gyro-terminal-terminate-heading svg {
   color: var(--gyro-danger);
 }
@@ -7633,7 +7593,7 @@
   z-index: 3;
 }
 
-.gyro-composer-attachments + textarea {
+.gyro-composer-attachments + .gyro-composer-editor > textarea {
   min-height: 54px;
   padding-top: var(--gyro-chat-space-2);
 }
@@ -7855,20 +7815,21 @@
 }
 
 .gyro-change-summary-actions > button {
-  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  background: var(--gyro-chat-review-action-bg, transparent);
   flex: none;
   max-width: 100%;
   white-space: normal;
-  border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-text);
+  border: 1px solid transparent;
+  border-radius: var(--gyro-radius-pill);
+  color: var(--gyro-chat-review-action-text, var(--gyro-muted));
   font-size: var(--gyro-chat-meta-size);
   min-height: 28px;
   padding: 0 calc(var(--gyro-chat-space-1) * 2.5);
 }
 
-.gyro-change-summary-actions > button:hover {
-  background: color-mix(in srgb, var(--gyro-text) 9%, transparent);
+.gyro-change-summary-actions > button:is(:hover, :focus-visible) {
+  background: color-mix(in srgb, var(--gyro-text) 9%, var(--gyro-chat-review-action-bg, transparent));
+  color: var(--gyro-chat-review-action-text, var(--gyro-text));
 }
 
 .gyro-change-summary-file > button {
@@ -7897,107 +7858,14 @@
   white-space: nowrap;
 }
 
-.gyro-change-summary-file:has(.gyro-change-summary-diff) > button {
-  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
-  border-bottom: 1px solid var(--gyro-premium-hairline-strong);
-}
-
-.gyro-change-summary-file > button small svg {
-  color: var(--gyro-faint);
-  flex: 0 0 auto;
-}
-
-.gyro-change-summary-diff-scroll code {
-  display: block;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: var(--gyro-chat-meta-size);
-  line-height: calc(18px * var(--gyro-ui-scale, 1));
-  min-width: max-content;
-  padding: calc(var(--gyro-chat-space-1) * 2.5) 0;
-}
-
-.gyro-change-summary-diff-scroll code > span {
-  display: block;
-  min-height: 18px;
-  padding: 0 var(--gyro-chat-block-gap);
-  white-space: pre;
-}
-
-.gyro-change-summary-diff-scroll code > span.is-added {
-  background: color-mix(in srgb, var(--gyro-success) 12%, transparent);
-  color: color-mix(in srgb, var(--gyro-success) 82%, var(--gyro-text));
-}
-
-.gyro-change-summary-diff-scroll code > span.is-removed {
-  background: color-mix(in srgb, var(--gyro-danger) 12%, transparent);
-  color: color-mix(in srgb, var(--gyro-danger) 82%, var(--gyro-text));
-}
-
-.gyro-change-summary-diff-scroll code > span.is-hunk {
-  background: color-mix(in srgb, var(--gyro-premium-accent) 9%, transparent);
-  color: color-mix(in srgb, var(--gyro-premium-accent) 70%, var(--gyro-text));
-}
-
-.gyro-change-summary-diff-scroll code > span.is-meta {
-  color: var(--gyro-faint);
-}
-
 :root[data-theme="light"] .gyro-chat-run-change-summary > header {
   background: var(--gyro-surface);
 }
 
-:root[data-theme="light"] .gyro-change-summary-actions > button {
-  background: var(--gyro-control-bg);
-  border-color: var(--gyro-border);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--gyro-shadow) 6%, transparent);
-}
-
-:root[data-theme="light"]
-  .gyro-chat-run-change-summary
-  > header
-  .gyro-change-summary-actions
-  > button:hover {
-  background: var(--gyro-control-bg);
-  border-color: var(--gyro-border);
-}
-
 :root[data-theme="light"] .gyro-change-summary-file > button {
-  background: var(--gyro-control-bg);
   border-bottom-color: var(--gyro-border);
 }
 
-:root[data-theme="light"] .gyro-change-summary-file > button:hover {
-  background: var(--gyro-control-bg);
-}
-
-:root[data-theme="light"]
-  .gyro-change-summary-file:has(.gyro-change-summary-diff)
-  > button {
-  background: var(--gyro-control-bg);
-  border-bottom-color: var(--gyro-border);
-}
-
-:root[data-theme="light"] .gyro-change-summary-diff-scroll code,
-:root[data-theme="light"] .gyro-change-summary-diff-scroll code > span.is-meta {
-  color: var(--gyro-muted);
-}
-
-:root[data-theme="light"] .gyro-change-summary-diff-scroll code > span.is-hunk,
-:root[data-theme="light"]
-  .gyro-change-summary-diff-scroll
-  code
-  > span.is-added {
-  background: var(--gyro-control-bg);
-  color: var(--gyro-accent);
-}
-
-:root[data-theme="light"]
-  .gyro-change-summary-diff-scroll
-  code
-  > span.is-removed {
-  background: var(--gyro-control-bg);
-  color: var(--gyro-danger);
-}
 .gyro-chat-run-change-summary {
   margin-right: 0;
   margin-bottom: var(--gyro-chat-space-2);
@@ -8086,8 +7954,14 @@
 }
 
 .gyro-chat-run-change-summary.is-complete > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   background: transparent;
   min-height: 64px;
+}
+
+.gyro-chat-run-change-summary.is-complete:has(.gyro-change-summary-options :is([aria-expanded="true"], [data-surface-exit])) {
+  overflow: visible;
 }
 
 .gyro-chat-run-change-summary.is-complete .gyro-chat-run-change-icon {
@@ -8100,21 +7974,20 @@
 
 .gyro-chat-run-change-summary.is-complete > header strong {
   font-size: var(--gyro-font-support);
-  font-weight: 500;
+  font-weight: 600;
 }
 
-.gyro-chat-run-change-summary.is-complete
-  .gyro-change-summary-actions
-  > button {
-  background: transparent;
-  border-color: var(--gyro-border-soft);
-  font-size: var(--gyro-font-support);
+.gyro-change-summary-actions .gyro-change-summary-options {
+  position: relative;
 }
 
-.gyro-chat-run-change-summary.is-complete
-  .gyro-change-summary-actions
-  > .is-undo {
-  border-color: transparent;
+.gyro-change-summary-file > :is(button, .gyro-change-summary-file-static)
+  > .gyro-change-summary-file-review {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--gyro-chat-space-1);
+  color: var(--gyro-muted);
+  min-height: 0;
 }
 
 .gyro-chat-run-change-summary.is-complete .gyro-change-summary-details {
@@ -8335,23 +8208,6 @@
   color: var(--gyro-success);
 }
 
-.gyro-change-summary-file.is-reviewable > .gyro-change-summary-diff {
-  border-top: 1px solid var(--gyro-premium-hairline-soft);
-  grid-column: 1 / -1;
-}
-
-.gyro-change-summary-diff-scroll {
-  max-height: 320px;
-  overflow: auto;
-}
-
-.gyro-change-summary-diff-note {
-  color: var(--gyro-faint);
-  font-size: var(--gyro-chat-meta-size);
-  margin: 0;
-  padding: var(--gyro-chat-space-2) var(--gyro-chat-block-gap);
-}
-
 .gyro-change-summary-more {
   align-items: center;
   background: transparent;
@@ -8397,7 +8253,7 @@
 }
 
 :root[data-theme="light"] .gyro-change-summary-details {
-  background: var(--gyro-control-bg);
+  background: var(--gyro-surface);
   border-color: var(--gyro-border);
   box-shadow: 0 9px 24px color-mix(in srgb, var(--gyro-shadow) 8%, transparent);
 }
@@ -8408,10 +8264,6 @@
   color: var(--gyro-muted);
 }
 
-:root[data-theme="light"] .gyro-change-summary-file > button,
-:root[data-theme="light"] .gyro-change-summary-file-static {
-  background: var(--gyro-control-bg);
-}
 :root .gyro-composer-shell.has-goal-caption {
   margin-top: calc(var(--gyro-chat-space-1) * 10);
 }
@@ -9219,6 +9071,15 @@ button.gyro-response-changed-files:hover {
   min-height: 0;
   padding: var(--gyro-chat-space-2) calc(var(--gyro-chat-space-1) * 2.5);
   gap: calc(var(--gyro-chat-space-1) * 2.5);
+}
+
+.gyro-approval-picker .gyro-composer-popover-description {
+  margin: 0 var(--gyro-chat-space-2) var(--gyro-chat-space-1);
+  padding-bottom: var(--gyro-chat-space-2);
+  border-bottom: 1px solid var(--gyro-premium-hairline-soft);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-chat-meta-size);
+  line-height: 1.4;
 }
 
 .gyro-approval-picker .gyro-composer-menu-item > svg:first-child,
@@ -10162,6 +10023,7 @@ button.gyro-response-changed-files:hover {
 }
 
 .gyro-composer-context-tooltip {
+  --gyro-context-tooltip-duration: calc(var(--gyro-premium-motion) * var(--gyro-exit-motion-factor));
   background: var(--gyro-premium-panel);
   border: 1px solid var(--gyro-premium-hairline-strong);
   border-radius: var(--gyro-radius-sm);
@@ -10178,9 +10040,9 @@ button.gyro-response-changed-files:hover {
   right: 0;
   transform: translateY(3px);
   transition:
-    opacity var(--gyro-premium-motion) var(--gyro-premium-ease),
-    transform var(--gyro-premium-motion) var(--gyro-premium-ease),
-    visibility var(--gyro-premium-motion) var(--gyro-premium-ease);
+    opacity var(--gyro-context-tooltip-duration) var(--gyro-premium-ease),
+    transform var(--gyro-context-tooltip-duration) var(--gyro-premium-ease),
+    visibility var(--gyro-context-tooltip-duration) var(--gyro-premium-ease);
   visibility: hidden;
   white-space: normal;
   z-index: 124;
@@ -10311,6 +10173,7 @@ button.gyro-response-changed-files:hover {
 
 .gyro-composer-context-meter:hover .gyro-composer-context-tooltip,
 .gyro-composer-context-meter:focus-within .gyro-composer-context-tooltip {
+  --gyro-context-tooltip-duration: var(--gyro-premium-motion);
   opacity: 1;
   transform: translateY(0);
   visibility: visible;
@@ -11015,10 +10878,7 @@ button.gyro-response-changed-files:hover {
       repeat(3, var(--gyro-composer-action-size));
     gap: var(--gyro-chat-space-1);
     align-items: center;
-  }
-  .gyro-chat-surface
-    .gyro-composer-shell.is-hero.has-provider
-    > .gyro-composer-bar {
+
     > .gyro-composer-control-context {
       grid-area: 1 / 1;
     }
@@ -11915,7 +11775,8 @@ button.gyro-response-changed-files:hover {
   content: none;
 }
 
-.gyro-run-approval-item {
+.gyro-run-approval-item,
+.gyro-run-group {
   min-width: 0;
 }
 
@@ -11932,10 +11793,6 @@ button.gyro-response-changed-files:hover {
   text-align: left;
   width: 100%;
 }
-.gyro-run-group {
-  min-width: 0;
-}
-
 .gyro-run-group-toggle {
   align-items: baseline;
   background: none;
@@ -12199,6 +12056,70 @@ button.gyro-response-changed-files:hover {
 .gyro-run-retry .gyro-run-row-detail {
   animation: gyro-run-breathe var(--gyro-chat-motion-spin) ease-in-out infinite;
 }
+
+.gyro-run-capacity .gyro-run-row-icon {
+  color: var(--gyro-status-warning);
+  opacity: 1;
+}
+
+.gyro-run-capacity .gyro-run-row-label {
+  color: var(--gyro-text);
+}
+
+.gyro-run-capacity-label {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--gyro-chat-space-1);
+}
+
+.gyro-run-capacity-help {
+  align-items: center;
+  color: var(--gyro-muted);
+  cursor: help;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 16px;
+  min-width: 16px;
+}
+
+.gyro-run-capacity-help:focus-visible {
+  border-radius: var(--gyro-radius-pill);
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+
+.gyro-run-capacity .gyro-run-row-text {
+  flex-wrap: wrap;
+  gap: 0 calc(var(--gyro-chat-space-1) * 2);
+}
+
+.gyro-run-capacity:has(> button) {
+  grid-template-columns: 19px minmax(0, 1fr) auto;
+}
+
+.gyro-run-capacity .gyro-run-row-detail {
+  color: var(--gyro-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.gyro-run-capacity > button {
+  background: transparent;
+  border: 0;
+  color: var(--gyro-muted);
+  font: inherit;
+  padding: calc(var(--gyro-chat-space-1) / 2) var(--gyro-chat-space-1);
+}
+
+.gyro-run-capacity-help:is(:hover, :focus-visible),
+.gyro-run-capacity > button:hover {
+  color: var(--gyro-text);
+}
+
+.gyro-run-capacity > button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+
 .gyro-run-budget {
   align-items: baseline;
   display: flex;
@@ -12266,7 +12187,8 @@ button.gyro-response-changed-files:hover {
   min-width: 0;
 }
 
-.gyro-run-problem-text strong {
+.gyro-run-problem-text strong,
+.gyro-run-problem-text span {
   font-size: var(--gyro-font-support);
 }
 
@@ -12276,10 +12198,6 @@ button.gyro-response-changed-files:hover {
 
 .gyro-run-problem.is-interrupted .gyro-run-problem-text strong {
   color: var(--gyro-warn);
-}
-
-.gyro-run-problem-text span {
-  font-size: var(--gyro-font-support);
 }
 
 .gyro-run-problem-actions {
@@ -12814,7 +12732,9 @@ button.gyro-response-changed-files:hover {
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-run-change-summary.is-complete {
+  background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
+  box-shadow: 0 2px 6px var(--gyro-premium-shadow-soft);
 }
 
 :root[data-theme]
@@ -15815,12 +15735,19 @@ button.gyro-response-changed-files:hover {
 }
 
 @container gyro-chat-pane (max-width: 360px) {
+  .gyro-chat-run-change-summary.is-complete > header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--gyro-chat-space-2);
+  }
+
+  .gyro-chat-run-change-summary.is-complete .gyro-chat-run-change-icon {
+    display: none;
+  }
+
   :root
     .gyro-chat-grid-slot.is-window-origin
     > .gyro-chat-surface.is-tiled
-    .gyro-thread-project-icon {
-    display: none;
-  }
+    .gyro-thread-project-icon,
   :root
     .gyro-app-shell
     .gyro-chat-surface.is-tiled
@@ -15847,48 +15774,20 @@ button.gyro-response-changed-files:hover {
     padding-left: var(--gyro-chat-header-navigation-inset);
   }
 }
-:root[data-theme] .gyro-chat-surface.is-empty:not(.is-tiled) {
-  isolation: isolate;
-  position: relative;
-}
-:root[data-theme] .gyro-chat-surface.is-empty:not(.is-tiled)::before {
-  background:
-    conic-gradient(
-      from 0deg at 34% 170%,
-      transparent 14deg,
-      var(--gyro-beam-1) 20deg,
-      var(--gyro-beam-2) 25deg,
-      var(--gyro-beam-3) 29deg,
-      var(--gyro-beam-4) 32deg,
-      transparent 37deg
-    ),
-    radial-gradient(52% 46% at 24% 0, var(--gyro-beam-drift), transparent);
-  content: "";
-  filter: blur(28px);
-  height: min(56%, 520px);
-  inset: 0 0 auto;
-  -webkit-mask-image: linear-gradient(var(--gyro-text) 30%, transparent);
-  mask-image: linear-gradient(var(--gyro-text) 30%, transparent);
-  opacity: var(--gyro-beam-strength);
-  pointer-events: none;
-  position: absolute;
-  z-index: -1;
-}
-
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-composer-bar
   .gyro-send-button:not(:disabled):not(.is-stop) {
-  background: var(--gyro-ink-bg);
-  box-shadow: var(--gyro-lift-shadow);
-  color: var(--gyro-ink-text);
+  background: var(--gyro-hero-send);
+  box-shadow: none;
+  color: var(--gyro-hero-send-text);
 }
 
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-composer-bar
   .gyro-send-button:not(:disabled):not(.is-stop):hover {
-  background: var(--gyro-ink-hover);
+  background: var(--gyro-hero-send-hover);
 }
 :root[data-theme]
   :is(.gyro-chat-start, .gyro-chat-surface, .gyro-chat-composer-dock)
@@ -15915,9 +15814,9 @@ button.gyro-response-changed-files:hover {
 }
 :root[data-theme] .gyro-app-shell.is-thread-layout .gyro-chat-thread-topbar {
   padding-right: var(--gyro-space-standard);
-  /* Re-assert the hairline balance (see the shared header rule) over later
-     thread-topbar padding resets. */
-  padding-top: var(--gyro-chat-header-hairline-width);
+  /* Re-assert the shared alignment over later thread-topbar padding resets. */
+  padding-block: var(--gyro-chat-header-hairline-width)
+    var(--gyro-window-header-bottom-inset);
 }
 
 :root[data-theme]
@@ -16185,7 +16084,8 @@ button.gyro-response-changed-files:hover {
   text-underline-offset: 2px;
   overflow-wrap: anywhere;
 }
-.gyro-chat-file-link:focus-visible {
+.gyro-chat-file-link:focus-visible,
+.gyro-chat-file-card:focus-visible {
   outline: 2px solid var(--gyro-focus-ring);
   outline-offset: 3px;
 }
@@ -16208,10 +16108,6 @@ button.gyro-response-changed-files:hover {
 }
 .gyro-chat-file-card:hover {
   border-color: var(--gyro-border-strong);
-}
-.gyro-chat-file-card:focus-visible {
-  outline: 2px solid var(--gyro-focus-ring);
-  outline-offset: 3px;
 }
 .gyro-chat-file-thumbnail {
   align-items: center;
@@ -17876,7 +17772,8 @@ button.gyro-response-changed-files:hover {
   cursor: pointer;
 }
 .gyro-run-error-details summary:focus-visible,
-.gyro-run-error-details pre:focus-visible {
+.gyro-run-error-details pre:focus-visible,
+.gyro-run .gyro-run-recovery .gyro-run-problem-actions button:focus-visible {
   outline: 2px solid var(--gyro-focus-ring);
   outline-offset: 2px;
 }
@@ -17884,10 +17781,6 @@ button.gyro-response-changed-files:hover {
   font: inherit;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
-}
-.gyro-run .gyro-run-recovery .gyro-run-problem-actions button:focus-visible {
-  outline: 2px solid var(--gyro-focus-ring);
-  outline-offset: 2px;
 }
 .gyro-run .gyro-run-recovery .gyro-run-problem-actions button.is-subtle {
   border-color: transparent;
@@ -18035,6 +17928,7 @@ button.gyro-response-changed-files:hover {
 .gyro-subagent-strip > summary {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--gyro-space-standard);
   min-height: max(28px, calc(28px * var(--gyro-ui-scale, 1)));
   padding: var(--gyro-space-compact) var(--gyro-space-standard);
@@ -18058,13 +17952,13 @@ button.gyro-response-changed-files:hover {
   transform: rotate(90deg);
 }
 .gyro-subagent-strip-status {
-  margin-left: auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--gyro-space-compact) var(--gyro-space-standard);
+  margin-inline-start: auto;
   min-width: 0;
-  overflow-wrap: anywhere;
-  text-align: right;
-}
-.gyro-subagent-strip-status.is-attention {
-  color: var(--gyro-warn);
 }
 .gyro-subagent-strip > .gyro-subagents {
   max-height: 180px;
@@ -18101,6 +17995,7 @@ button.gyro-response-changed-files:hover {
 }
 .gyro-subagents li > button:focus-visible,
 .gyro-subagent-environment button:focus-visible,
+.gyro-subagent-approval-source:focus-visible,
 .gyro-subagent-notice button:focus-visible,
 .gyro-subagent-notice summary:focus-visible {
   outline: 2px solid var(--gyro-focus-ring);
@@ -18111,6 +18006,29 @@ button.gyro-response-changed-files:hover {
   height: 14px;
   flex: none;
   object-fit: contain;
+}
+.gyro-subagent-approval-source {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  min-width: 0;
+  max-width: 100%;
+  min-height: max(24px, calc(28px * var(--gyro-ui-scale, 1)));
+  padding: var(--gyro-space-compact) var(--gyro-space-standard);
+  color: var(--gyro-text);
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  font-size: var(--gyro-chat-meta-size);
+  text-align: left;
+  cursor: pointer;
+}
+.gyro-subagent-approval-source > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.gyro-subagent-approval-source:hover {
+  background: var(--gyro-control-hover);
 }
 .gyro-subagent-marks {
   display: inline-flex;
@@ -18147,14 +18065,13 @@ button.gyro-response-changed-files:hover {
   min-width: 0;
   font-size: var(--gyro-chat-meta-size);
 }
+.gyro-env-card > .gyro-subagent-environment {
+  margin: var(--gyro-space-compact) var(--gyro-space-panel) 0;
+}
 .gyro-subagent-environment > header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--gyro-space-compact);
   margin-bottom: var(--gyro-space-standard);
-  color: var(--gyro-muted);
+  color: var(--gyro-text);
+  font-weight: 500;
 }
 .gyro-subagent-environment button,
 .gyro-subagent-notice button {
@@ -18202,8 +18119,22 @@ button.gyro-response-changed-files:hover {
 .gyro-subagent-environment-summary:hover {
   background: var(--gyro-control-hover);
 }
-.gyro-subagent-environment button.gyro-subagent-attention {
+.gyro-subagent-attention {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gyro-space-compact);
+  margin-bottom: var(--gyro-space-standard);
+}
+.gyro-subagent-attention > button {
+  padding-inline: var(--gyro-space-standard);
+  background: var(--gyro-control-hover);
+}
+.gyro-subagent-attention > button.is-waiting,
+.gyro-subagent-attention > button.is-interrupted {
   color: var(--gyro-warn);
+}
+.gyro-subagent-attention > button.is-failed {
+  color: var(--gyro-danger);
 }
 .gyro-subagent-notice {
   padding: var(--gyro-space-standard);
@@ -18216,9 +18147,10 @@ button.gyro-response-changed-files:hover {
 }
 .gyro-subagent-notice button {
   color: var(--gyro-accent);
+  padding-inline: var(--gyro-space-standard);
 }
-.gyro-subagent-notice button:disabled {
-  cursor: default;
+.gyro-subagent-notice button:hover {
+  background: var(--gyro-control-hover);
 }
 .gyro-subagent-notice details {
   margin-top: var(--gyro-space-compact);
@@ -18227,22 +18159,62 @@ button.gyro-response-changed-files:hover {
   cursor: pointer;
 }
 .gyro-subagent-panel {
+  display: flex;
+  flex-direction: column;
   height: 100%;
-  overflow: auto;
+  min-height: 0;
+  overflow: hidden;
   padding: var(--gyro-space-panel);
   min-width: 0;
   box-sizing: border-box;
 }
-.gyro-subagent-task {
-  margin: 0 0 calc(var(--gyro-chat-space-1) * 3.5);
+.gyro-subagent-overview {
+  display: grid;
+  flex: none;
+  gap: var(--gyro-space-standard);
+  padding-bottom: var(--gyro-space-standard);
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+.gyro-subagent-history {
+  display: grid;
+  align-content: start;
+  gap: var(--gyro-space-standard);
+  min-height: 0;
+  overflow: auto;
+  padding-top: var(--gyro-space-standard);
+}
+.gyro-subagent-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+}
+.gyro-subagent-heading h2 {
+  margin: 0;
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-lead);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.gyro-subagent-metadata {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--gyro-space-compact) var(--gyro-space-comfortable);
   color: var(--gyro-muted);
   font-size: var(--gyro-chat-meta-size);
+  font-variant-numeric: tabular-nums;
+}
+.gyro-subagent-task {
+  margin: 0;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
   line-height: 1.6;
 }
 .gyro-subagent-task summary {
   width: fit-content;
   cursor: pointer;
-  color: var(--gyro-faint);
+  color: var(--gyro-muted);
 }
 .gyro-subagent-task summary:hover {
   color: var(--gyro-text);
@@ -18253,31 +18225,40 @@ button.gyro-response-changed-files:hover {
   overflow-wrap: anywhere;
 }
 .gyro-subagent-run + .gyro-subagent-run {
-  margin-top: var(--gyro-space-section);
+  margin-top: var(--gyro-space-standard);
+  padding-top: var(--gyro-space-panel);
+  border-top: 1px solid var(--gyro-border-soft);
 }
 .gyro-subagent-result {
   margin-top: calc(var(--gyro-chat-space-1) * 3.5);
   overflow-wrap: anywhere;
 }
-.gyro-subagent-panel .gyro-run-header-actions {
-  align-items: center;
-}
-.gyro-subagent-panel .gyro-run-header-actions .gyro-subagent-stop {
+.gyro-subagent-panel .gyro-subagent-stop {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  flex: none;
+  width: var(--gyro-companion-control-height);
+  height: var(--gyro-companion-control-height);
+  margin-inline-start: auto;
   padding: 0;
+  color: var(--gyro-muted);
   background: transparent;
   border: 0;
+  border-radius: var(--gyro-radius-sm);
+  cursor: pointer;
 }
-.gyro-subagent-panel .gyro-subagent-stop:hover {
+.gyro-subagent-panel .gyro-subagent-stop:enabled:hover {
   background: var(--gyro-control-hover);
+  color: var(--gyro-danger);
+}
+.gyro-subagent-panel .gyro-subagent-stop:disabled {
+  color: var(--gyro-faint);
+  cursor: default;
 }
 .gyro-subagent-stop:focus-visible,
 .gyro-subagent-task summary:focus-visible {
-  outline: 2px solid var(--gyro-accent);
+  outline: 2px solid var(--gyro-focus-ring);
   outline-offset: 2px;
 }
 .gyro-chat-companion .gyro-subagent-tab,
@@ -18290,6 +18271,7 @@ button.gyro-response-changed-files:hover {
   gap: calc(var(--gyro-chat-space-1) * 1.75);
 }
 .gyro-subagent-empty {
+  margin: 0;
   padding: var(--gyro-space-panel);
   font-size: var(--gyro-chat-meta-size);
   color: var(--gyro-muted);
@@ -18947,10 +18929,6 @@ button.gyro-response-changed-files:hover {
 .gyro-chat-run-change-summary strong {
   font-size: var(--gyro-chat-small-size);
 }
-.gyro-chat-surface .gyro-send-button:not(:disabled):not(.is-stop) {
-  background: var(--gyro-ink-bg);
-  color: var(--gyro-ink-text);
-}
 .gyro-chat-environment-popover-actions button.is-primary {
   background: var(--gyro-ink-bg);
   color: var(--gyro-ink-text);
@@ -19026,14 +19004,15 @@ button.gyro-response-changed-files:hover {
 }
 .gyro-composer-input {
   display: grid;
-  background: var(--gyro-chat-raised);
+  background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-chat-hairline);
   border-radius: var(--gyro-radius-composer);
+  box-shadow: 0 2px 6px var(--gyro-premium-shadow-soft);
   box-sizing: border-box;
   min-width: 0;
   position: relative;
 }
-:root[data-theme] .gyro-chat-surface .gyro-composer-input > textarea {
+:root[data-theme] .gyro-chat-surface .gyro-composer-editor > :is(textarea, .gyro-composer-draft-mirror) {
   background: transparent;
   border: 0;
   border-radius: inherit;
@@ -19118,7 +19097,7 @@ button.gyro-response-changed-files:hover {
   margin: 0;
   padding: var(--gyro-space-comfortable) var(--gyro-space-panel);
 }
-.gyro-composer-input.is-setup-empty > textarea {
+.gyro-composer-input.is-setup-empty > .gyro-composer-editor {
   grid-area: 1 / 1;
 }
 .gyro-composer-input.is-setup-empty > .gyro-composer-blocker {
@@ -19130,15 +19109,15 @@ button.gyro-response-changed-files:hover {
 .gyro-composer-input.is-setup-empty > .gyro-composer-blocker > button {
   pointer-events: auto;
 }
-.gyro-composer-input.is-setup-empty > textarea::placeholder {
+.gyro-composer-input.is-setup-empty textarea::placeholder {
   opacity: 0;
 }
-.gyro-composer-input.is-setup-empty:has(> textarea:focus)
+.gyro-composer-input.is-setup-empty:has(textarea:focus)
   > .gyro-composer-blocker {
   display: none;
 }
-.gyro-composer-input.is-setup-empty:has(> textarea:focus)
-  > textarea::placeholder {
+.gyro-composer-input.is-setup-empty:has(textarea:focus)
+  textarea::placeholder {
   opacity: 1;
 }
 @container (max-width: 620px) {
@@ -19156,7 +19135,7 @@ button.gyro-response-changed-files:hover {
   transition: border-color var(--gyro-premium-motion-fast)
     var(--gyro-premium-ease);
 }
-.gyro-composer-input:has(> textarea:focus-visible) {
+.gyro-composer-input:has(textarea:focus-visible) {
   border-color: color-mix(
     in srgb,
     var(--gyro-text) 22%,
@@ -19286,7 +19265,7 @@ button.gyro-response-changed-files:hover {
   margin: var(--gyro-chat-space-2) var(--gyro-chat-space-2) 0;
 }
 .gyro-composer-input.is-setup-empty:has(> .gyro-composer-attachments)
-  > :is(textarea, .gyro-composer-blocker) {
+  > :is(.gyro-composer-editor, .gyro-composer-blocker) {
   grid-area: 3 / 1;
 }
 /* The composer a dragged image will land in, so a drop never feels blind. */
@@ -19587,7 +19566,7 @@ button.gyro-response-changed-files:hover {
 }
 
 /* Review: underline navigation; setup, results and history share one rhythm. */
-.gyro-second-opinion > nav {
+:root[data-theme] .gyro-second-opinion > nav {
   padding: 0 var(--gyro-space-panel);
   gap: var(--gyro-space-panel);
 }
@@ -19604,38 +19583,7 @@ button.gyro-response-changed-files:hover {
   color: var(--gyro-text);
   box-shadow: inset 0 -2px var(--gyro-accent);
 }
-.gyro-second-opinion-body {
-  padding: var(--gyro-space-panel);
-  gap: var(--gyro-space-section);
-  line-height: 1.55;
-}
-.gyro-second-opinion-body h3 {
-  font-size: var(--gyro-font-lead);
-  font-weight: 600;
-  letter-spacing: -0.015em;
-}
-.gyro-second-opinion-body :is(input, select, textarea) {
-  padding: var(--gyro-space-standard);
-  border-color: var(--gyro-border);
-}
-.gyro-second-opinion-body :is(.gyro-review-hint, .gyro-review-context span) {
-  font-size: var(--gyro-font-support);
-  line-height: 1.55;
-}
-.gyro-second-opinion-body fieldset {
-  gap: var(--gyro-space-panel);
-}
-.gyro-second-opinion-body .gyro-review-context {
-  padding: var(--gyro-space-comfortable);
-  border: 1px solid var(--gyro-border-soft);
-  background: transparent;
-}
-.gyro-second-opinion-body .gyro-review-findings {
-  gap: var(--gyro-space-comfortable);
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-review-scope {
-  padding-inline: var(--gyro-tool-gutter);
-}
+:root[data-theme] .gyro-chat-companion-content .gyro-review-scope,
 :root[data-theme] .gyro-chat-companion-content .gyro-diff-review-toolbar {
   padding-inline: var(--gyro-tool-gutter);
 }
@@ -19773,19 +19721,6 @@ button.gyro-response-changed-files:hover {
 :root[data-theme] .gyro-chat-companion-content .gyro-subagent-panel {
   padding: var(--gyro-space-panel);
 }
-:root[data-theme] .gyro-chat-companion-content .gyro-subagent-task {
-  margin-bottom: var(--gyro-space-panel);
-  padding-bottom: var(--gyro-space-panel);
-  border-bottom: 1px solid var(--gyro-border-soft);
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-subagent-task summary {
-  font-size: var(--gyro-font-support);
-  font-weight: 600;
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-subagent-task p {
-  line-height: 1.6;
-  color: var(--gyro-muted);
-}
 
 /* Plan keeps document/steps navigation and distinct completion states. */
 :root[data-theme] .gyro-chat-companion-host-pane > .gyro-plan-rail .gyro-plan-panel-head {
@@ -19812,6 +19747,10 @@ button.gyro-response-changed-files:hover {
   border-radius: 0;
   box-shadow: none;
 }
+:root[data-theme] .gyro-chat-companion-content .gyro-second-opinion > .gyro-environment-rail.is-tool.is-chromeless {
+  display: grid;
+  padding: 0;
+}
 :root[data-theme] .gyro-chat-environment-popover .gyro-environment-overline {
   font-size: var(--gyro-font-chrome);
   font-weight: 600;
@@ -19836,4 +19775,92 @@ button.gyro-response-changed-files:hover {
 ):focus-visible {
   outline: 2px solid var(--gyro-focus-ring);
   outline-offset: -2px;
+}
+
+.gyro-composer-editor {
+  position: relative;
+  min-width: 0;
+  border-radius: inherit;
+}
+.gyro-composer-draft-mirror {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  pointer-events: none;
+  color: var(--gyro-text);
+}
+.gyro-composer-editor:has(.gyro-composer-draft-mirror) textarea {
+  position: relative;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--gyro-text);
+}
+.gyro-inline-command {
+  position: relative;
+  display: inline-block;
+  color: transparent;
+}
+.gyro-inline-command svg {
+  position: absolute;
+  inset: 0;
+  fill: var(--gyro-muted);
+  font-family: var(--gyro-font-mono);
+}
+@media (forced-colors: active) {
+  .gyro-composer-draft-mirror { display: none; }
+  .gyro-composer-editor:has(.gyro-composer-draft-mirror) textarea {
+    -webkit-text-fill-color: CanvasText;
+  }
+}
+
+.gyro-composer-slash-menu.gyro-reviewer-menu {
+  width: min(calc(372px * var(--gyro-ui-scale, 1)), calc(100% - 12px));
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.gyro-composer-draft-mirror:has(.gyro-inline-reviewer) { z-index: 3; }
+@media (forced-colors: active) {
+  .gyro-composer-draft-mirror:has(.gyro-inline-reviewer) { display: block; color: transparent; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .gyro-reviewer-working .gyro-run-row-icon svg {
+    animation: gyro-chat-activity-spin var(--gyro-chat-motion-spin) linear infinite;
+  }
+}
+
+@container gyro-chat-pane (max-width: 280px) {
+  .gyro-chat-run-change-summary.is-complete > header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.gyro-composer-stop-status {
+  align-self: center;
+  color: var(--gyro-muted);
+  white-space: nowrap;
+}
+
+:root[data-theme] .gyro-chat-companion.is-review:has(.gyro-review-reader) { background-color: var(--gyro-pane); }
+
+.gyro-review-document .gyro-response-body { min-width: 0; font: inherit; width: 100%; }
+
+.gyro-council-chip-group .gyro-composer-chip.is-council {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-right: calc(var(--gyro-chat-space-1) * 1.5);
+}
+
+.gyro-response-actions.gyro-council-actions button:not([aria-label]) {
+  width: auto;
+  height: auto;
+  white-space: nowrap;
+  color: var(--gyro-text);
+}
+
+.gyro-council-scope-dock .gyro-question-dock-head > svg {
+  flex: none;
+  color: var(--gyro-muted);
 }

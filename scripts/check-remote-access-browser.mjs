@@ -258,6 +258,11 @@ try {
       ),
     "SSH disconnect status",
   );
+  assert.equal(
+    await evaluate("document.querySelector('.gyro-sidebar')?.innerText.includes('Existing remote chat')"),
+    false,
+    "A disconnected SSH host disappears from the sidebar even with its workspace open",
+  );
   await evaluate(
     "document.querySelector('.gyro-remote-ssh-menu summary').click()",
   );
@@ -289,6 +294,15 @@ try {
     "host toggle follows backend",
   );
   await click("Pair a device");
+  await until(
+    () =>
+      evaluate(
+        "Boolean(document.querySelector('.gyro-remote-qr svg[aria-label=\"Pairing code for your phone\"] path')?.getAttribute('d'))",
+      ),
+    "phone pairing QR code",
+  );
+  await click("Phone (Coming soon)");
+  await click("Mac");
   await until(
     () =>
       evaluate(
@@ -334,6 +348,11 @@ try {
       ),
     "standard remote new-session surface",
   );
+  const projectChipLabel = () => evaluate(
+    "document.querySelector('.gyro-chat-start [data-tour=\"composer.project\"]')?.textContent.trim()",
+  );
+  const remoteProjectLabel = "remote-project on Remote Mac · Fixture";
+  assert.equal(await projectChipLabel(), remoteProjectLabel, "remote device selection shows the folder and device");
   assert.equal(
     await evaluate(
       "Boolean(document.querySelector('.gyro-sidebar-project-children > button.is-empty'))",
@@ -989,6 +1008,7 @@ try {
       ),
     "No folder returns to a normal local new session",
   );
+  assert.equal(await projectChipLabel(), "No folder", "local chat shows its own location");
   await evaluate(
     "(() => { const f=document.querySelector('.gyro-chat-start textarea'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(f,'Create through the normal remote folder picker'); f.dispatchEvent(new Event('input',{bubbles:true})); })()",
   );
@@ -1048,6 +1068,7 @@ try {
       ),
     "draft follows selection to the remote host",
   );
+  assert.equal(await projectChipLabel(), remoteProjectLabel, "remote folder selection shows the folder and device");
   await evaluate(
     "document.querySelector('button[aria-label=\"Send message\"]').click()",
   );

@@ -10,6 +10,10 @@ import {
   type ReasoningEffort,
 } from "@gyro-dev/ui";
 import {
+  RemoteAccessSlots,
+  useRemoteWorkspaceSlots,
+} from "../../../../packages/ui/src/remote-access-context";
+import {
   FolderOpen,
   GitBranch,
   Terminal,
@@ -73,6 +77,7 @@ export default function RemoteWorkspace({
   selection: RemoteSelection;
 }) {
   useRemoteTheme();
+  const remoteSlots = useRemoteWorkspaceSlots();
   const workspace = useRemoteWorkspace(host.id, selection);
   const {
     view,
@@ -175,7 +180,6 @@ export default function RemoteWorkspace({
         projectId: view.projectId,
         sessionId: id,
       });
-      void access.refreshCatalog();
     }
     return id;
   };
@@ -462,7 +466,7 @@ export default function RemoteWorkspace({
       "This action is unavailable remotely. Manage provider setup and permission policy on the host.",
     );
   };
-  return (
+  const content = (
     <div className="gyro-remote-workspace">
       {!session && workspace.loading && (
         <div className="gyro-remote-empty" role="status">
@@ -629,5 +633,21 @@ export default function RemoteWorkspace({
         </div>
       )}
     </div>
+  );
+  return (
+    <RemoteAccessSlots.Provider
+      value={{
+        ...remoteSlots,
+        composerWorkspace: {
+          hostName: host.name,
+          projectName: selectedProject?.name,
+          projectKey: selectedProject
+            ? JSON.stringify([host.id, selectedProject.id])
+            : undefined,
+        },
+      }}
+    >
+      {content}
+    </RemoteAccessSlots.Provider>
   );
 }

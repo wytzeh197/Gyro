@@ -5,6 +5,7 @@ import vm from "node:vm";
 import ts from "typescript";
 import { createChatSendLifecycle } from "../apps/desktop/src/chat-send-lifecycle.ts";
 import { readChatSessionList } from "../apps/desktop/src/chat-session-updates.ts";
+import { updateSendingSessions } from "../packages/ui/src/chat-message-queue.ts";
 
 const source = readRepoSource(
   new URL("../apps/desktop/src/App.tsx", import.meta.url),
@@ -365,6 +366,8 @@ assert.equal(
 // Stop must pause before awaiting the provider, so completion cannot race the queue.
 const stoppedChatSessionsRef = { current: new Set() };
 let resolveStop;
+let rejectStop;
+let stopping = [];
 const stopChat = callback("stopChatSession", {
   steeringChatSessionsRef: { current: new Set() },
   pendingSteerStopsRef: { current: new Set() },
@@ -372,9 +375,14 @@ const stopChat = callback("stopChatSession", {
   chatAutoRetry: { cancelSession: () => {} },
   retryDispatchRef: { current: { cancelSession: () => {} } },
   invoke: () =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       resolveStop = resolve;
+      rejectStop = reject;
     }),
+  updateSendingSessions,
+  setStoppingSessionIds: (update) => {
+    stopping = update(stopping);
+  },
   setQueueRetryTick: () => {},
   notify: () => {},
 });
@@ -383,6 +391,12 @@ assert.ok(stoppedChatSessionsRef.current.has("existing"));
 resolveStop(true);
 await Promise.resolve();
 assert.ok(stoppedChatSessionsRef.current.has("existing"));
+stopChat("retry-stop");
+assert.deepEqual(stopping, ["existing", "retry-stop"]);
+rejectStop(new Error("fixture stop failed"));
+await Promise.resolve();
+assert.deepEqual(stopping, ["existing"], "a rejected stop must let the user retry");
+assert.ok(stoppedChatSessionsRef.current.has("retry-stop"));
 console.log(
   "Manual stop pauses queue delivery synchronously and stays paused.",
 );

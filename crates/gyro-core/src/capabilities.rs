@@ -34,6 +34,7 @@ pub enum CapabilityId {
     WorkspaceGitLog,
     WorkspaceGitShow,
     WorkspaceGitBlame,
+    WorkspaceGitCommit,
     WorkspaceProposeEdit,
     WorkspaceEdit,
     WorkspaceCreatePath,
@@ -43,6 +44,7 @@ pub enum CapabilityId {
     WorkspaceDuplicatePath,
     WorkspaceUndoPath,
     WorkspaceOpenFolder,
+    WorkspaceRunCommand,
     WorkspaceRunTask,
     WorkspaceRunTest,
     WorkspaceReadOutput,
@@ -56,6 +58,7 @@ pub enum CapabilityId {
     TerminalOpen,
     TerminalRead,
     TerminalWait,
+    TerminalInput,
     TerminalStop,
     BrowserTargets,
     BrowserSelectTarget,
@@ -117,6 +120,7 @@ impl CapabilityId {
             Self::WorkspaceGitLog => "workspace.git_log",
             Self::WorkspaceGitShow => "workspace.git_show",
             Self::WorkspaceGitBlame => "workspace.git_blame",
+            Self::WorkspaceGitCommit => "workspace.git_commit",
             Self::WorkspaceProposeEdit => "workspace.propose_edit",
             Self::WorkspaceEdit => "workspace.edit",
             Self::WorkspaceCreatePath => "workspace.create",
@@ -126,6 +130,7 @@ impl CapabilityId {
             Self::WorkspaceDuplicatePath => "workspace.duplicate",
             Self::WorkspaceUndoPath => "workspace.undo",
             Self::WorkspaceOpenFolder => "workspace.open_folder",
+            Self::WorkspaceRunCommand => "workspace.run_command",
             Self::WorkspaceRunTask => "workspace.run_task",
             Self::WorkspaceRunTest => "workspace.run_test",
             Self::WorkspaceReadOutput => "workspace.read_output",
@@ -139,6 +144,7 @@ impl CapabilityId {
             Self::TerminalOpen => "terminal.open",
             Self::TerminalRead => "terminal.read",
             Self::TerminalWait => "terminal.wait",
+            Self::TerminalInput => "terminal.input",
             Self::TerminalStop => "terminal.stop",
             Self::BrowserTargets => "browser.targets",
             Self::BrowserSelectTarget => "browser.select-target",
@@ -200,6 +206,7 @@ impl CapabilityId {
             Self::WorkspaceGitLog => "gyro_git_log",
             Self::WorkspaceGitShow => "gyro_git_show",
             Self::WorkspaceGitBlame => "gyro_git_blame",
+            Self::WorkspaceGitCommit => "gyro_git_commit",
             Self::WorkspaceProposeEdit => "gyro_workspace_propose_edit",
             Self::WorkspaceEdit => "gyro_workspace_edit",
             Self::WorkspaceCreatePath => "gyro_workspace_create",
@@ -209,6 +216,7 @@ impl CapabilityId {
             Self::WorkspaceDuplicatePath => "gyro_workspace_duplicate",
             Self::WorkspaceUndoPath => "gyro_workspace_undo",
             Self::WorkspaceOpenFolder => "gyro_workspace_open_folder",
+            Self::WorkspaceRunCommand => "gyro_workspace_run_command",
             Self::WorkspaceRunTask => "gyro_workspace_run_task",
             Self::WorkspaceRunTest => "gyro_workspace_run_test",
             Self::WorkspaceReadOutput => "gyro_workspace_read_output",
@@ -222,6 +230,7 @@ impl CapabilityId {
             Self::TerminalOpen => "gyro_terminal_open",
             Self::TerminalRead => "gyro_terminal_read",
             Self::TerminalWait => "gyro_terminal_wait",
+            Self::TerminalInput => "gyro_terminal_input",
             Self::TerminalStop => "gyro_terminal_stop",
             Self::BrowserTargets => "gyro_browser_targets",
             Self::BrowserSelectTarget => "gyro_browser_select_target",
@@ -814,6 +823,11 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         description: "Read which commit last touched each line of a workspace file, with the author. A call covers at most 400 lines, so pass lineStart and lineEnd for a large file.",
     },
     CapabilityDescriptor {
+        id: CapabilityId::WorkspaceGitCommit,
+        class: CapabilityClass::WorkspaceWrite,
+        description: "Create a local Git commit, staging paths or all changes first in the same call. Hooks run as usual and files that may hold secrets are refused. Use this instead of git add and git commit in a terminal; push separately with gyro_github_push.",
+    },
+    CapabilityDescriptor {
         id: CapabilityId::WorkspaceProposeEdit,
         class: CapabilityClass::WorkspaceInspect,
         description: "Submit a hash-guarded file edit in Gyro Workspace. Full access applies it immediately through the guarded transaction; otherwise it creates a proposal for review. Read existing files first and supply expectedHash. Check the returned status before claiming the edit was applied.",
@@ -857,6 +871,11 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         id: CapabilityId::WorkspaceOpenFolder,
         class: CapabilityClass::WorkspaceOpen,
         description: "Switch Gyro to a local folder the user named by absolute path (a leading ~/ is expanded), such as when they ask to open their website checkout from a chat that has no folder. Gyro opens the folder as a project with a fresh chat bound to it. This chat's own workspace does not change, so tools here keep using the current workspace. Use only when the user asks to open or switch folders. Returns the resolved path, folder name, and Git branch when there is one.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WorkspaceRunCommand,
+        class: CapabilityClass::TerminalExecute,
+        description: "Run one foreground command in this chat’s selected Workspace. Specify program and argv separately and optionally a workspace-relative cwd. Commands are offline by default. To use an HTTPS package registry, request exact public hostnames through networkDestinations and wait for the user’s one-invocation approval. If a destination is blocked, preserve the command result and ask before a new invocation.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRunTask,
@@ -922,6 +941,11 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         id: CapabilityId::TerminalWait,
         class: CapabilityClass::TerminalObserve,
         description: "Wait for this chat’s model-owned command to finish, without restarting it or repeatedly reading output. Pass the resource.id returned by terminal_open or a background workspace task. Returns completed, exitCode, and bounded output, or still running after timeoutMs (default 60000, max 300000). For builds and other long commands, prefer one long wait over repeated short ones. If still running, call this tool again; when completed, inspect exitCode and continue the user’s task. For remote CI builds, start a watcher such as gh run watch RUN_ID --exit-status in terminal_open, then wait here. A timeout does not stop the command. Do not finish the task merely because a wait timed out.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::TerminalInput,
+        class: CapabilityClass::TerminalExecute,
+        description: "Send keystrokes to this chat's running model-owned terminal: answer a prompt, drive a REPL, or interrupt a command. Text is sent verbatim, so end it with a newline to press Enter; key sends one control key such as ctrl-c. Never type secrets. Returns new output after yieldTimeMs.",
     },
     CapabilityDescriptor {
         id: CapabilityId::TerminalStop,
@@ -1607,6 +1631,8 @@ mod tests {
         assert!(plan.contains(&CapabilityId::ResearchRun));
         assert!(plan.contains(&CapabilityId::AgentSpawn));
         assert!(!plan.contains(&CapabilityId::GithubPush));
+        // A local commit rewrites history, so Plan never advertises it.
+        assert!(!plan.contains(&CapabilityId::WorkspaceGitCommit));
         assert_eq!(
             advertised_capability_descriptors(CapabilityRunMode::Normal).count(),
             CAPABILITY_DESCRIPTORS.len()

@@ -3,12 +3,13 @@
 use crate::{
     providers::{
         chat_types::ProviderChatRequest, runners::kimi_acp::compatible_provider_session_binding,
-        types::ProviderResumeCursor,
     },
     stores::{open_store, parse_uuid, to_string},
     terminal::types::TerminalPaneRequest,
 };
-use gyro_core::{ProviderSessionBinding, Session, SessionEventKind, SessionStore};
+#[cfg(test)]
+use gyro_core::SessionEventKind;
+use gyro_core::{ProviderSessionBinding, Session, SessionStore};
 use serde::Serialize;
 use std::{path::Path, process::Command};
 #[derive(Serialize)]
@@ -168,16 +169,11 @@ fn apply_session_data_home(
     }
 }
 
-pub(super) fn requires_native_session(
-    store: &SessionStore,
-    request: &ProviderChatRequest,
-) -> anyhow::Result<bool> {
-    let id = parse_uuid(&request.session_id).map_err(anyhow::Error::msg)?;
-    Ok(store
-        .get_session(id)?
-        .and_then(|session| session.import_source)
-        .is_some_and(|source| !source.fresh_session_requested))
-}
+#[cfg(test)]
+pub(super) use gyro_core::provider_runtime::recovery::{
+    check_import_continuation as check_continuation,
+    import_requires_native_session as requires_native_session,
+};
 
 pub(super) fn compatible_binding(
     store: &SessionStore,
@@ -205,63 +201,6 @@ pub(super) fn compatible_binding(
         return Some(binding);
     }
     compatible_provider_session_binding(binding, request)
-}
-
-pub(super) fn check_continuation(
-    store: &SessionStore,
-    request: &ProviderChatRequest,
-    cursor: Option<&ProviderResumeCursor>,
-) -> anyhow::Result<()> {
-    let id = parse_uuid(&request.session_id).map_err(anyhow::Error::msg)?;
-    let Some(session) = store.get_session(id)? else {
-        return Ok(());
-    };
-    let Some(source) = session.import_source else {
-        return Ok(());
-    };
-    if !session.workspace_path.is_dir() {
-        anyhow::bail!("Locate this imported project's folder before sending a message.");
-    }
-    if !source.fresh_session_requested && cursor.is_none() {
-        return unavailable(store, request, "The original provider session is unavailable for the selected model. Retry with its original model, or choose Continue in a new session.");
-    }
-    Ok(())
-}
-
-pub(super) fn unavailable(
-    store: &SessionStore,
-    request: &ProviderChatRequest,
-    detail: &str,
-) -> anyhow::Result<()> {
-    let id = parse_uuid(&request.session_id).map_err(anyhow::Error::msg)?;
-    if let Some(source) = store
-        .get_session(id)?
-        .and_then(|session| session.import_source)
-    {
-        if let Some(binding) =
-            store.get_provider_session_binding(id, source.source_kind.provider_id())?
-        {
-            store.upsert_provider_session_binding(
-                id,
-                binding.provider_id,
-                binding.model_id,
-                binding.model_label,
-                binding.reasoning_effort,
-                binding.resume_cursor_json,
-                "import-resume-unavailable",
-                Some(detail.to_owned()),
-            )?;
-        }
-    }
-    store.append_event(
-        id,
-        SessionEventKind::SystemEvent,
-        detail,
-        serde_json::json!({
-            "kind": "import-resume-unavailable", "detail": detail,
-        }),
-    )?;
-    anyhow::bail!("{detail}")
 }
 
 #[cfg(test)]

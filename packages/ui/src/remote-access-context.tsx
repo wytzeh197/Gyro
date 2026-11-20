@@ -22,7 +22,11 @@ export const RemoteAccessSlots = createContext<{
   content?: ReactNode;
   selectLocal?: () => void;
   projectChoices?: RemoteProjectChoice[];
-  selectedProjectKey?: string;
+  composerWorkspace?: {
+    hostName: string;
+    projectName?: string;
+    projectKey?: string;
+  };
   selectProject?: (key: string, draft: string) => void;
   createSession?: () => void;
   localProjects?: Array<{ path: string; label: string }>;

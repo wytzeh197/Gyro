@@ -1,0 +1,19 @@
+
+; Network access is not filtered by destination. Unix connections are denied
+; except for the system DNS resolver; SSH agent, Docker and Gyro sockets are
+; not granted. Creating a socket does not authorize connecting or binding it.
+(allow system-socket (socket-domain AF_INET) (socket-domain AF_INET6))
+(allow system-socket (socket-domain AF_UNIX))
+(allow network-outbound
+  (remote unix-socket (literal "/private/var/run/mDNSResponder"))
+  (remote unix-socket (literal "/var/run/mDNSResponder")))
+(allow network-outbound (remote ip "*:*"))
+(allow network-inbound network-bind (local ip "*:*"))
+(allow mach-lookup
+  (global-name "com.apple.system.opendirectoryd.libinfo")
+  (global-name "com.apple.SystemConfiguration.DNSConfiguration")
+  (global-name "com.apple.SystemConfiguration.configd")
+  (global-name "com.apple.networkd")
+  (global-name "com.apple.TrustEvaluationAgent")
+  (global-name "com.apple.trustd.agent"))
+; No SecurityServer, Apple Events, generic Mach lookup or other Unix connection.

@@ -90,7 +90,11 @@ pub(super) fn execute(
             let plan = plan_write(snapshot.as_deref(), expected_hash, operation)?;
             assert_no_unsaved_editor_changes(app, bound, MEMORY_PATH)?;
             ensure_memory_directory(&bound.workspace, &candidate)?;
-            let config = load_config_blocking().map_err(anyhow::Error::msg)?;
+            let config = crate::chat_permissions::for_active_turn(
+                app,
+                &bound.session_id,
+                load_config_blocking().map_err(anyhow::Error::msg)?,
+            );
             let apply_immediately = bound.policy.mode == CapabilityRunMode::Normal
                 && capability_full_access_enabled(&config)
                 && delegated_agents::file_edit_ceiling(app, &bound.session_id);

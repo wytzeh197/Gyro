@@ -3,7 +3,10 @@ use crate::{
         MAX_WORKSPACE_WATCH_CACHES, WORKSPACE_CHANGED_EVENT, WORKSPACE_CHANGE_DEBOUNCE,
         WORKSPACE_TREE_MAX_CACHE_AGE,
     },
-    state::workspace::{WorkspaceDirectoryStamp, WorkspaceTreeSnapshot, WorkspaceWatchManager},
+    git::{branches, read::discover_repository, status_cache::git_dirs},
+    state::workspace::{
+        WorkspaceChanges, WorkspaceDirectoryStamp, WorkspaceTreeSnapshot, WorkspaceWatchManager,
+    },
     stores::to_string,
     workspace::types::{WorkspaceChangedEvent, WorkspaceFile},
     workspace_tree_order,
@@ -255,13 +258,18 @@ impl WorkspaceWatchManager {
         }
         let watched_root = root.to_path_buf();
         let event_root = watched_root.clone();
+        let external_git_dirs = external_git_watch_dirs(root);
+        let event_git_dirs = external_git_dirs.clone();
         let manager = self.clone();
         let mut watcher = RecommendedWatcher::new(
             move |result: notify::Result<NotifyEvent>| {
                 // Notify errors mean the snapshot can no longer be trusted.
                 // Use the same coalesced rescan path instead of ignoring them.
                 let event = result.unwrap_or_else(|_| NotifyEvent::new(notify::EventKind::Any));
-                manager.schedule_rescan(event_root.clone(), event, app.clone());
+                if let Some(changes) = workspace_watch_changes(&event_root, &event, &event_git_dirs)
+                {
+                    manager.schedule_rescan(event_root.clone(), changes, app.clone());
+                }
             },
             NotifyConfig::default(),
         )
@@ -269,6 +277,17 @@ impl WorkspaceWatchManager {
         watcher
             .watch(&watched_root, RecursiveMode::Recursive)
             .map_err(to_string)?;
+        for dir in external_git_dirs {
+            // Individual metadata roots bound the watch and avoid object/pack churn.
+            // If a volume refuses these additional watches, focus/picker reads still catch up.
+            let _ = watcher.watch(&dir, RecursiveMode::NonRecursive);
+            for name in ["refs", "reftable", "worktrees"] {
+                let path = dir.join(name);
+                if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_dir()) {
+                    let _ = watcher.watch(&path, RecursiveMode::Recursive);
+                }
+            }
+        }
         self.watchers
             .lock()
             .map_err(|_| "workspace watcher registry is unavailable".to_string())?
@@ -276,14 +295,16 @@ impl WorkspaceWatchManager {
         Ok(())
     }
 
-    pub(crate) fn schedule_rescan(&self, root: PathBuf, event: NotifyEvent, app: tauri::AppHandle) {
-        if !workspace_watch_event_is_relevant(&root, &event) {
-            return;
-        }
+    fn schedule_rescan(&self, root: PathBuf, changes: WorkspaceChanges, app: tauri::AppHandle) {
         let should_start_worker = {
             let Ok(mut rescan_state) = self.rescan_state.lock() else {
                 return;
             };
+            rescan_state
+                .changes
+                .entry(root.clone())
+                .or_default()
+                .merge(changes);
             rescan_state.request(root.clone())
         };
         if !should_start_worker {
@@ -291,18 +312,25 @@ impl WorkspaceWatchManager {
         }
         let manager = self.clone();
         let mut superseded_rounds = 0;
+        let mut changes = WorkspaceChanges::default();
         std::thread::spawn(move || loop {
             std::thread::sleep(WORKSPACE_CHANGE_DEBOUNCE);
             let serial = manager
                 .rescan_state
                 .lock()
                 .ok()
-                .and_then(|rescan_state| rescan_state.serial(&root));
+                .and_then(|mut rescan_state| {
+                    if let Some(pending) = rescan_state.changes.remove(&root) {
+                        changes.merge(pending);
+                    }
+                    rescan_state.serial(&root)
+                });
             let Some(serial) = serial else {
                 return;
             };
 
-            let scanned = scan_workspace_tree(&root, 1);
+            // File content and Git metadata changes do not alter the root listing.
+            let scanned = changes.root_entries.then(|| scan_workspace_tree(&root, 1));
             let superseded = manager
                 .rescan_state
                 .lock()
@@ -315,18 +343,34 @@ impl WorkspaceWatchManager {
                 continue;
             }
             superseded_rounds = 0;
-            if let Ok(snapshot) =
-                scanned.and_then(|snapshot| manager.cache_snapshot(root.clone(), snapshot))
-            {
-                let _ = app.emit(
-                    WORKSPACE_CHANGED_EVENT,
-                    WorkspaceChangedEvent {
-                        workspace_path: root.display().to_string(),
-                        generation: snapshot.generation,
-                        files: snapshot.files,
-                    },
-                );
+            let snapshot = scanned
+                .and_then(Result::ok)
+                .and_then(|snapshot| manager.cache_snapshot(root.clone(), snapshot).ok());
+            let generation = snapshot.as_ref().map_or_else(
+                || manager.next_generation.fetch_add(1, Ordering::AcqRel) + 1,
+                |snapshot| snapshot.generation,
+            );
+            let emitted = std::mem::take(&mut changes);
+            if emitted.branches {
+                // A ref update must supersede a branch read started before it.
+                branches::invalidate(&root.to_string_lossy());
             }
+            let _ = app.emit(
+                WORKSPACE_CHANGED_EVENT,
+                WorkspaceChangedEvent {
+                    workspace_path: root.display().to_string(),
+                    generation,
+                    files: snapshot.map(|snapshot| snapshot.files),
+                    changed_paths: emitted.paths.map(|paths| {
+                        paths
+                            .into_iter()
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .collect()
+                    }),
+                    branches_changed: emitted.branches,
+                    directory_entries_changed: emitted.directory_entries,
+                },
+            );
 
             let should_rescan = manager
                 .rescan_state
@@ -341,6 +385,25 @@ impl WorkspaceWatchManager {
 }
 
 pub(crate) const MAX_SUPERSEDED_WORKSPACE_RESCANS: u32 = 8;
+
+fn external_git_watch_dirs(root: &Path) -> Vec<PathBuf> {
+    let mut directories = Vec::new();
+    if let Some((git_dir, common_dir)) =
+        discover_repository(root).and_then(|(repo, _)| git_dirs(&repo))
+    {
+        if !git_dir.join("HEAD").is_file() || !common_dir.join("objects").is_dir() {
+            return directories;
+        }
+        for directory in [git_dir, common_dir] {
+            if let Ok(path) = directory.canonicalize() {
+                if !path.starts_with(root) && !directories.contains(&path) {
+                    directories.push(path);
+                }
+            }
+        }
+    }
+    directories
+}
 
 /// Folder names that only ever hold installed dependencies or tool caches.
 pub(crate) fn is_generated_workspace_dir(name: &str) -> bool {
@@ -362,37 +425,174 @@ pub(crate) fn is_generated_workspace_dir(name: &str) -> bool {
     )
 }
 
+#[cfg(test)]
 pub(crate) fn workspace_watch_event_is_relevant(root: &Path, event: &NotifyEvent) -> bool {
-    event.need_rescan()
-        || event.paths.is_empty()
-        || event.paths.iter().any(|path| {
-            let Ok(relative) = path.strip_prefix(root) else {
-                return false;
-            };
-            let mut components = relative.components();
-            let Some(first) = components.next() else {
-                return true;
-            };
-            let first = first.as_os_str().to_string_lossy();
-            if first == ".git" {
-                // Index/ref changes alter badges and branch identity without touching source files.
-                let tail = relative.strip_prefix(".git").unwrap_or(relative);
-                return matches!(
+    workspace_watch_changes(root, event, &[]).is_some()
+}
+
+fn workspace_watch_changes(
+    root: &Path,
+    event: &NotifyEvent,
+    external_git_dirs: &[PathBuf],
+) -> Option<WorkspaceChanges> {
+    if event.need_rescan() || event.paths.is_empty() {
+        return Some(WorkspaceChanges {
+            paths: None,
+            branches: true,
+            directory_entries: true,
+            root_entries: true,
+        });
+    }
+    // Read-only operations must not trigger a fresh Git or editor read.
+    use notify::event::{AccessKind, AccessMode, ModifyKind};
+    if matches!(
+        event.kind,
+        notify::EventKind::Access(
+            AccessKind::Read | AccessKind::Open(_) | AccessKind::Close(AccessMode::Read)
+        )
+    ) {
+        return None;
+    }
+    let mut changes = WorkspaceChanges::default();
+    let mut relevant = false;
+    let git_dir = root.join(".git");
+    let may_change_entries = !matches!(
+        event.kind,
+        notify::EventKind::Modify(ModifyKind::Data(_) | ModifyKind::Metadata(_))
+    );
+    for path in &event.paths {
+        let git_path = path.strip_prefix(&git_dir).ok().or_else(|| {
+            external_git_dirs
+                .iter()
+                .find_map(|dir| path.strip_prefix(dir).ok())
+        });
+        if let Some(tail) = git_path {
+            let worktree_change = tail.strip_prefix("worktrees").is_ok_and(|path| {
+                path.components().count() < 2
+                    || matches!(
+                        path.file_name().and_then(|name| name.to_str()),
+                        Some("HEAD" | "gitdir" | "locked" | "commondir")
+                    )
+            });
+            let branch_change = tail.as_os_str().is_empty()
+                || matches!(
                     tail.to_str(),
-                    Some("HEAD" | "index" | "packed-refs" | "config")
-                ) || tail.starts_with("refs")
-                    || tail.starts_with("reftable");
+                    Some("HEAD" | "packed-refs" | "config" | "config.worktree")
+                )
+                || tail.starts_with("refs")
+                || tail.starts_with("reftable")
+                || worktree_change;
+            relevant |= branch_change || tail == Path::new("index");
+            changes.branches |= branch_change;
+            continue;
+        }
+        let Ok(relative) = path.strip_prefix(root) else {
+            continue;
+        };
+        // Keep generated caches and top-level build output from invalidating the workspace.
+        let mut parents = relative.parent().into_iter().flat_map(Path::components);
+        if parents.any(|part| is_generated_workspace_dir(&part.as_os_str().to_string_lossy())) {
+            continue;
+        }
+        let mut parts = relative.components();
+        if let Some(first) = parts.next() {
+            if matches!(
+                first.as_os_str().to_str(),
+                Some("target" | "dist" | "build")
+            ) && parts.next().is_some()
+            {
+                continue;
             }
-            // Dependency and tool caches churn at any depth (`pnpm install`,
-            // a test run); only their appearance at the top level counts.
-            let mut parents = relative.parent().into_iter().flat_map(Path::components);
-            if parents.any(|part| is_generated_workspace_dir(&part.as_os_str().to_string_lossy())) {
-                return false;
+        }
+        relevant = true;
+        changes.directory_entries |= may_change_entries;
+        changes.root_entries |= may_change_entries && relative.components().count() <= 1;
+        if let Some(paths) = &mut changes.paths {
+            paths.insert(relative.to_path_buf());
+            if paths.len() > 256 {
+                changes.paths = None;
             }
-            // Keep build-output suppression at the workspace root. Nested
-            // names such as src/build can contain source and must invalidate
-            // Explorer and Git state. The root folder itself still counts.
-            let is_build_output = matches!(first.as_ref(), ".next" | "target" | "dist" | "build");
-            !(is_build_output && components.next().is_some())
-        })
+        }
+    }
+    relevant.then_some(changes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workspace_watch_routes_linked_git_metadata_and_file_changes_separately() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        let main = root.join("main");
+        let linked = root.join("linked");
+        let common = main.join(".git");
+        let linked_metadata = common.join("worktrees/linked");
+        fs::create_dir_all(common.join("objects")).unwrap();
+        fs::create_dir_all(&linked_metadata).unwrap();
+        fs::create_dir_all(&linked).unwrap();
+        fs::write(
+            linked.join(".git"),
+            format!("gitdir: {}\n", linked_metadata.display()),
+        )
+        .unwrap();
+        fs::write(linked_metadata.join("HEAD"), "ref: refs/heads/feature\n").unwrap();
+        fs::write(linked_metadata.join("commondir"), "../..\n").unwrap();
+
+        let dirs = external_git_watch_dirs(&linked);
+        assert_eq!(dirs, vec![linked_metadata.clone(), common.clone()]);
+        let git = NotifyEvent::new(notify::EventKind::Any).add_path(common.join("refs/heads/main"));
+        let mut changed = workspace_watch_changes(&linked, &git, &dirs).unwrap();
+        assert!(changed.branches);
+        assert!(changed.paths.as_ref().unwrap().is_empty());
+        assert!(!changed.directory_entries && !changed.root_entries);
+
+        let worktree =
+            NotifyEvent::new(notify::EventKind::Any).add_path(common.join("worktrees/other/HEAD"));
+        assert!(
+            workspace_watch_changes(&linked, &worktree, &dirs)
+                .unwrap()
+                .branches
+        );
+        let index =
+            NotifyEvent::new(notify::EventKind::Any).add_path(linked_metadata.join("index"));
+        assert!(
+            !workspace_watch_changes(&linked, &index, &dirs)
+                .unwrap()
+                .branches
+        );
+
+        let files = NotifyEvent::new(notify::EventKind::Any)
+            .add_path(linked.join("src/before.rs"))
+            .add_path(linked.join("lib/after.rs"))
+            .add_path(common.join("objects/ignored"));
+        changed.merge(workspace_watch_changes(&linked, &files, &dirs).unwrap());
+        assert!(changed.branches);
+        assert!(changed.directory_entries && !changed.root_entries);
+        assert_eq!(
+            changed.paths.unwrap(),
+            HashSet::from([
+                PathBuf::from("src/before.rs"),
+                PathBuf::from("lib/after.rs")
+            ])
+        );
+    }
+
+    #[test]
+    fn workspace_watch_skips_directory_reads_for_content_edits() {
+        use notify::event::{DataChange, ModifyKind};
+        let root = Path::new("/workspace");
+        let content = NotifyEvent::new(notify::EventKind::Modify(ModifyKind::Data(
+            DataChange::Content,
+        )))
+        .add_path(root.join("README.md"));
+        let content = workspace_watch_changes(root, &content, &[]).unwrap();
+        assert!(!content.directory_entries && !content.root_entries);
+        assert!(content.paths.unwrap().contains(Path::new("README.md")));
+
+        let unknown = NotifyEvent::new(notify::EventKind::Any).add_path(root.join("README.md"));
+        let unknown = workspace_watch_changes(root, &unknown, &[]).unwrap();
+        assert!(unknown.directory_entries && unknown.root_entries);
+    }
 }

@@ -8,7 +8,8 @@ pub(crate) use gyro_core::provider_runtime::reliability::{
 };
 #[cfg(test)]
 use gyro_core::provider_runtime::reliability::{openai_tools_for_round, tools_for_round};
-pub(crate) use gyro_core::provider_runtime::support::is_model_capacity_error;
+#[cfg(test)]
+use gyro_core::provider_runtime::support::is_model_capacity_error;
 use gyro_core::CapabilityId;
 pub(crate) fn validate_tool_call(
     name: &str,

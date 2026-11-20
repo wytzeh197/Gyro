@@ -26,6 +26,7 @@ import {
   type ChatAttachment,
   type ChatGridState,
   type ChatMode,
+  type ComposerReviewer,
   type ChatPaneRef,
   type CommandProfile,
   type CouncilRun,
@@ -188,6 +189,7 @@ export type TurnSourceControlBaselines = Record<
 >;
 
 export type ChatTurnContextSnapshot = {
+  secondOpinion?: ComposerReviewer;
   /** UI acknowledgement after durable insertion or queue acceptance; never serialized. */
   onAccepted?: () => void;
   /** Scheduler delivery may wait, but must never enqueue another copy. */
@@ -282,6 +284,7 @@ export type SavedProject = {
 
 export const EMPTY_CONFIG: GyroConfig = {
   automaticUpdateChecks: true,
+  automaticUpdates: false,
   telemetryEnabled: false,
   requireCommandApproval: true,
   requireFileEditApproval: true,
@@ -927,24 +930,34 @@ export function loadPinnedSessionIds(): string[] {
   }
 }
 
-export function loadChatDrafts(): Record<string, string> {
+export type ComposerDrafts = {
+  drafts: Record<string, string>;
+  reviewers: Record<string, ComposerReviewer>;
+};
+
+export function loadChatDrafts(): ComposerDrafts {
+  const drafts = new Map<string, string>();
+  const reviewers = new Map<string, ComposerReviewer>();
   const stored = readBoundedLocalStorage(CHAT_DRAFTS_STORAGE_KEY, 256_000);
-  if (!stored) return {};
   try {
-    const parsed = JSON.parse(stored);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-      return {};
-    return Object.fromEntries(
-      Object.entries(parsed).filter(
-        (entry): entry is [string, string] =>
-          typeof entry[0] === "string" &&
-          typeof entry[1] === "string" &&
-          chatMessageLength(entry[1]) <= MAX_CHAT_MESSAGE_CHARS,
-      ),
-    );
-  } catch {
-    return {};
-  }
+    const parsed = JSON.parse(stored || "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      for (const [key, entry] of Object.entries(parsed)) {
+        const row = entry && typeof entry === "object" ? entry : undefined;
+        const text = row && "text" in row ? row.text : entry;
+        if (typeof text !== "string" || chatMessageLength(text) > MAX_CHAT_MESSAGE_CHARS) continue;
+        drafts.set(key, text);
+        const reviewer = row && "reviewer" in row ? row.reviewer : undefined;
+        if (reviewer && typeof reviewer === "object" &&
+            "providerId" in reviewer && typeof reviewer.providerId === "string" && isProviderId(reviewer.providerId) &&
+            "modelId" in reviewer && typeof reviewer.modelId === "string" && reviewer.modelId &&
+            "label" in reviewer && typeof reviewer.label === "string" && reviewer.label) {
+          reviewers.set(key, { providerId: reviewer.providerId, modelId: reviewer.modelId, label: reviewer.label });
+        }
+      }
+    }
+  } catch { /* Ignore invalid local drafts. */ }
+  return { drafts: Object.fromEntries(drafts), reviewers: Object.fromEntries(reviewers) };
 }
 
 export function loadChatDraftModes(): Record<string, ChatMode> {
@@ -1075,8 +1088,11 @@ export function chatPaneForSession(session: Session): ChatPaneRef {
   };
 }
 
-export function persistChatDrafts(drafts: Record<string, string>) {
-  safeSetLocalStorage(CHAT_DRAFTS_STORAGE_KEY, JSON.stringify(drafts));
+export function persistChatDrafts({ drafts, reviewers }: ComposerDrafts) {
+  const rows = Object.entries(drafts).map(([key, text]) => [
+    key, reviewers[key] ? { text, reviewer: reviewers[key] } : text,
+  ]);
+  safeSetLocalStorage(CHAT_DRAFTS_STORAGE_KEY, JSON.stringify(Object.fromEntries(rows)));
 }
 
 export function flushPersistedWorkbenchState(

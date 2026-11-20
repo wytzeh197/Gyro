@@ -1,5 +1,5 @@
+import { SurfacePresence } from "./surface-presence";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { MoreHorizontal, Trash2 } from "lucide-react";
 
 import { confirmAction } from "./confirm-action";
@@ -82,8 +82,8 @@ export function ScmFileActions({
       >
         <MoreHorizontal size={14} />
       </button>
-      {position &&
-        createPortal(
+      <SurfacePresence portal="body">
+        {position ? (
           <div
             ref={menu}
             className="gyro-scm-file-actions-menu"
@@ -109,9 +109,9 @@ export function ScmFileActions({
               <Trash2 size={14} />
               <span>Discard local changes</span>
             </button>
-          </div>,
-          document.body,
-        )}
+          </div>
+        ) : null}
+      </SurfacePresence>
     </>
   );
 }

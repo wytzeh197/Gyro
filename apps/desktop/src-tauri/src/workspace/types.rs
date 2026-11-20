@@ -191,5 +191,9 @@ pub(crate) struct WorkspacePreparationSnapshot {
 pub(crate) struct WorkspaceChangedEvent {
     pub(crate) workspace_path: String,
     pub(crate) generation: u64,
-    pub(crate) files: Vec<WorkspaceFile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) files: Option<Vec<WorkspaceFile>>,
+    pub(crate) changed_paths: Option<Vec<String>>,
+    pub(crate) branches_changed: bool,
+    pub(crate) directory_entries_changed: bool,
 }

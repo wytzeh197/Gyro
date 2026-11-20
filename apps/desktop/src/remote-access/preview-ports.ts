@@ -76,6 +76,8 @@ export function createPreviewPorts() {
   const requests: HostRequest[] = [];
   let holdFileReads = false;
   const pendingFileReads: Array<() => void> = [];
+  let failNextInvite = false;
+  let inviteSeconds = 300;
   let watchedSession: string | undefined;
   let watchedHost = hostId;
   let approvals: Snapshot["approvals"] = [];
@@ -182,10 +184,16 @@ export function createPreviewPorts() {
         if (request.action === "cancelInvitation")
           status.invitationActive = false;
         if (request.action === "invite") {
+          if (failNextInvite) {
+            failNextInvite = false;
+            throw new Error("Remote access isn't running (fixture)");
+          }
           status.invitationActive = true;
+          // Real invitations carry a relay address; keep the fixture as long
+          // so the QR preview has a realistic density.
           return {
-            invitation: "gyro-pair-v1:EXPLICIT-BROWSER-FIXTURE",
-            expiresAt: Math.floor(Date.now() / 1000) + 300,
+            invitation: `gyro-pair-v1:EXPLICIT-BROWSER-FIXTURE-${"x".repeat(480)}`,
+            expiresAt: Math.floor(Date.now() / 1000) + inviteSeconds,
           } as T;
         }
         if (request.action === "revoke")
@@ -196,7 +204,10 @@ export function createPreviewPorts() {
           const peer = status.pending.find((p) => p.id === request.peerId);
           status.pending = status.pending.filter((p) => p !== peer);
           if (peer && request.action === "approve")
-            status.peers.push({ ...peer, role: "both" });
+            status.peers.push({
+              ...peer,
+              role: peer.role === "client" ? "client" : "both",
+            });
         }
         if (request.action === "pair")
           return { hostId, peerId: clientId, status: "pending" } as T;
@@ -290,7 +301,8 @@ export function createPreviewPorts() {
           result = { id: crypto.randomUUID(), kind: "workspace-file", name: op.path,
             path: op.path, relativePath: op.path, size: 10, contentHash: "fixture-file-hash" };
           break;
-        case "snapshot":
+        case "snapshot": {
+          const fetchedAt = new Date();
           result = {
             session: sessions.find((s) => s.id === op.sessionId),
             running: running.has(op.sessionId),
@@ -305,22 +317,23 @@ export function createPreviewPorts() {
                   id: "five-hour",
                   label: "5 hour",
                   usedPercent: 37,
-                  resetsAt: "2026-11-14T20:00:00Z",
+                  resetsAt: new Date(fetchedAt.getTime() + 3_600_000).toISOString(),
                 },
                 {
                   id: "weekly",
                   label: "Weekly",
                   usedPercent: 62,
-                  resetsAt: "2026-11-20T20:00:00Z",
+                  resetsAt: new Date(fetchedAt.getTime() + 7 * 86_400_000).toISOString(),
                 },
               ],
-              fetchedAt: new Date().toISOString(),
+              fetchedAt: fetchedAt.toISOString(),
             },
             control,
             approvals,
             mutations,
           };
           break;
+        }
         case "history": {
           const events = histories.get(op.sessionId) ?? [];
           // Match the native host: a known revision returns no transcript body.
@@ -632,13 +645,17 @@ export function createPreviewPorts() {
       online = value;
     },
     /** Fixture-only: a device asking this Mac to trust it. */
-    addPending(name: string) {
+    addPending(name: string, id = "a1b2c3d4e5f60718293a4b5c6d7e8f90") {
       status.invitationActive = false;
-      status.pending.push({
-        id: "a1b2c3d4e5f60718293a4b5c6d7e8f90",
-        name,
-        role: "client",
-      });
+      status.pending.push({ id, name, role: "client" });
+    },
+    /** Fixture-only: make the next invitation fail to be created. */
+    failNextInvite() {
+      failNextInvite = true;
+    },
+    /** Fixture-only: lifetime of the next invitations, in seconds. */
+    setInviteSeconds(seconds: number) {
+      inviteSeconds = seconds;
     },
     addApproval(command: string, cwd = "/fixture/remote-project") {
       approvals = [

@@ -2,6 +2,8 @@
 
 The verified command path checks one local web-app task with one explicitly reviewed command and one or two editable requirements. A structured native browser action is also implemented in source, with native acceptance still pending. Neither path uses AI, a hosted account, a paid provider, cloud sync or billing. Open a chat's **Chat options → Check this work** menu.
 
+You can also open **Check this work** from the Changes view for the latest turn when the chat is idle. Check evaluates the current workspace. The recorded diff shows the edits from that turn.
+
 ## What the prototype establishes
 
 Each requirement has a stable observation key, expected JSON value and reviewed evidence scope: **API responses**, **Browser interaction** or **Other command assertions**. The approved test command must produce a matching observation, matching scope and supporting output. Gyro compares actual and expected values itself. Missing or mismatched scope remains Not checked independently for that requirement. An exit code, an AI claim or a missing observation cannot produce a pass.
@@ -20,7 +22,7 @@ The fixture is a small web app with an in-memory HTTP API. The broken implementa
 
 ## Check window and background status
 
-Check now separates Requirements, Review and Results. The review summarizes requirements, local URL, expected data changes and covered files; exact actions, expectations and snapshot details remain inspectable before approval.
+Start with what should pass. Each requirement has an **Evidence settings** disclosure, and **Test setup** contains the action, local URL, expected data changes and covered files. Select **Review check plan** to inspect the plan, including exact actions, expectations and snapshot details, before approval.
 
 After approval, closing the Check window leaves that check running in the current app session. A compact Gyro Check row above that chat's composer shows progress. Details reopens the same check without another execution; Stop requests cancellation separately. When execution settles, the row retains the result counts and can be dismissed. Stopped or missing evidence remains Not checked. This does not promise continuation after quitting the app.
 
@@ -71,7 +73,7 @@ Changes during or after a check, unavailable files or changed workspace identity
 
 ## Reproduce the controlled examples
 
-In a chat rooted in this repository, open Check, expand **Controlled to-do example**, and load Working, Broken, Broken form or Unavailable. Review the plan and run it. The approved command starts its own isolated loopback server, creates synthetic in-memory items, captures the API responses, then stops its server. It fails if its port is occupied instead of attaching to an unknown app.
+In a chat rooted in this repository, open Check, expand **Test setup → Controlled to-do example**, and load Working, Broken, Broken form or Unavailable. Review the plan and run it. The approved command starts its own isolated loopback server, creates synthetic in-memory items, captures the API responses, then stops its server. It fails if its port is occupied instead of attaching to an unknown app.
 
 To inspect the web app manually:
 

@@ -77,7 +77,7 @@ export function useWorkbenchAppearance(preferences: WorkbenchPreferences) {
       .querySelector('meta[name="theme-color"]')
       ?.setAttribute(
         "content",
-        resolvedTheme === "light" ? "#f7f7f7" : "#181818",
+        resolvedTheme === "light" ? "#f9f8f7" : "#1e1e1d",
       );
     try {
       window.localStorage.setItem(THEME_STORAGE_KEY, themePreference);

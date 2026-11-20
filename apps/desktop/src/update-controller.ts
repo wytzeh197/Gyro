@@ -28,6 +28,7 @@ export type GyroUpdateController = {
   checkForUpdate: (userInitiated?: boolean) => Promise<UpdateCheckResult>;
   downloadUpdate: () => Promise<void>;
   restartAndInstallUpdate: () => Promise<void>;
+  installUpdateOnQuit: () => Promise<void>;
 };
 
 export type UpdateCheckResult =
@@ -63,11 +64,13 @@ async function updateArchiveSize(update: Update): Promise<number | undefined> {
 
 export function useGyroUpdater({
   automaticChecks,
+  automaticUpdates,
 }: {
   automaticChecks: boolean;
+  automaticUpdates: boolean;
 }): GyroUpdateController {
-  const [state, setState] = useState<UpdateState>({
-    status: import.meta.env.DEV ? "development" : "checking",
+  const [state, setRenderedState] = useState<UpdateState>({
+    status: import.meta.env.DEV || !isTauriRuntime() ? "development" : "idle",
     currentVersion: import.meta.env.DEV ? "development" : "unknown",
   });
   const [installedUpdateNotice, setInstalledUpdateNotice] =
@@ -78,6 +81,18 @@ export function useGyroUpdater({
   const retryCountRef = useRef(0);
   const retryTimerRef = useRef<number>();
   const checkingRef = useRef(false);
+  const installingRef = useRef<Promise<void>>();
+
+  // Claim each phase immediately so a button press and a background effect
+  // cannot both start the same operation before React renders the new state.
+  const setState = useCallback(
+    (next: UpdateState | ((current: UpdateState) => UpdateState)) => {
+      stateRef.current =
+        typeof next === "function" ? next(stateRef.current) : next;
+      setRenderedState(stateRef.current);
+    },
+    [],
+  );
 
   const checkForUpdate = useCallback(
     async (userInitiated = true): Promise<UpdateCheckResult> => {
@@ -174,12 +189,8 @@ export function useGyroUpdater({
         checkingRef.current = false;
       }
     },
-    [automaticChecks],
+    [automaticChecks, setState],
   );
-
-  useEffect(() => {
-    stateRef.current = state;
-  }, [state]);
 
   const downloadUpdate = useCallback(async () => {
     let update = updateRef.current;
@@ -189,9 +200,13 @@ export function useGyroUpdater({
         return;
       }
       update = updateRef.current;
-      if (!update) {
-        return;
-      }
+    }
+    if (
+      !update ||
+      checkingRef.current ||
+      !["available", "failed"].includes(stateRef.current.status)
+    ) {
+      return;
     }
     let downloadedBytes = 0;
     // Falls back to the manifest size when the server omits a content length.
@@ -203,20 +218,23 @@ export function useGyroUpdater({
       progressPercent: 0,
     }));
     try {
-      await update.download((event) => {
-        if (event.event === "Started") {
-          totalBytes = event.data.contentLength ?? totalBytes;
-        } else if (event.event === "Progress") {
-          downloadedBytes += event.data.chunkLength;
-        }
-        setState((current) => ({
-          ...current,
-          status: "downloading",
-          downloadedBytes,
-          totalBytes,
-          progressPercent: updateProgressPercent(downloadedBytes, totalBytes),
-        }));
-      });
+      await update.download(
+        (event) => {
+          if (stateRef.current.status !== "downloading") return;
+          if (event.event === "Started") {
+            totalBytes = event.data.contentLength ?? totalBytes;
+          } else if (event.event === "Progress") {
+            downloadedBytes += event.data.chunkLength;
+          }
+          setState((current) => ({
+            ...current,
+            downloadedBytes,
+            totalBytes,
+            progressPercent: updateProgressPercent(downloadedBytes, totalBytes),
+          }));
+        },
+        { timeout: 5 * 60 * 1_000 },
+      );
       setState((current) => ({
         ...current,
         status: "ready",
@@ -233,43 +251,56 @@ export function useGyroUpdater({
         silentFailure: false,
       }));
     }
-  }, [checkForUpdate]);
+  }, [checkForUpdate, setState]);
 
-  const restartAndInstallUpdate = useCallback(async () => {
-    const update = updateRef.current;
-    if (!update) {
-      await checkForUpdate(true);
-      return;
+  useEffect(() => {
+    if (automaticUpdates && state.status === "available") {
+      void downloadUpdate();
     }
-    const installedNotice: InstalledUpdateNotice = {
-      version: update.version,
-      releaseNotes: update.body ?? "",
-    };
-    setState((current) => ({ ...current, status: "installing" }));
-    try {
-      await update.install();
-      // Installation succeeded. Store the offered release before the process
-      // exits so the next launch can show its notes without another check.
-      try {
-        localStorage.setItem(
-          INSTALLED_UPDATE_NOTICE_STORAGE_KEY,
-          JSON.stringify(installedNotice),
-        );
-      } catch {
-        // Storage availability should never prevent the installed app from
-        // restarting. The update itself is already on disk.
+  }, [automaticUpdates, downloadUpdate, state.status]);
+
+  const installUpdate = useCallback(
+    async (restart: boolean) => {
+      if (installingRef.current) return installingRef.current;
+      const update = updateRef.current;
+      if (!update || stateRef.current.status !== "ready") {
+        return;
       }
-      await invoke("restart_app");
-    } catch (error) {
-      setState((current) => ({
-        ...current,
-        status: "failed",
-        error: String(error),
-        retryable: true,
-        silentFailure: false,
-      }));
-    }
-  }, [checkForUpdate]);
+      setState((current) => ({ ...current, status: "installing" }));
+      installingRef.current = (async () => {
+        try {
+          await update.install();
+          // The next launch can show release notes without another check.
+          try {
+            const installedNotice: InstalledUpdateNotice = {
+              version: update.version,
+              releaseNotes: update.body ?? "",
+            };
+            localStorage.setItem(
+              INSTALLED_UPDATE_NOTICE_STORAGE_KEY,
+              JSON.stringify(installedNotice),
+            );
+          } catch {
+            // The update is already on disk and exiting must still work.
+          }
+          if (restart) await invoke("restart_app");
+        } catch (error) {
+          setState((current) => ({
+            ...current,
+            status: "failed",
+            error: String(error),
+            retryable: true,
+            silentFailure: false,
+          }));
+          if (!restart) console.error("Gyro update failed before quit", error);
+        }
+      })().finally(() => {
+        installingRef.current = undefined;
+      });
+      return installingRef.current;
+    },
+    [setState],
+  );
 
   useEffect(() => {
     if (import.meta.env.DEV || !isTauriRuntime()) {
@@ -279,6 +310,10 @@ export function useGyroUpdater({
     void getVersion()
       .then((currentVersion) => {
         if (!active) return;
+        currentVersionRef.current = currentVersion;
+        if (stateRef.current.status === "idle") {
+          setState((current) => ({ ...current, currentVersion }));
+        }
         try {
           const raw = localStorage.getItem(INSTALLED_UPDATE_NOTICE_STORAGE_KEY);
           if (!raw) return;
@@ -322,7 +357,7 @@ export function useGyroUpdater({
     return () => {
       active = false;
     };
-  }, []);
+  }, [setState]);
 
   const dismissInstalledUpdateNotice = useCallback(() => {
     setInstalledUpdateNotice(undefined);
@@ -390,6 +425,10 @@ export function useGyroUpdater({
     dismissInstalledUpdateNotice,
     checkForUpdate,
     downloadUpdate,
-    restartAndInstallUpdate,
+    restartAndInstallUpdate: () => installUpdate(true),
+    installUpdateOnQuit: async () => {
+      if (installingRef.current) await installingRef.current;
+      else if (automaticUpdates) await installUpdate(false);
+    },
   };
 }

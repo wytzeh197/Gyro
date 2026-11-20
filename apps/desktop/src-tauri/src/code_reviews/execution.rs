@@ -16,7 +16,7 @@ use gyro_core::{
         pack_review_input, parse_review_result, read_snapshot, write_review_output, CodeReviewRun,
         ReviewStatus,
     },
-    provider_runtime::{api_config::provider_adapter_with_kind, types::ProviderAdapterKind},
+    provider_runtime::{advisory::supports_code_review, api_config::provider_adapter_with_kind},
     CreateSessionContext, GyroConfig, SessionEventKind, SessionOrigin, SessionStore,
 };
 use serde_json::json;
@@ -46,7 +46,10 @@ pub(crate) fn validate_reviewer(
         .find(|provider| provider.id == provider_id && provider.enabled)
         .ok_or_else(|| anyhow::anyhow!("Enable the selected reviewer in Providers"))?;
     let kind = provider_adapter_with_kind(provider_id, provider.kind.as_deref()).kind;
-    ensure!(matches!(kind,ProviderAdapterKind::Ollama|ProviderAdapterKind::OpenAiCompatible),"No-tool review is unavailable for this adapter in this build; explicitly choose an API or local Ollama model");
+    ensure!(
+        supports_code_review(kind),
+        "No-tool review is unavailable for this adapter in this build; choose a supported reviewer"
+    );
     ensure!(
         !model_id.trim().is_empty() && model_id.len() <= 200,
         "Choose a reviewer model"

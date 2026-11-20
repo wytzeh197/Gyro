@@ -1,3 +1,8 @@
+import {
+  isCitedImageTarget,
+  parseChatMarkdownLink,
+} from "./chat-file-links.ts";
+
 /**
  * Sentence-end hard against a new sentence/title case — the unmistakable
  * glued-stream boundary (`finished.I'll continue`, `is.Gyro is…`).
@@ -74,7 +79,9 @@ function opaqueMarkdownRanges(value: string): Array<[number, number]> {
   if (fence) ranges.push([fence.start, value.length]);
   for (const match of value.matchAll(/(`+)([\s\S]*?)\1/g))
     ranges.push([match.index!, match.index! + match[0].length]);
-  for (const match of value.matchAll(/\]\((?:<[^>]*>|[^)\n]+)\)/g))
+  for (const match of value.matchAll(
+    /\]\((?:<[^>]*>|(?:[^()\n]|\([^()\n]*\))+)\)/g,
+  ))
     ranges.push([match.index!, match.index! + match[0].length]);
   // Merge once so long messages do not scan every code span for every boundary.
   const merged: Array<[number, number]> = [];
@@ -289,7 +296,28 @@ export function structuredCommentaryBlocks(value: string) {
 
 /** Final answers are content, including single-character and symbol paragraphs. */
 export function finalAssistantResponseText(value: string): string {
-  return assistantTextBlocks(value).join("\n\n");
+  return assistantTextBlocks(restoreSavedImagePaths(value)).join("\n\n");
+}
+
+/** Older desktop builds saved sentence breaks inside local Markdown image paths. */
+function restoreSavedImagePaths(value: string): string {
+  const insertedBreak = /(?<=[.!?])\n\n(?=(?:\p{Lu}\p{Ll}|I['’]))/gu;
+  if (!value.includes("![") || !insertedBreak.test(value)) return value;
+  const protectedRanges = opaqueMarkdownRanges(value);
+  return value.replace(
+    /!\[[^\]\n]*\]\((?:<[^>]*>|(?:[^()\n]|\n\n|\([^()]*\))+)\)/g,
+    (token, offset: number) => {
+      // Leave literal Markdown examples in code alone.
+      if (
+        !token.includes("\n") ||
+        protectedRanges.some(([start, end]) => start <= offset && offset < end)
+      )
+        return token;
+      const restored = token.replace(insertedBreak, "");
+      const link = parseChatMarkdownLink(restored);
+      return link && isCitedImageTarget(link.target) ? restored : token;
+    },
+  );
 }
 
 /**

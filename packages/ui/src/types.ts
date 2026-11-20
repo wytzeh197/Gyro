@@ -127,6 +127,7 @@ export type CapabilityId =
   | "workspace-git-log"
   | "workspace-git-show"
   | "workspace-git-blame"
+  | "workspace-git-commit"
   | "workspace-propose-edit"
   | "workspace-edit"
   | "workspace-create-path"
@@ -136,6 +137,7 @@ export type CapabilityId =
   | "workspace-duplicate-path"
   | "workspace-undo-path"
   | "workspace-open-folder"
+  | "workspace-run-command"
   | "workspace-run-task"
   | "workspace-run-test"
   | "workspace-read-output"
@@ -148,6 +150,7 @@ export type CapabilityId =
   | "ide-open-panel"
   | "terminal-open"
   | "terminal-read"
+  | "terminal-input"
   | "terminal-wait"
   | "terminal-stop"
   | "browser-targets"
@@ -2285,8 +2288,17 @@ export type CouncilPreset = {
   builtIn?: boolean;
 };
 
+export type CouncilSynthesizerChoice = {
+  providerId: string;
+  modelId?: string | null;
+};
+
 export type CouncilConfig = {
   defaultPresetId: string;
+  /** Presets loaded for council chats; their seats are merged in order. */
+  activePresetIds?: string[];
+  /** Model that writes the final answer for this chat; overrides the lead preset. */
+  synthesizer?: CouncilSynthesizerChoice | null;
   presets: CouncilPreset[];
   maxSeats: number;
   seatTimeoutSeconds: number;
@@ -2670,6 +2682,7 @@ export type GyroConfig = {
   /** Ephemeral remote view: the connected host owns the available model list. */
   hostModelCatalog?: boolean;
   automaticUpdateChecks?: boolean;
+  automaticUpdates?: boolean;
   telemetryEnabled: boolean;
   requireCommandApproval: boolean;
   requireFileEditApproval: boolean;
@@ -2690,6 +2703,7 @@ export type GyroConfig = {
 };
 
 export type UpdateStatus =
+  | "idle"
   | "checking"
   | "current"
   | "available"
@@ -2811,7 +2825,10 @@ export type WorkspacePreparationSnapshot = WorkspacePreparationProgress & {
 export type WorkspaceChangedEvent = {
   workspacePath: string;
   generation: number;
-  files: WorkspaceFile[];
+  files?: WorkspaceFile[];
+  changedPaths?: string[] | null;
+  branchesChanged?: boolean;
+  directoryEntriesChanged?: boolean;
 };
 
 export type WorkspaceFileContent = {
