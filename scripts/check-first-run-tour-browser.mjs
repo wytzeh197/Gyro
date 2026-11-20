@@ -452,15 +452,16 @@ try {
     await click("Next");
     await waitStep(2);
     await inspect(`disconnected-${theme}-model`, 2, disconnected);
-    assert.match(await evaluate("document.querySelector('.gyro-tour-title').textContent"), /connect/i);
-    assert.equal(await primaryLabel(), "Connect an account", "no first task without a provider");
-    await click("Connect an account");
+    assert.equal(await evaluate("document.querySelector('.gyro-tour-title').textContent"), "Set up a model");
+    assert.match(await evaluate("document.querySelector('.gyro-tour-card').textContent"), /account.*API key.*local model/i);
+    assert.equal(await primaryLabel(), "Set up a model", "no first task without a provider");
+    await click("Set up a model");
     await until(async () => !(await tourOpen()), "connect exits tour");
     assert.equal(await evaluate("document.documentElement.dataset.tourFixtureDestination"), "settings");
     assert.equal(await evaluate("document.documentElement.dataset.tourFixtureSection"), "providers");
     assert.equal(await recordStatus(), "complete");
   }
-  checks.push("Disconnected users end on Connect an account, which opens Accounts and stays there");
+  checks.push("Disconnected users see model setup options and can open Models & accounts");
 
   for (const theme of ["dark", "light"]) {
     const spec = await load({ theme, firstTask: true, width: 900, height: 700 });

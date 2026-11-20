@@ -2866,6 +2866,129 @@ button.gyro-account-menu-row:hover {
   white-space: nowrap;
 }
 
+.gyro-sidebar-github-setup {
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  display: grid;
+  gap: 6px;
+  margin: 4px 8px 6px;
+  padding: 10px;
+}
+
+.gyro-sidebar-github-setup.is-publish {
+  border: 0;
+  gap: var(--gyro-space-standard);
+  margin: 0;
+  padding: var(--gyro-space-compact) var(--gyro-space-comfortable)
+    var(--gyro-space-comfortable);
+}
+
+.gyro-sidebar-github-publish-account {
+  max-width: min(14ch, 28vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-sidebar-github-publish-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gyro-space-standard);
+  justify-content: space-between;
+}
+
+.gyro-sidebar-github-setup strong {
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-caption);
+  font-weight: 600;
+}
+
+.gyro-sidebar-github-setup p {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.gyro-sidebar-github-setup small {
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-tiny);
+  line-height: 1.4;
+}
+
+.gyro-sidebar-github-setup code {
+  background: var(--gyro-code-bg);
+  border-radius: var(--gyro-radius-xs);
+  font-size: inherit;
+  padding: 0 3px;
+}
+
+.gyro-sidebar-github-setup-primary {
+  background: var(--gyro-accent);
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-app);
+  font-size: var(--gyro-font-micro);
+  font-weight: 600;
+  justify-self: start;
+  min-height: 26px;
+  padding: 4px 12px;
+}
+
+.gyro-sidebar-github-setup-primary:not(:disabled):hover {
+  filter: brightness(1.08);
+}
+
+.gyro-sidebar-github-publish-actions .gyro-sidebar-github-account-switch {
+  color: var(--gyro-muted);
+}
+
+.gyro-sidebar-github-setup-primary:disabled,
+.gyro-sidebar-github-account-switch:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.gyro-sidebar-github-account {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: flex;
+  font-size: var(--gyro-font-micro);
+  gap: 6px;
+  justify-content: space-between;
+  padding: 2px 12px 4px;
+}
+
+.gyro-sidebar-github-account span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-sidebar-github-account-switch {
+  background: transparent;
+  border: 0;
+  color: var(--gyro-accent);
+  flex: 0 0 auto;
+  font-size: var(--gyro-font-micro);
+  justify-self: start;
+  padding: 0;
+}
+
+.gyro-sidebar-github-account-switch:not(:disabled):hover {
+  text-decoration: underline;
+}
+
+.gyro-sidebar-github-setup-badge {
+  background: color-mix(in srgb, var(--gyro-accent) 16%, transparent);
+  border-radius: var(--gyro-radius-pill);
+  color: var(--gyro-accent);
+  font-size: var(--gyro-font-tiny);
+  padding: 0 6px;
+}
+
 .gyro-sidebar-github-detail {
   border-left: 1px solid var(--gyro-border-soft);
   display: flex;
@@ -12771,6 +12894,7 @@ body,
 
 /* Hover card for the sidebar update button: which release, and how heavy. */
 .gyro-sidebar-update-tip {
+  --gyro-update-tooltip-duration: calc(var(--gyro-premium-motion) * var(--gyro-exit-motion-factor));
   background: var(--gyro-premium-panel-strong);
   border: 1px solid var(--gyro-premium-line);
   border-radius: var(--gyro-radius-sm);
@@ -12783,9 +12907,9 @@ body,
   pointer-events: none;
   position: absolute;
   transition:
-    opacity var(--gyro-premium-motion) var(--gyro-premium-ease),
-    transform var(--gyro-premium-motion) var(--gyro-premium-ease),
-    visibility var(--gyro-premium-motion) var(--gyro-premium-ease);
+    opacity var(--gyro-update-tooltip-duration) var(--gyro-premium-ease),
+    transform var(--gyro-update-tooltip-duration) var(--gyro-premium-ease),
+    visibility var(--gyro-update-tooltip-duration) var(--gyro-premium-ease);
   visibility: hidden;
   white-space: nowrap;
   z-index: 130;
@@ -12817,6 +12941,7 @@ body,
 
 .gyro-sidebar-update:hover .gyro-sidebar-update-tip,
 .gyro-sidebar-update:focus-within .gyro-sidebar-update-tip {
+  --gyro-update-tooltip-duration: var(--gyro-premium-motion);
   opacity: 1;
   visibility: visible;
 }
@@ -15174,8 +15299,15 @@ button.gyro-settings-row em::after {
   border-radius: var(--gyro-radius-lg);
   display: grid;
   gap: 20px;
-  min-height: 190px;
   padding: 17px;
+}
+/* Wheels need the height; bars hug their content so the meta line stays close. */
+.gyro-usage-card:has(.gyro-usage-wheel) {
+  min-height: 190px;
+}
+/* A lone window uses the full row instead of leaving half of it empty. */
+.gyro-usage-card:only-child:not(:has(.gyro-usage-wheel)) {
+  grid-column: 1 / -1;
 }
 
 .gyro-usage-card > header,
@@ -26430,10 +26562,9 @@ textarea:focus-visible,
 }
 
 /* Native traffic lights (MAIN_TRAFFIC_LIGHT_Y 15) render with their visual
-   centre at y 23. The live window row is set in window-chrome-density.css: a
-   40px bar whose padding balances its 1px bottom hairline so 28px controls
-   centre on y 23 too; the inset chat and companion headers do the same in
-   chat.css. The 48px rule below is the older baseline it overrides.
+   centre at y 23. The live window row (window-chrome-density.css) and inset
+   chat and companion headers (chat.css) add height below that centerline.
+   The 48px rule below is the older baseline they override.
    Window controls never carry their own top offset: the padding below derives
    from the shared --gyro-traffic-light-* tokens, so a future nudge moves the row
    with the lights instead of breaking the alignment. Those tokens live in the
@@ -27758,11 +27889,11 @@ textarea:focus-visible,
 }
 .gyro-model-rail-empty button.is-primary {
   border-color: transparent;
-  background: var(--gyro-model-rail-accent);
-  color: #fff;
+  background: var(--gyro-ink-bg);
+  color: var(--gyro-ink-text);
 }
 .gyro-model-rail-empty button.is-primary:hover {
-  background: color-mix(in srgb, var(--gyro-model-rail-accent) 88%, black);
+  background: var(--gyro-ink-hover);
 }
 .gyro-model-rail-empty .gyro-model-rail-signin-status {
   display: inline-flex;
@@ -27770,6 +27901,9 @@ textarea:focus-visible,
   gap: 6px;
   max-width: none;
   color: var(--gyro-text);
+}
+.gyro-model-rail-signin-status > svg {
+  flex: none;
 }
 .gyro-model-rail-signin-row {
   display: flex;

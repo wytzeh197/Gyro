@@ -107,12 +107,32 @@ try {
   };
   const click = (label) =>
     evaluate(
-      `(() => { const b = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === ${JSON.stringify(label)}); if (!b || b.disabled) throw Error('Button unavailable: '+${JSON.stringify(label)}); b.click(); })()`,
+      `(() => { const label = ${JSON.stringify(label)}; const b = [...document.querySelectorAll('button')].find(b => (b.getAttribute('aria-label') ?? b.textContent.trim()) === label); if (!b || b.disabled) throw Error('Button unavailable: ' + label); b.click(); })()`,
     );
+  const loadExample = async (label) => {
+    await evaluate(`(() => {
+      const setup = document.querySelector('.gyro-check-test-setup');
+      const example = [...setup.querySelectorAll('details')].find(
+        (details) => details.querySelector('summary').textContent.includes('Controlled to-do example'),
+      );
+      for (const group of [setup, example]) {
+        if (!group.open) group.querySelector('summary').click();
+      }
+    })()`);
+    await click(label);
+  };
   const statuses = () =>
     evaluate(
       "window.__gyroCheckFixture.reports[0]?.results.map(r => r.status)",
     );
+  const capture = async (selector, filename) => {
+    const clip = await evaluate(`(() => {
+      const { x, y, width, height } = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
+      return { x, y, width, height, scale: 1 };
+    })()`);
+    const screenshot = await send("Page.captureScreenshot", { format: "png", clip });
+    await writeFile(join(artifacts, filename), Buffer.from(screenshot.data, "base64"));
+  };
   const checkStatuses = async (expected) => {
     await until(
       async () => JSON.stringify(await statuses()) === JSON.stringify(expected),
@@ -131,25 +151,47 @@ try {
   await until(() => evaluate("!!document.querySelector('main')"));
   await click("Open Check");
   await until(() => evaluate("!!document.querySelector('[role=dialog]')"));
+  const setup = "document.querySelector('.gyro-check-test-setup')";
+  assert.equal(await evaluate(`${setup}.open`), false);
   assert.equal(
     await evaluate("document.querySelectorAll('.gyro-check-criterion').length"),
     0,
   );
+  await evaluate("document.documentElement.dataset.theme = 'dark'");
+  await capture(".gyro-check-dialog", "check-this-work-dark.png");
+  await evaluate("document.documentElement.dataset.theme = 'light'");
+  await evaluate("[...document.querySelectorAll('button')].find(b => b.textContent === 'Add requirement').focus()");
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+  assert.equal(await evaluate("document.activeElement.textContent"), "Test setup");
   await click("Add requirement");
   assert.equal(
     await evaluate("document.querySelectorAll('.gyro-check-criterion').length"),
     1,
   );
-  await click("Remove requirement");
+  assert.equal(
+    await evaluate("document.activeElement.matches('.gyro-check-criterion-row input')"),
+    true,
+  );
+  assert.equal(await evaluate(`${setup}.open`), false);
+  await evaluate(`(() => {
+    const input = document.activeElement;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Add a to-do item');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`);
+  await click("Review check plan");
+  assert.equal(await evaluate(`${setup}.open`), true);
+  assert.equal(
+    await evaluate(`document.activeElement === ${setup}.querySelector('textarea')`),
+    true,
+  );
+  assert.equal(await evaluate("window.__gyroCheckFixture.pending"), undefined);
+  await click("Remove requirement 1");
   assert.equal(
     await evaluate("document.querySelectorAll('.gyro-check-criterion').length"),
     0,
   );
-  checks += 3;
-  await evaluate(
-    "document.querySelector('details').open = true; document.querySelectorAll('details')[1].open = true",
-  );
-  await click("Load working");
+  checks += 9;
+  await loadExample("Load working");
   await click("Review check plan");
   await until(() =>
     evaluate(
@@ -187,7 +229,7 @@ try {
   };
   const approve = async (variant) => {
     await newCheck();
-    await click(`Load ${variant}`);
+    await loadExample(`Load ${variant}`);
     await click("Review check plan");
     await until(() =>
       evaluate("!!document.querySelector('input[type=checkbox]')"),
@@ -231,7 +273,7 @@ try {
   await until(() => evaluate("!!document.querySelector('.gyro-check-stale')"));
   checks++;
   await newCheck();
-  await click("Load working");
+  await loadExample("Load working");
   await evaluate(
     "(() => { const t = document.querySelector('[role=dialog] textarea'); const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set; set.call(t, 'node fixture slow'); t.dispatchEvent(new Event('input', { bubbles: true })); })()",
   );
@@ -312,7 +354,7 @@ try {
     "window.__gyroCheckFixture.executed",
   );
   await newCheck();
-  await click("Load browser form check");
+  await loadExample("Load browser form check");
   await click("Review check plan");
   await until(() =>
     evaluate("!!document.querySelector('input[type=checkbox]')"),
@@ -366,7 +408,7 @@ try {
   );
   checks++;
   await newCheck();
-  await click("Load working");
+  await loadExample("Load working");
   await evaluate(
     "(() => { const t = document.querySelector('[role=dialog] textarea'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(t, 'node fixture slow'); t.dispatchEvent(new Event('input', { bubbles: true })); })()",
   );
@@ -381,7 +423,7 @@ try {
       "document.querySelector('.gyro-check-strip')?.dataset.running === 'true'",
     ),
   );
-  await click("Close");
+  await click("Close Check");
   await until(() => evaluate("!document.querySelector('[role=dialog]')"));
   await evaluate("window.__gyroCheckFixture.completeRunning()");
   await until(() =>
@@ -437,6 +479,44 @@ try {
     ? { checks: 0, skipped: "Historical geometry mockup: explicit --ui-only scope" }
     : await checkGeometryAndCompletion({ send, evaluate, root, artifacts });
   checks += geometry.checks;
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: 1000,
+    height: 800,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await send("Page.navigate", { url: `${origin}/review-fixture.html?mode=chat` });
+  const turnReviewButton = "document.querySelector('.gyro-change-summary-actions > button')";
+  await until(() => evaluate(`Boolean(${turnReviewButton})`));
+  await click("Hide review");
+  await until(() => evaluate("!document.querySelector('.gyro-review-scope')"));
+  assert.equal(
+    await evaluate(`getComputedStyle(${turnReviewButton}).backgroundColor`),
+    "rgba(0, 0, 0, 0)",
+  );
+  await capture(".gyro-chat-run-change-summary.is-complete", "review-changes-dark.png");
+  await click("Review changes");
+  await until(() =>
+    evaluate("document.querySelector('.gyro-review-identity strong')?.textContent.endsWith('lib.rs')"),
+  );
+  checks += 2;
+  const reviewAction = `Array.from(document.querySelectorAll('.gyro-review-scope button'))
+    .find(button => button.textContent.trim() === 'Check this work')`;
+  await until(() => evaluate(`Boolean(${reviewAction})`));
+  await evaluate(`(${reviewAction}).click()`);
+  await until(() => evaluate("!!document.querySelector('[role=dialog]')"));
+  assert.equal(
+    await evaluate("document.querySelector('[role=dialog] details p')?.textContent"),
+    "Update the image support check.",
+  );
+  await send("Page.navigate", {
+    url: `${origin}/review-fixture.html?mode=chat&historical`,
+  });
+  await until(() => evaluate(
+    "location.search.includes('historical') && !!document.querySelector('.gyro-review-scope .gyro-review-identity')",
+  ));
+  assert.equal(await evaluate(`Boolean(${reviewAction})`), false);
+  checks += 2;
   await writeFile(
     join(artifacts, "result.json"),
     JSON.stringify(

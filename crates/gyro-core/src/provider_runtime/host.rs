@@ -146,6 +146,10 @@ pub trait RunnerHost: Send + Sync {
     ) -> String;
     fn reasoning_efforts(&self, provider_id: &str, model_id: Option<&str>) -> Option<Vec<String>>;
     fn claude_capability_tools(&self, mode: super::types::ChatMode) -> String;
+
+    fn use_desktop_workspace_permissions(&self) -> bool {
+        false
+    }
     fn cancellation(&self, session_id: &str) -> anyhow::Result<CancellationToken>;
     fn emit(&self, request: &ProviderChatRequest, event: RunEvent<'_>);
     fn conversation_history(&self, request: &ProviderChatRequest) -> Option<String>;

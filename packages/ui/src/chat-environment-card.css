@@ -481,11 +481,11 @@
   white-space: nowrap;
 }
 
-/* Footer: branch, processes, subagents */
+/* Footer: branch and processes */
 
 .gyro-env-card-foot {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   background: var(--gyro-surface-soft);
   border-top: 1px solid var(--gyro-border-soft);
 }

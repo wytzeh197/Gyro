@@ -10,6 +10,15 @@ type GithubRefreshDependencies = {
   dispatch: (action: WorkbenchAction) => void;
 };
 
+export type GithubRefreshOptions = {
+  force?: boolean;
+  background?: "all" | "runs";
+};
+
+const AVAILABILITY_MAX_AGE_MS = 5 * 60_000;
+export const GITHUB_ACTIVE_RUN_INTERVAL_MS = 15_000;
+export const GITHUB_IDLE_INTERVAL_MS = 60_000;
+
 /**
  * Coordinate repository reads independently of component renders. Workspace
  * changes invalidate every outstanding read, including a switch away and back.
@@ -22,7 +31,14 @@ export function createGithubRefreshController({
   let workspace: string | undefined;
   let workspaceGeneration = 0;
   let refreshGeneration = 0;
-  let inFlight: { promise: Promise<void> } | undefined;
+  let inFlight:
+    { promise: Promise<void>; runsOnly: boolean; loading: boolean } | undefined;
+  let availabilityCache:
+    { value: GithubAvailability; checkedAt: number } | undefined;
+  let lastFullRefresh: number | undefined;
+  let lastRunsRefresh: number | undefined;
+  let runsError: string | undefined;
+  let pullRequestsError: string | undefined;
   const requestGenerations = new Map<string, number>();
 
   function setWorkspace(root: string | undefined) {
@@ -32,6 +48,11 @@ export function createGithubRefreshController({
     workspace = root;
     workspaceGeneration += 1;
     inFlight = undefined;
+    availabilityCache = undefined;
+    lastFullRefresh = undefined;
+    lastRunsRefresh = undefined;
+    runsError = undefined;
+    pullRequestsError = undefined;
     requestGenerations.clear();
   }
 
@@ -53,87 +74,127 @@ export function createGithubRefreshController({
       isCurrentWorkspace() && requestGenerations.get(channel) === generation;
   }
 
-  async function performRefresh(root: string, isCurrent: () => boolean) {
-    dispatch({ type: "github-error", error: undefined });
-    dispatch({ type: "github-loading", loading: true });
+  async function performRefresh(
+    root: string,
+    options: GithubRefreshOptions,
+    isCurrent: () => boolean,
+  ) {
+    const runsOnly = options.background === "runs";
     try {
-      const availability = await invoke<GithubAvailability>("github_status", {
-        request: { workspacePath: root },
-      });
-      if (!isCurrent()) {
-        return;
+      let availability = availabilityCache?.value;
+      if (
+        !runsOnly &&
+        (!options.background ||
+          !availability?.available ||
+          Date.now() - (availabilityCache?.checkedAt ?? 0) >=
+            AVAILABILITY_MAX_AGE_MS)
+      ) {
+        availability = await invoke<GithubAvailability>("github_status", {
+          request: { workspacePath: root },
+        });
+        if (!isCurrent()) return;
+        availabilityCache = { value: availability, checkedAt: Date.now() };
+        dispatch({ type: "github-set-availability", availability });
       }
-      dispatch({ type: "github-set-availability", availability });
-      if (!availability.available) {
-        return;
-      }
+      if (!availability?.available) return;
 
-      // A denied PR endpoint must not hide healthy Actions data, or vice versa.
-      // Promise callbacks also turn a synchronous adapter throw into a rejection.
+      // Keep independent endpoint results and errors, including across a CI-only refresh.
       const [runs, pullRequests] = await Promise.allSettled([
         Promise.resolve().then(() =>
           invoke<GithubWorkflowRun[]>("github_workflow_runs", {
             request: { workspacePath: root, limit: 20 },
           }),
         ),
-        Promise.resolve().then(() =>
-          invoke<GithubPullRequest[]>("github_pull_requests", {
-            request: { workspacePath: root, limit: 20 },
-          }),
-        ),
+        runsOnly
+          ? undefined
+          : Promise.resolve().then(() =>
+              invoke<GithubPullRequest[]>("github_pull_requests", {
+                request: { workspacePath: root, limit: 20 },
+              }),
+            ),
       ]);
       if (!isCurrent()) {
         return;
       }
-      const errors: string[] = [];
       if (runs.status === "fulfilled") {
         dispatch({ type: "github-set-runs", runs: runs.value });
+        runsError = undefined;
       } else {
-        errors.push(`Workflow runs: ${errorMessage(runs.reason)}`);
+        runsError = `Workflow runs: ${errorMessage(runs.reason)}`;
       }
-      if (pullRequests.status === "fulfilled") {
+      if (pullRequests.status === "fulfilled" && pullRequests.value) {
         dispatch({
           type: "github-set-pull-requests",
           pullRequests: pullRequests.value,
         });
-      } else {
-        errors.push(`Pull requests: ${errorMessage(pullRequests.reason)}`);
+        pullRequestsError = undefined;
+      } else if (pullRequests.status === "rejected") {
+        pullRequestsError = `Pull requests: ${errorMessage(pullRequests.reason)}`;
       }
-      // Result actions may clear an earlier error, so publish failures last.
-      dispatch({ type: "github-error", error: errors.join("\n") || undefined });
+      const error = [runsError, pullRequestsError].filter(Boolean).join("\n");
+      dispatch({ type: "github-error", error: error || undefined });
     } catch (error) {
       if (isCurrent()) {
+        availabilityCache = undefined;
         dispatch({ type: "github-error", error: errorMessage(error) });
-      }
-    } finally {
-      if (isCurrent()) {
-        dispatch({ type: "github-loading", loading: false });
       }
     }
   }
 
   function refresh(
     root: string,
-    options: { force?: boolean } = {},
+    options: GithubRefreshOptions = {},
   ): Promise<void> {
     const isCurrentWorkspace = captureWorkspace(root);
     if (!isCurrentWorkspace()) {
       return Promise.resolve();
     }
+    const runsOnly = options.background === "runs";
     if (inFlight && !options.force) {
-      return inFlight.promise;
+      if (!inFlight.runsOnly || runsOnly) {
+        if (!options.background && !inFlight.loading) {
+          inFlight.loading = true;
+          dispatch({ type: "github-loading", loading: true });
+        }
+        return inFlight.promise;
+      }
+      return inFlight.promise.then(() =>
+        isCurrentWorkspace() ? refresh(root, options) : undefined,
+      );
     }
+    const now = Date.now();
+    if (
+      runsOnly &&
+      (!availabilityCache?.value.available ||
+        (lastRunsRefresh !== undefined && now - lastRunsRefresh < 14_000))
+    )
+      return Promise.resolve();
+    if (
+      options.background === "all" &&
+      lastFullRefresh !== undefined &&
+      now - lastFullRefresh < 55_000
+    )
+      return Promise.resolve();
+    if (!runsOnly) lastFullRefresh = now;
+    lastRunsRefresh = now;
     // A completed mutation requires a read started after that mutation.
     // Superseded reads must not publish old data or finish the new spinner.
     const generation = ++refreshGeneration;
     const isCurrent = () =>
       isCurrentWorkspace() && refreshGeneration === generation;
-    const promise = performRefresh(root, isCurrent).finally(() => {
+    const loading = !options.background || Boolean(inFlight?.loading);
+    if (!options.background)
+      dispatch({ type: "github-error", error: undefined });
+    if (loading) dispatch({ type: "github-loading", loading: true });
+    const promise = performRefresh(root, options, isCurrent).finally(() => {
       if (inFlight?.promise === promise) {
+        if (isCurrent() && inFlight.loading) {
+          dispatch({ type: "github-loading", loading: false });
+        }
         inFlight = undefined;
       }
     });
-    inFlight = { promise };
+    inFlight = { promise, runsOnly, loading };
     return promise;
   }
 

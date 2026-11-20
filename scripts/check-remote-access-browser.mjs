@@ -258,6 +258,11 @@ try {
       ),
     "SSH disconnect status",
   );
+  assert.equal(
+    await evaluate("document.querySelector('.gyro-sidebar')?.innerText.includes('Existing remote chat')"),
+    false,
+    "A disconnected SSH host disappears from the sidebar even with its workspace open",
+  );
   await evaluate(
     "document.querySelector('.gyro-remote-ssh-menu summary').click()",
   );
@@ -289,6 +294,15 @@ try {
     "host toggle follows backend",
   );
   await click("Pair a device");
+  await until(
+    () =>
+      evaluate(
+        "Boolean(document.querySelector('.gyro-remote-qr svg[aria-label=\"Pairing code for your phone\"] path')?.getAttribute('d'))",
+      ),
+    "phone pairing QR code",
+  );
+  await click("Phone (Coming soon)");
+  await click("Mac");
   await until(
     () =>
       evaluate(

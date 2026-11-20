@@ -100,6 +100,7 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
         .ok_or_else(|| "provider chat session no longer exists".to_string())?;
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     let config = GyroConfig::load(&paths).map_err(to_string)?;
+    let requested_full_access = request.full_access;
     bind_provider_chat_request(&mut request, &session, &config, store.paths())?;
     request.project_memory = Some(gyro_core::project_memory::PreparedMemoryContext {
         suggest_candidates: origin == UsageOrigin::Chat && session.parent_session_id.is_none(),
@@ -160,6 +161,18 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
         // capability policy, prompt contract, document, and approval handoff
         // as the composer mode. Do this before binding tool authority.
         request.mode = ChatMode::Plan;
+    }
+    if requested_full_access
+        && origin == UsageOrigin::Chat
+        && session.parent_session_id.is_none()
+        && request.mode == ChatMode::Normal
+        && request.goal.is_none()
+        && request.workflow_run_id.is_none()
+        && crate::chat_permissions::permits(&app, &session, store.paths())
+    {
+        request.full_access = true;
+        request.require_command_approval = false;
+        request.require_file_edit_approval = false;
     }
     validate_chat_context(&request)?;
     let turn_id = request.turn_id.as_deref().map(parse_uuid).transpose()?;
@@ -223,7 +236,7 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
     {
         *control.request.lock().map_err(to_string)? = Some(request.clone());
     }
-    let _agent_scope = delegated_agents::ParentRunScope::new(&app, &request.session_id);
+    let _agent_scope = delegated_agents::ParentRunScope::new(&app, &request.session_id, run_id);
     // The session row read at turn start is this turn's authority for the
     // workspace identity; re-reading it here could straddle a roots update.
     let context_already_persisted = bind_provider_capability_context(
@@ -350,6 +363,11 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
                 status.clone(),
                 Some(error.as_str()),
             );
+            if status == HarnessRunStatus::Cancelled {
+                if let Err(error) = gyro_core::mutations::expire_stopped_turn_edits(&store, session_id, run_id) {
+                    eprintln!("Could not expire pending edits for the stopped turn: {error}");
+                }
+            }
             let _ = append_provider_diagnostics_event(
                 &store,
                 session_id,

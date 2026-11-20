@@ -1,6 +1,6 @@
 {
   "schema": "gyro.model-catalog.v1",
-  "revision": "2026-11-17.1",
+  "revision": "2026-11-20.1",
   "enabled": true,
   "rolloutPercentage": 100,
   "models": [
@@ -316,6 +316,79 @@
       "contextWindowTokens": 1000000,
       "supportedReasoningEfforts": ["low", "medium", "high", "xhigh", "max"],
       "defaultReasoningEffort": "high"
+    },
+    {
+      "providerId": "antigravity",
+      "id": "gemini-4-neon",
+      "displayName": "Gemini 4 Neon",
+      "description": "Antigravity CLI. Google's flagship coding model and the default for new Antigravity chats. Google AI Pro, Ultra and Enterprise.",
+      "minClientRevision": 1,
+      "contextWindowTokens": 512000,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh"],
+      "defaultReasoningEffort": "high"
+    },
+    {
+      "providerId": "antigravity",
+      "id": "gemini-4-carbon",
+      "displayName": "Gemini 4 Carbon",
+      "description": "Antigravity CLI. Deepest planning and reasoning. Google AI Ultra and Enterprise.",
+      "minClientRevision": 1,
+      "supportedReasoningEfforts": ["low", "medium", "high"],
+      "defaultReasoningEffort": "medium"
+    },
+    {
+      "providerId": "antigravity",
+      "id": "gemini-4-argon",
+      "displayName": "Gemini 4 Argon",
+      "description": "Antigravity CLI. Balanced planner for longer tasks. Google AI Pro, Ultra and Enterprise.",
+      "minClientRevision": 1,
+      "supportedReasoningEfforts": ["low", "medium", "high"],
+      "defaultReasoningEffort": "medium"
+    },
+    {
+      "providerId": "antigravity",
+      "id": "gemini-4-hydrogen",
+      "displayName": "Gemini 4 Hydrogen",
+      "description": "Antigravity CLI. Fast implementer for well-scoped edits. Available through Antigravity.",
+      "minClientRevision": 1,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh"],
+      "defaultReasoningEffort": "high"
+    },
+    {
+      "providerId": "antigravity",
+      "id": "gemini-3.8-flash",
+      "displayName": "Gemini 3.8 Flash",
+      "description": "Antigravity CLI. Fast and light. Every Antigravity plan.",
+      "minClientRevision": 1,
+      "supportedReasoningEfforts": ["low", "medium", "high"],
+      "defaultReasoningEffort": "medium"
+    },
+    {
+      "providerId": "antigravity",
+      "id": "gemini-3.1-pro-preview",
+      "displayName": "Gemini 3.1 Pro",
+      "description": "Antigravity CLI. Previous-generation Pro model.",
+      "minClientRevision": 1,
+      "supportedReasoningEfforts": ["low", "high"],
+      "defaultReasoningEffort": "high"
+    },
+    {
+      "providerId": "antigravity",
+      "id": "claude-opus-5-5",
+      "displayName": "Claude Opus 5.5 (Thinking)",
+      "description": "Antigravity CLI. Anthropic's Opus through Antigravity. Enterprise needs administrator opt-in.",
+      "minClientRevision": 1,
+      "supportedReasoningEfforts": ["low", "medium", "high", "max"],
+      "defaultReasoningEffort": "medium"
+    },
+    {
+      "providerId": "antigravity",
+      "id": "claude-sonnet-5-5",
+      "displayName": "Claude Sonnet 5.5 (Thinking)",
+      "description": "Antigravity CLI. Anthropic's Sonnet through Antigravity. Enterprise needs administrator opt-in.",
+      "minClientRevision": 1,
+      "supportedReasoningEfforts": ["low", "medium", "high", "max"],
+      "defaultReasoningEffort": "medium"
     }
   ]
 }

@@ -328,7 +328,7 @@ let states = scenes.flatMap((scene) =>
 );
 if (extended && !navigation) {
   for (const [name, edge, selector] of [
-    ["composer", "code-block", ".gyro-composer-input > textarea"],
+    ["composer", "code-block", ".gyro-composer-editor > textarea"],
     ["send", "code-block", ".gyro-send-button"],
     ["work", "streaming", ".gyro-run-call.is-running"],
     ["file", "code-block", ".gyro-change-summary-file"],

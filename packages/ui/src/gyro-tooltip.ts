@@ -26,7 +26,7 @@ export function installGyroTooltips(root: Document = document): () => void {
   bubble.className = "gyro-tooltip";
   bubble.setAttribute("role", "tooltip");
   bubble.id = "gyro-tooltip";
-  bubble.hidden = true;
+  bubble.setAttribute("aria-hidden", "true");
   root.body.appendChild(bubble);
 
   let target: HTMLElement | SVGElement | null = null;
@@ -46,8 +46,8 @@ export function installGyroTooltips(root: Document = document): () => void {
 
   const hide = () => {
     window.clearTimeout(timer);
-    if (!bubble.hidden) lastHiddenAt = performance.now();
-    bubble.hidden = true;
+    if (bubble.classList.contains("is-visible")) lastHiddenAt = performance.now();
+    bubble.setAttribute("aria-hidden", "true");
     bubble.classList.remove("is-visible");
     restore();
     target = null;
@@ -72,9 +72,9 @@ export function installGyroTooltips(root: Document = document): () => void {
 
   const show = (element: HTMLElement | SVGElement, text: string) => {
     bubble.textContent = text;
-    bubble.hidden = false;
     place(element);
     bubble.classList.add("is-visible");
+    bubble.removeAttribute("aria-hidden");
     if (!element.hasAttribute("aria-describedby")) {
       element.setAttribute("aria-describedby", bubble.id);
     }

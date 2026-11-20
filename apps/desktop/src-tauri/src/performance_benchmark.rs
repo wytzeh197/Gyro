@@ -749,7 +749,7 @@ fn turn_with_reviewer(
         }
         reviewer.map_or_else(Vec::new, |reviewer| reviewer.audit)
     });
-    let result = tauri::async_runtime::block_on(run_provider_chat(app.clone(), request));
+    let result = tauri::async_runtime::block_on(run_provider_chat(app.clone(), request, None, None));
     finished.store(true, Ordering::Release);
     let _ = done.send(());
     let audit = watchdog

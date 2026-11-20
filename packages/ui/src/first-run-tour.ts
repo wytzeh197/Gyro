@@ -53,8 +53,8 @@ export const TOUR_ANCHOR_SELECTORS: Record<TourAnchorId, string> = {
 /**
  * Three steps, all on the composer a new user is looking at: what Gyro can
  * see, how to ask, and which model answers. The model step comes last because
- * it ends in the action that gets a user to a first result: connect an
- * account, or prepare a first task once one is connected. Code view, panels
+ * it ends in the action that gets a user to a first result: set up a model,
+ * or prepare a first task once a model is available. Code view, panels
  * and Review are taught where they become relevant, not before a first message.
  */
 export const TOUR_STEPS: readonly TourStep[] = Object.freeze([
@@ -74,7 +74,7 @@ export const TOUR_STEPS: readonly TourStep[] = Object.freeze([
     placement: "top",
     title: () => "Describe a task",
     body: () =>
-      "Say what you want changed. Type @ to include files, or attach images. Gyro asks before it edits files or runs commands.",
+      "Say what you want changed. Type @ to include files, or attach images. Your permission settings control when Gyro asks before running commands or editing files.",
   },
   {
     id: "model",
@@ -82,13 +82,13 @@ export const TOUR_STEPS: readonly TourStep[] = Object.freeze([
     anchor: "composer.model",
     placement: "top",
     title: ({ providerConfigured }) =>
-      providerConfigured ? "Choose a model" : "Connect an AI account",
+      providerConfigured ? "Choose a model" : "Set up a model",
     body: ({ providerConfigured, offersFirstTask }) =>
       providerConfigured
         ? offersFirstTask
           ? "Pick the model for this chat here. Ready to try it? A first task prepares a prompt you can edit before sending."
           : "Pick the model for this chat here. You can change it at any time."
-        : "Gyro needs an AI account before it can work. Connect one, then pick a model here.",
+        : "Connect an existing account, add an API key, or use a local model. Then choose a model for your chat.",
   },
 ]);
 

@@ -52,6 +52,14 @@ impl ModelCommandBoundary {
         &self,
         cwd: Option<&Path>,
     ) -> anyhow::Result<Option<PreparedWorkspaceSandbox>> {
+        self.prepare_with_proxy(cwd, None)
+    }
+
+    fn prepare_with_proxy(
+        &self,
+        cwd: Option<&Path>,
+        proxy_port: Option<u16>,
+    ) -> anyhow::Result<Option<PreparedWorkspaceSandbox>> {
         match self {
             Self::Unrestricted => Ok(None),
             Self::Workspace {
@@ -61,8 +69,9 @@ impl ModelCommandBoundary {
             } => {
                 let cwd =
                     cwd.ok_or_else(|| anyhow::anyhow!("model command has no working directory"))?;
-                PreparedWorkspaceSandbox::prepare(root, cwd, home, Some(private_data_root))
-                    .map(Some)
+                PreparedWorkspaceSandbox::prepare_with_network_boundary(
+                    root, cwd, home, Some(private_data_root), proxy_port,
+                ).map(Some)
             }
         }
     }
@@ -89,7 +98,7 @@ impl ModelCommandBoundary {
 
 pub(super) fn model_command_policy_summary(policy: &str) -> &'static str {
     match policy {
-        "workspace-filesystem" => "workspace filesystem policy; network allowed",
+        "workspace-filesystem" => "workspace filesystem policy; outbound network blocked",
         "unrestricted" => "Full access",
         _ => "unknown execution policy",
     }
@@ -114,7 +123,9 @@ fn model_command_boundary_for_context(
     app: &tauri::AppHandle,
     context: &ModelCommandContext,
 ) -> anyhow::Result<ModelCommandBoundary> {
-    let config = load_config_blocking().map_err(anyhow::Error::msg)?;
+    let config = crate::chat_permissions::for_active_turn(
+        app, &context.session_id, load_config_blocking().map_err(anyhow::Error::msg)?,
+    );
     if model_command_full_access(
         &config,
         context.mode,
@@ -122,8 +133,12 @@ fn model_command_boundary_for_context(
     ) {
         return Ok(ModelCommandBoundary::Unrestricted);
     }
+    confined_command_boundary(&context.workspace)
+}
+
+pub(super) fn confined_command_boundary(workspace: &Path) -> anyhow::Result<ModelCommandBoundary> {
     Ok(ModelCommandBoundary::Workspace {
-        root: context.workspace.clone(),
+        root: workspace.to_path_buf(),
         home: user_home_directory()?,
         private_data_root: GyroPaths::for_current_user()?.base_dir,
     })
@@ -147,10 +162,31 @@ pub(super) fn run_model_task_output_with_cancellation(
     cancellation: CancellationToken,
     boundary: &ModelCommandBoundary,
 ) -> anyhow::Result<IdeCommandOutput> {
+    run_model_command(command, cancellation, boundary, None)
+}
+
+pub(super) fn run_model_command(
+    command: Command,
+    cancellation: CancellationToken,
+    boundary: &ModelCommandBoundary,
+    proxy_port: Option<u16>,
+) -> anyhow::Result<IdeCommandOutput> {
     let mut request = execution_request(&command);
     // Keep scratch alive until the bounded runner has reaped the command.
     // A failed preparation or sandbox-exec launch never retries unrestricted.
-    let sandbox = boundary.prepare(request.current_dir.as_deref())?;
+    let sandbox = boundary.prepare_with_proxy(request.current_dir.as_deref(), proxy_port)?;
+    if let Some(port) = proxy_port {
+        anyhow::ensure!(sandbox.is_some(), "Network approval requires a workspace sandbox");
+        let proxy_url = format!("http://127.0.0.1:{port}");
+        for name in ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"] {
+            request.env.retain(|(key, _)| key != name);
+            request.env.push((name.into(), Some(proxy_url.clone().into())));
+        }
+        for name in ["NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy"] {
+            request.env.retain(|(key, _)| key != name);
+            request.env.push((name.into(), None));
+        }
+    }
     if let Some(sandbox) = sandbox.as_ref() {
         (request.program, request.args) = sandbox.wrap_command(&request.program, &request.args);
         request.env.extend(

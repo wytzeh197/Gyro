@@ -82,7 +82,7 @@ export function DesktopNotificationSettings({
     permission === "prompt" || permission === "prompt-with-rationale";
   return (
     <SettingsGroup id="macos-notifications" label="Notifications">
-      <SettingsRow label="Notifications" detail={permissionDetail(permission)}>
+      <SettingsRow label="Send macOS notifications" detail={permissionDetail(permission)}>
         <SettingsSwitch
           checked={preferences.enabled}
           label="Send macOS notifications"

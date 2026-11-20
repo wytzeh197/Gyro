@@ -198,6 +198,7 @@ pub struct AccountSessionState {
 pub struct GyroConfig {
     #[serde(default = "default_automatic_update_checks")]
     pub automatic_update_checks: bool,
+    pub automatic_updates: bool,
     pub telemetry_enabled: bool,
     pub require_command_approval: bool,
     pub require_file_edit_approval: bool,
@@ -237,6 +238,7 @@ impl Default for GyroConfig {
     fn default() -> Self {
         Self {
             automatic_update_checks: true,
+            automatic_updates: false,
             telemetry_enabled: false,
             require_command_approval: true,
             require_file_edit_approval: true,
@@ -572,7 +574,16 @@ impl GyroConfig {
         Ok(())
     }
 
+    pub fn reset_saved_full_access(&mut self) {
+        if self.full_access {
+            self.full_access = false;
+            self.require_command_approval = true;
+            self.require_file_edit_approval = true;
+        }
+    }
+
     fn normalize_legacy_state(&mut self) {
+        self.reset_saved_full_access();
         let legacy_hosted_placeholder = self.account_oidc.issuer_url.trim_end_matches('/')
             == "https://auth.gyro.dev"
             && self.account_oidc.client_id == "gyro-desktop";
@@ -1410,6 +1421,7 @@ mod tests {
         assert!(config.require_file_edit_approval);
         assert!(!config.full_access);
         assert!(config.automatic_update_checks);
+        assert!(!config.automatic_updates);
         assert_eq!(
             config.account_oidc.scopes,
             vec![
@@ -1431,7 +1443,7 @@ mod tests {
     }
 
     #[test]
-    fn user_permission_choice_survives_save_and_reload() {
+    fn saved_full_access_migrates_to_ask() {
         let temp = tempfile::tempdir().unwrap();
         let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
         let config = GyroConfig {
@@ -1444,9 +1456,9 @@ mod tests {
         config.save(&paths).unwrap();
         let restored = GyroConfig::load(&paths).unwrap();
 
-        assert!(!restored.require_command_approval);
-        assert!(!restored.require_file_edit_approval);
-        assert!(restored.full_access);
+        assert!(restored.require_command_approval);
+        assert!(restored.require_file_edit_approval);
+        assert!(!restored.full_access);
     }
 
     #[test]
@@ -1466,10 +1478,25 @@ mod tests {
         assert!(!config.account_oidc.client_id.is_empty());
         assert!(!config.account_session.signed_in);
         assert!(config.automatic_update_checks);
+        assert!(!config.automatic_updates);
         assert!(serde_json::to_value(config)
             .unwrap()
             .get("updateChannel")
             .is_none());
+    }
+
+    #[test]
+    fn automatic_updates_opt_in_survives_save_and_reload() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let config = GyroConfig {
+            automatic_updates: true,
+            ..GyroConfig::default()
+        };
+
+        config.save(&paths).unwrap();
+
+        assert!(GyroConfig::load(&paths).unwrap().automatic_updates);
     }
 
     #[test]

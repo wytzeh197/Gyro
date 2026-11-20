@@ -22,6 +22,14 @@ pub fn run_anthropic_claude_chat(
     resume_cursor: Option<&ProviderResumeCursor>,
     attempt: &mut ProviderRunAttempt,
 ) -> anyhow::Result<ProviderRunnerOutput> {
+    if crate::provider_runtime::advisory::is_advisory(request) {
+        crate::provider_runtime::advisory::validate_advisory_request(
+            crate::provider_runtime::types::ProviderAdapterKind::AnthropicClaude,
+            request,
+            resume_cursor,
+        )?;
+        return run_claude_review(host, request);
+    }
     let cwd = provider_chat_cwd(request.workspace_path.as_deref())?;
     let can_resume = resume_cursor.is_some_and(|cursor| cursor.kind == "claude-session");
     let history = if can_resume {
@@ -90,6 +98,14 @@ pub fn run_anthropic_claude_chat(
         host.reasoning_efforts("anthropic", request.model_id.as_deref())
             .as_deref(),
     );
+    if host.use_desktop_workspace_permissions() && !request.full_access {
+        let before_prompt = args.len() - 2;
+        args.splice(
+            before_prompt..before_prompt,
+            ["--restricted", "--tools", "Read,Glob,Grep", "--settings", r#"{"disableAllHooks":true}"#]
+                .into_iter().map(str::to_owned),
+        );
+    }
     let input_file = if request.attachments.iter().any(|item| item.kind == "image") {
         let mut input = tempfile::NamedTempFile::new()?;
         serde_json::to_writer(
@@ -198,6 +214,125 @@ pub fn run_anthropic_claude_chat(
         );
     }
     anyhow::bail!("{}", provider_stream_failure_detail(&stdout, &stderr));
+}
+
+// The review subprocess has no workspace, chat history, Gyro MCP server or resume
+// cursor. Feed only the frozen input on stdin, also keeping source out of argv.
+fn run_claude_review(
+    host: &dyn RunnerHost,
+    request: &ProviderChatRequest,
+) -> anyhow::Result<ProviderRunnerOutput> {
+    let directory = tempfile::tempdir()?;
+    let mut input = tempfile::NamedTempFile::new()?;
+    input.write_all(request.message.as_bytes())?;
+    input.flush()?;
+    let model = request
+        .model_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("Choose a Claude reviewer model"))?;
+    let mut command = host.provider_command("claude", "anthropic")?;
+    command.current_dir(directory.path()).args([
+        "--print",
+        "--safe-mode",
+        "--tools",
+        "",
+        "--strict-mcp-config",
+        "--mcp-config",
+        r#"{"mcpServers":{}}"#,
+        "--setting-sources",
+        "",
+        "--settings",
+        r#"{"disableAllHooks":true}"#,
+        "--disable-slash-commands",
+        "--no-session-persistence",
+        "--permission-mode",
+        "dontAsk",
+        "--system-prompt",
+        "Review only the supplied frozen input and return the requested JSON.",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--model",
+        &crate::provider_runtime::native_args::claude_model_arg(model),
+    ]);
+    let output = host.stream_command(
+        command,
+        Some(input.path()),
+        Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS),
+        Duration::from_secs(PROVIDER_CHAT_INACTIVITY_TIMEOUT_SECS),
+        request,
+        &mut None,
+    )?;
+    anyhow::ensure!(
+        output.status_success,
+        "Claude review failed: {}",
+        provider_stream_failure_detail(&output.stdout, &output.stderr)
+    );
+    let response = claude_review_result(&output.stdout)?;
+    let mut result = claude_runner_output(output, response, String::new(), false, false);
+    result.resume_cursor = None;
+    Ok(result)
+}
+
+fn claude_review_result(stream: &str) -> anyhow::Result<String> {
+    let mut initialized = false;
+    let mut result = None;
+    for line in stream.lines().filter(|line| !line.trim().is_empty()) {
+        let event: serde_json::Value = serde_json::from_str(line)?;
+        match (event["type"].as_str(), event["subtype"].as_str()) {
+            (Some("system"), Some("init")) => {
+                anyhow::ensure!(
+                    event["tools"].as_array().is_some_and(Vec::is_empty)
+                        && event["mcp_servers"].as_array().is_some_and(Vec::is_empty),
+                    "Claude reviewer did not start with tools disabled"
+                );
+                initialized = true;
+            }
+            (Some("assistant"), _) => {
+                anyhow::ensure!(
+                    !event["message"]["content"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|block| block["type"]
+                            .as_str()
+                            .is_some_and(|kind| kind.contains("tool"))),
+                    "Claude reviewer attempted a tool call"
+                );
+            }
+            (Some("result"), Some("success")) if event["is_error"] == false => {
+                result = event["result"]
+                    .as_str()
+                    .filter(|text| !text.trim().is_empty())
+                    .map(str::to_owned);
+            }
+            _ => {}
+        }
+    }
+    anyhow::ensure!(initialized, "Claude did not confirm tool-free review");
+    result.ok_or_else(|| anyhow::anyhow!("Claude did not finish the second opinion"))
+}
+
+#[cfg(test)]
+mod review_tests {
+    use super::claude_review_result;
+    #[test]
+    fn claude_review_requires_a_tool_free_session_and_successful_result() {
+        let init = r#"{"type":"system","subtype":"init","tools":[],"mcp_servers":[]}"#;
+        let result =
+            r#"{"type":"result","subtype":"success","is_error":false,"result":"reviewed"}"#;
+        assert_eq!(
+            claude_review_result(&[init, result].join("\n")).unwrap(),
+            "reviewed"
+        );
+        assert!(claude_review_result(result).is_err());
+        assert!(claude_review_result(init).is_err());
+        let with_tools = init.replace(r#""tools":[]"#, r#""tools":["Read"]"#);
+        assert!(claude_review_result(&[&with_tools, result].join("\n")).is_err());
+        let tool_call = r#"{"type":"assistant","message":{"content":[{"type":"tool_use"}]}}"#;
+        assert!(claude_review_result(&[init, tool_call, result].join("\n")).is_err());
+    }
 }
 
 /// Hands on the billing parser's total. Leaving `accounted_usage` empty let the

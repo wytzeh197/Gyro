@@ -139,18 +139,17 @@ pub(crate) fn wait_for_capability_approval(
     let session_id = Uuid::parse_str(&bound.session_id)?;
     let turn_id = bound.turn_id.as_deref().map(Uuid::parse_str).transpose()?;
     let (sender, receiver) = mpsc::channel();
-    app.state::<ProviderCapabilityApprovalManager>()
-        .pending
+    let control = app
+        .state::<ProviderCancellationManager>()
+        .flags
         .lock()
-        .map_err(|_| anyhow::anyhow!("capability approval state is unavailable"))?
-        .insert(
-            approval_id.to_string(),
-            PendingCapabilityApproval {
-                sender,
-                session_id,
-                turn_id,
-            },
-        );
+        .map_err(|_| anyhow::anyhow!("run state unavailable"))?
+        .get(&bound.session_id)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("capability approval was cancelled"))?;
+    let cancelled = || code_mode::cancelled() || control.cancellation.is_cancelled();
+    anyhow::ensure!(!cancelled(), "capability approval was cancelled");
+    let command_once = capability_id == CapabilityId::WorkspaceRunCommand;
     let mut payload = serde_json::json!({
         "schema": CAPABILITY_SCHEMA_V1,
         "kind": "capability-approval",
@@ -162,12 +161,30 @@ pub(crate) fn wait_for_capability_approval(
         "status": "waiting",
         "scopeKind": scope_kind,
         "scopeValue": gyro_core::sanitize_capability_summary(scope_value),
-        "choices": if capability_id == CapabilityId::WorkspaceReadEditor {
+        "choices": if command_once || capability_id == CapabilityId::WorkspaceReadEditor {
             serde_json::json!(["deny", "allow-once"])
         } else {
             serde_json::json!(["deny", "allow-once", "allow-project"])
         },
     });
+    if command_once {
+        let hosts = crate::command_network::destinations(arguments)?;
+        let program = capability_argument_string(arguments, "program")?;
+        let args = crate::capabilities::access::capability_argument_strings(arguments, "args")?;
+        let argv = std::iter::once(program).chain(args.iter().map(String::as_str))
+            .map(serde_json::to_string)
+            .collect::<Result<Vec<_>, _>>()?
+            .join(" ");
+        payload["command"] = serde_json::json!(gyro_core::security::redact_secrets(&argv));
+        let cwd = arguments.get("cwd").and_then(serde_json::Value::as_str).unwrap_or(".");
+        let cwd = gyro_core::security::assert_path_inside_workspace(&bound.workspace, Path::new(cwd))?;
+        payload["cwd"] = serde_json::json!(cwd);
+        payload["reason"] = serde_json::json!(if hosts.is_empty() {
+            "This command will run in the workspace with outbound network access blocked.".to_string()
+        } else {
+            format!("Allow HTTPS access for this invocation to {}. The command can send data to these hosts.", hosts.into_iter().collect::<Vec<_>>().join(", "))
+        });
+    }
     if capability_uses_language_server(capability_id) {
         let (reason, risk) = if class == CapabilityClass::TerminalExecute {
             (
@@ -251,6 +268,18 @@ pub(crate) fn wait_for_capability_approval(
             });
         }
     }
+    app.state::<ProviderCapabilityApprovalManager>()
+        .pending
+        .lock()
+        .map_err(|_| anyhow::anyhow!("capability approval state is unavailable"))?
+        .insert(
+            approval_id.to_string(),
+            PendingCapabilityApproval {
+                sender,
+                session_id,
+                turn_id,
+            },
+        );
     let _ = capability_event(
         app,
         bound,
@@ -261,32 +290,28 @@ pub(crate) fn wait_for_capability_approval(
         None,
     );
     let _ = app.emit(PROVIDER_APPROVAL_EVENT, visible_event);
+    let _agent_wait = delegated_agents::ApprovalWait::start(app, session_id, turn_id);
     let started_at = Instant::now();
     let decision = loop {
+        if cancelled() {
+            break Err("capability approval was cancelled".to_string());
+        }
         match receiver.recv_timeout(Duration::from_millis(250)) {
+            Ok(_) if cancelled() => break Err("capability approval was cancelled".to_string()),
             Ok(decision) => break Ok(decision),
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 break Err("capability approval was cancelled".to_string())
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
-        let active = app
-            .state::<ProviderCancellationManager>()
-            .flags
-            .lock()
-            .ok()
-            .and_then(|flags| flags.get(&bound.session_id).cloned());
-        if code_mode::cancelled()
-            || active
-                .as_ref()
-                .map_or(true, |control| control.cancellation.is_cancelled())
-        {
+        if cancelled() {
             break Err("capability approval was cancelled".to_string());
         }
         // A permission-mode change also releases already waiting delegation.
         // Recheck live project policy so auto approval cannot bypass a denial.
         let automatic = load_config_blocking().is_ok_and(|config| {
-            let full_access = capability_id != CapabilityId::WorkspaceReadEditor
+            let config = crate::chat_permissions::for_active_turn(app, &bound.session_id, config);
+            let full_access = !command_once && capability_id != CapabilityId::WorkspaceReadEditor
                 && bound.policy.mode == CapabilityRunMode::Normal
                 && delegated_agents::full_access_ceiling(app, &bound.session_id)
                 && capability_full_access_enabled(&config);
@@ -367,6 +392,56 @@ pub(crate) fn wait_for_capability_approval(
             }
         })
         .map_err(anyhow::Error::msg)
+}
+
+pub(crate) fn take_capability_approval(
+    manager: &ProviderCapabilityApprovalManager,
+    approval_id: Uuid,
+    session_id: Uuid,
+    turn_id: Option<Uuid>,
+) -> Result<PendingCapabilityApproval, String> {
+    let mut pending = manager
+        .pending
+        .lock()
+        .map_err(|_| "capability approval state is unavailable".to_string())?;
+    let std::collections::hash_map::Entry::Occupied(entry) = pending.entry(approval_id.to_string())
+    else {
+        return Err("capability approval is no longer pending".into());
+    };
+    if entry.get().session_id != session_id || entry.get().turn_id != turn_id {
+        return Err("capability approval did not belong to this chat turn".into());
+    }
+    Ok(entry.remove())
+}
+
+#[cfg(test)]
+#[test]
+fn capability_approval_remains_pending_after_a_decision_for_the_wrong_turn() {
+    let manager = ProviderCapabilityApprovalManager::default();
+    let (sender, receiver) = mpsc::channel();
+    let (session, turn, id) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    manager.pending.lock().unwrap().insert(
+        id.to_string(),
+        PendingCapabilityApproval {
+            sender,
+            session_id: session,
+            turn_id: Some(turn),
+        },
+    );
+    assert!(take_capability_approval(&manager, id, session, Some(Uuid::new_v4())).is_err());
+    assert!(take_capability_approval(&manager, id, Uuid::new_v4(), Some(turn)).is_err());
+    let approval = take_capability_approval(&manager, id, session, Some(turn))
+        .ok()
+        .unwrap();
+    approval
+        .sender
+        .send(CapabilityApprovalDecision::Deny)
+        .unwrap();
+    assert_eq!(
+        receiver.try_recv().unwrap(),
+        CapabilityApprovalDecision::Deny
+    );
+    assert!(take_capability_approval(&manager, id, session, Some(turn)).is_err());
 }
 
 pub(crate) fn editor_approval_fingerprint(

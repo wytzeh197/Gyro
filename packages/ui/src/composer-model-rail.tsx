@@ -1,3 +1,4 @@
+import { forwardRef, useImperativeHandle, type ForwardedRef } from "react";
 import {
   Check,
   CircleDashed,
@@ -207,7 +208,9 @@ function SignInProgress({
         <CircleDashed aria-hidden="true" className="is-spinning" size={13} />
         {signIn.deviceCode
           ? "Enter this code on the sign-in page"
-          : "Waiting for browser sign-in"}
+          : signIn.acceptsCode
+            ? "Finish signing in, then paste the authorization code from your browser."
+            : "Waiting for browser sign-in"}
       </p>
       {signIn.deviceCode ? (
         <button
@@ -271,7 +274,7 @@ function SignInProgress({
  * arrowed to), so sweeping the pointer across the rail never swaps the list,
  * and the rail keeps its order so a logo is always where the hand remembers it.
  */
-export function ComposerModelRail({
+export const ComposerModelRail = forwardRef(function ComposerModelRail({
   id,
   placement,
   align = "end",
@@ -297,7 +300,7 @@ export function ComposerModelRail({
   onSelectModel: (providerId: string, modelId: string) => void;
   onConnect: (providerId: string) => void;
   onManageProviders: () => void;
-}) {
+}, surfaceRef: ForwardedRef<HTMLDivElement>) {
   const connected = providers.filter((provider) => provider.connected);
   const available = providers.filter((provider) => !provider.connected);
   const [previewId, setPreviewId] = useState(
@@ -311,6 +314,7 @@ export function ComposerModelRail({
   const previewSignIn =
     preview && !preview.connected ? signIns[preview.id] : undefined;
   const panelRef = useRef<HTMLDivElement>(null);
+  useImperativeHandle(surfaceRef, () => panelRef.current!, []);
   const [resolvedPlacement, setResolvedPlacement] = useState(placement);
   const railRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -674,4 +678,4 @@ export function ComposerModelRail({
       </div>
     </div>
   );
-}
+});

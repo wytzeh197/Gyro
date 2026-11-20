@@ -246,6 +246,13 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
                 "description": "Start the task in this chat's terminal and return immediately instead of waiting for it to exit. Use for dev servers, watchers, and other long-running commands, then wait for finite commands with gyro_terminal_wait, read output with gyro_terminal_read, or end it with gyro_terminal_stop."
             }
         }),
+        CapabilityId::WorkspaceRunCommand => json!({
+            "program": {"type":"string","description":"Executable name or path"},
+            "args": {"type":"array","items":{"type":"string"}},
+            "cwd": {"type":"string","description":"Directory relative to the Workspace root"},
+            "networkDestinations": {"type":"array","items":{"type":"string"},"maxItems":16,"description":"Exact public HTTPS hostnames this invocation needs"},
+            "maxBytes": workspace_result_bytes_schema()
+        }),
         CapabilityId::TerminalOpen => json!({
             "program": { "type": "string", "description": "Executable name or path only, such as \"npm\" or \"cargo\". It runs directly without a shell, so put arguments in args. For pipes, redirects, or && use program \"sh\" with args [\"-c\", \"...\"]." },
             "args": { "type": "array", "items": { "type": "string" }, "description": "Arguments passed to program, one per element, such as [\"run\", \"dev\"]." },
@@ -259,6 +266,13 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
             "maxBytes": workspace_result_bytes_schema(),
             "resourceId": { "type": "string", "description": "resource.id returned when this chat started the command" },
             "timeoutMs": { "type": "integer", "minimum": 0, "maximum": 300000, "default": 60000, "description": "Maximum wait per call, up to 5 minutes. Prefer a long wait for builds. A running command keeps running; call wait again if needed." }
+        }),
+        CapabilityId::TerminalInput => json!({
+            "text": { "type": "string", "description": "Text to type, sent verbatim. End with a newline to press Enter." },
+            "key": { "type": "string", "enum": crate::terminal_capability::INPUT_KEYS, "description": "One control key, sent after text." },
+            "yieldTimeMs": { "type": "integer", "minimum": 0, "maximum": terminal_wait::MAX_INITIAL_WAIT_MS, "default": terminal_wait::DEFAULT_INITIAL_WAIT_MS, "description": "Wait this long for output before returning." },
+            "knownOutputRevision": { "type":"integer","minimum":0,"description":"Output revision already received; unchanged output is omitted." },
+            "maxBytes": workspace_result_bytes_schema()
         }),
         CapabilityId::TerminalRead | CapabilityId::TerminalStop => json!({
             "knownOutputRevision": { "type":"integer","minimum":0,"description":"Output revision already received; unchanged output is omitted." },

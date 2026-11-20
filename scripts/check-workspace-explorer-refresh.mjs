@@ -34,8 +34,10 @@ let slot = 0;
 let timerId = 0;
 const timers = new Map();
 const listeners = new Map();
+let focused = true;
 const document = {
   visibilityState: "visible",
+  hasFocus: () => focused,
   addEventListener: (name, fn) => listeners.set(name, fn),
   removeEventListener: (name) => listeners.delete(name),
 };
@@ -45,10 +47,13 @@ const hookFn = vm.runInNewContext(js, {
   mergeExplorerDirectories,
   sameListings,
   window: {
-    setInterval: fn => { timers.set(++timerId, fn); return timerId; },
+    setInterval: (fn, delay) => { timers.set(++timerId, { fn, delay }); return timerId; },
     clearInterval: id => timers.delete(id),
+    addEventListener: (name, fn) => listeners.set(name, fn),
+    removeEventListener: (name) => listeners.delete(name),
   },
   document,
+  useCallback: (fn) => fn,
   useRef: (initial) => {
     const id = slot++;
     return (slots[id] ??= { current: initial });
@@ -84,22 +89,23 @@ const files = [root];
 const reads = [];
 const errors = [];
 const load = (path) => new Promise((resolve) => reads.push({ path, resolve }));
-const render = (revision) => {
+const render = () => {
   slot = 0;
-  const result = hookFn(files, load, (...args) => errors.push(args), revision);
+  const result = hookFn(files, load, (...args) => errors.push(args), "event");
   while (effects.length) effects.shift()();
   return result;
 };
 const flush = () => new Promise(setImmediate);
-let result = render(0);
+let result = render();
 assert.equal(timers.size, 0, "No expanded folders means no polling timer");
 result.onExpandedDirectoriesChange([root.path]);
-render(0);
+result = render();
 assert.equal(timers.size, 1);
+assert.equal(timers.values().next().value.delay, 15_000);
 await flush();
 assert.equal(reads.length, 1);
-render(1);
-render(2);
+result.refreshChangedDirectories(root.path, ["/project/new.ts"]);
+result.refreshChangedDirectories(root.path, ["/project/other.ts"]);
 await flush();
 assert.equal(
   reads.length,
@@ -115,12 +121,15 @@ assert.equal(
 );
 reads[1].resolve([{ path: "/project/new.ts", kind: "file" }]);
 await flush();
-result = render(2);
+result = render();
 assert.ok(result.explorerFiles.some((file) => file.path === "/project/new.ts"));
 assert.ok(
   !result.explorerFiles.some((file) => file.path === "/project/old.ts"),
 );
-render(3);
+result.refreshChangedDirectories(root.path, ["/project/nested/deeper/file.ts"]);
+await flush();
+assert.equal(reads.length, 2, "An unrelated child directory leaves the expanded root listing alone");
+result.refreshChangedDirectories(root.path, ["/project/new.ts"]);
 await flush();
 assert.equal(
   reads.length,
@@ -129,22 +138,33 @@ assert.equal(
 );
 reads[2].resolve([]);
 await flush();
-document.visibilityState = "hidden";
-render(4);
-for (const tick of timers.values()) tick();
+focused = false;
+result.refreshChangedDirectories(root.path, ["/project/new.ts"]);
+for (const { fn } of timers.values()) fn();
 await flush();
-assert.equal(reads.length, 3, "Native changes and timer ticks must not read hidden folders");
+assert.equal(reads.length, 3, "An unfocused window skips even while it is visible");
+focused = true;
+listeners.get("focus")();
+await flush();
+assert.equal(reads.length, 4, "Focusing the window reconciles skipped changes");
+reads[3].resolve([]);
+await flush();
+document.visibilityState = "hidden";
+result.refreshChangedDirectories(root.path, ["/project/new.ts"]);
+for (const { fn } of timers.values()) fn();
+await flush();
+assert.equal(reads.length, 4, "Native changes and timer ticks must not read hidden folders");
 document.visibilityState = "visible";
 listeners.get("visibilitychange")();
 await flush();
-assert.equal(reads.length, 4, "Returning to the window catches up without waiting for a tick");
-result = render(4);
+assert.equal(reads.length, 5, "Returning to the window catches up without waiting for a tick");
+result = render();
 result.onExpandedDirectoriesChange([]);
-render(4);
+render();
 assert.equal(timers.size, 0, "Collapsing the last folder retires its polling timer");
 assert.equal(listeners.size, 0);
 for (const entry of slots) entry?.cleanup?.();
-reads[3].resolve([]);
+reads[4].resolve([]);
 await flush();
 assert.deepEqual(errors, []);
 console.log(

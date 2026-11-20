@@ -80,6 +80,50 @@ try {
   assert.ok(reversed.at(-1)?.width > 250, "open-close-open interruption settles open");
   await click("Close panel");
   await pause(300);
+  const menuMotion = await evaluate(`(async () => {
+    const trigger = document.querySelector('[aria-label="Preview actions"]');
+    const getMenu = () => document.querySelector(".gyro-toolbar-overflow-menu");
+    const frame = () => new Promise(requestAnimationFrame);
+    const findTrack = menu => menu.getAnimations().find(track => track.animationName);
+    trigger.click();
+    await frame();
+    const menu = getMenu();
+    const opening = findTrack(menu);
+    const openTime = Number(opening.effect.getComputedTiming().duration);
+    await opening.finished;
+    trigger.click();
+    await opening.ready;
+    const closingRate = opening.playbackRate;
+    const inert = menu.inert;
+    await opening.finished;
+    await frame();
+    const removed = !getMenu();
+    trigger.click();
+    await frame();
+    const reopenedMenu = getMenu();
+    const interrupted = findTrack(reopenedMenu);
+    interrupted.pause();
+    await interrupted.ready;
+    interrupted.currentTime = openTime * 0.45;
+    trigger.click();
+    await interrupted.ready;
+    const sameTimeline = findTrack(reopenedMenu) === interrupted;
+    trigger.click();
+    await interrupted.ready;
+    const reopeningRate = interrupted.playbackRate;
+    await interrupted.finished;
+    return {
+      openTime, closingRate, inert, removed, sameTimeline, reopeningRate,
+      reopened: getMenu() === reopenedMenu && !reopenedMenu.inert,
+    };
+  })()`);
+  assert.equal(menuMotion.openTime, 130, "overflow keeps its existing 130 ms entrance");
+  assert.equal(menuMotion.closingRate, -1.25, "full exit takes 80% of the opening duration");
+  assert.equal(menuMotion.reopeningRate, 1, "reopening restores the original playback rate");
+  assert.ok(menuMotion.inert && menuMotion.removed && menuMotion.sameTimeline && menuMotion.reopened, JSON.stringify(menuMotion));
+  await call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape" });
+  await until(() => evaluate('!document.querySelector(".gyro-toolbar-overflow-menu")'), "overflow exits after Escape");
+  assert.equal(await evaluate("document.activeElement?.getAttribute('aria-label')"), "Preview actions");
   await evaluate('document.querySelector(".motion-qa-disclosure-content")?.style.setProperty("height", "201.25px")');
   await click("Run disclosure frame checks");
   const normal = await until(() => evaluate('document.querySelector("[data-motion-result]")?.textContent.startsWith("PASS") && document.querySelector("[data-motion-result]").textContent'), "disclosure opening, closing and reversal");
@@ -105,6 +149,10 @@ try {
   assert.ok(reducedOpened.filter(Boolean).every(x => Math.abs(x.width - reducedOpened.at(-1).width) < 1), "reduced motion has no intermediate panel width");
   const reducedClosed = await trace("Close panel");
   assert.equal(reducedClosed.filter(Boolean).length, 0, "reduced motion removes dock immediately");
+  await evaluate("document.querySelector('[aria-label=\"Preview actions\"]').click()");
+  await until(() => evaluate('!!document.querySelector(".gyro-toolbar-overflow-menu")'), "reduced motion overflow opens");
+  await evaluate("document.querySelector('[aria-label=\"Preview actions\"]').click()");
+  await until(() => evaluate('!document.querySelector(".gyro-toolbar-overflow-menu")'), "reduced motion overflow closes");
   await click("Run disclosure frame checks");
   const reduced = await until(() => evaluate('document.querySelector("[data-motion-result]")?.textContent.includes("reduced motion true") && document.querySelector("[data-motion-result]").textContent'), "reduced motion disclosure");
   assert.match(reduced, /^PASS/);

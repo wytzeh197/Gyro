@@ -172,6 +172,7 @@ const childEvents = [
 function Fixture() {
   const [environmentOpen, setEnvironmentOpen] = useState(true);
   const params = new URLSearchParams(location.search);
+  const scenario = params.get("scenario");
   const [theme, setTheme] = useState<"dark" | "light">(
     params.get("theme") === "light" ? "light" : "dark",
   );
@@ -195,12 +196,47 @@ function Fixture() {
       theme,
     );
   }, [theme]);
-  const [agents, setAgents] = useState<SubagentSnapshot[]>(() =>
-    params.get("scenario") === "working"
+  const [agents, setAgents] = useState<SubagentSnapshot[]>(() => {
+    if (scenario === "empty" || scenario === "loading") return [];
+    if (scenario === "lifecycle") {
+      return [
+        ...initial,
+        {
+          ...base,
+          agentId: "docs",
+          name: "Documentation follow-up",
+          task: "Check the updated guide against the current behavior.",
+          runId: "docs-followup",
+          status: "interrupted",
+          error: "The sub-agent reached its tool limit before finishing.",
+          summary:
+            "Verified the setup section. The troubleshooting section still needs review.",
+          startedAt: null,
+          elapsedMs: 42400,
+        },
+        {
+          ...base,
+          agentId: "fixtures",
+          name: "Fixture cleanup",
+          status: "cancelled",
+          startedAt: null,
+          elapsedMs: 6000,
+        },
+        {
+          ...base,
+          agentId: "types",
+          name: "Type review",
+          status: "stopping",
+        },
+      ];
+    }
+    return scenario === "working"
       ? [
           ...initial.map((agent, index) => ({
             ...agent,
             status: "running" as const,
+            startedAt: now,
+            error: null,
             name:
               [
                 "Native provider accounting",
@@ -219,9 +255,14 @@ function Fixture() {
             summary: "Review completed.",
           })),
         ]
-      : initial,
-  );
+      : initial;
+  });
   const [refreshError, setRefreshError] = useState(false);
+  const [historyRead, setHistoryRead] = useState<"loading" | "error">();
+  const [stopRequest, setStopRequest] = useState<{
+    agentId: string;
+    error?: string;
+  }>();
   const [tabs, setTabs] = useState<SubagentTabState>({ openAgentIds: [] });
   const [companion, dispatchCompanion] = useReducer(
     chatCompanionReducer,
@@ -266,7 +307,48 @@ function Fixture() {
     agents,
     openAgentIds: tabs.openAgentIds,
     selectedAgentId: tabs.selectedAgentId,
-    eventsByAgentId: { parser: events },
+    eventsByAgentId: {
+      parser: events,
+      docs: [
+        event(
+          "docs",
+          "docs-initial",
+          "docs-task",
+          "user-message",
+          "Review the setup guide.",
+        ),
+        event(
+          "docs",
+          "docs-initial",
+          "docs-reply",
+          "assistant-message",
+          "Initial guide review complete.",
+        ),
+        event("docs", "docs-initial", "docs-done", "system-event", "Done", {
+          kind: "provider-status",
+          status: "done",
+          durationMs: 12400,
+        }),
+      ],
+    },
+    history: tabs.selectedAgentId
+      ? {
+          isLoading: historyRead === "loading",
+          error:
+            historyRead === "error"
+              ? "Fixture: history unavailable"
+              : undefined,
+          onRetry: () => setHistoryRead(undefined),
+          hasMoreBefore: false,
+          isLoadingEarlier: false,
+          onLoadEarlier: () => {},
+        }
+      : undefined,
+    stopRequest:
+      stopRequest && stopRequest.agentId === tabs.selectedAgentId
+        ? { pending: !stopRequest.error, error: stopRequest.error }
+        : undefined,
+    isRefreshing: scenario === "loading",
     error: refreshError ? "Could not refresh sub-agents." : undefined,
     errorDetail: refreshError
       ? "Fixture: native connection unavailable"
@@ -286,19 +368,32 @@ function Fixture() {
           paneId: "fixture",
         });
     },
-    onStop: (id) =>
-      setAgents((current) =>
-        current.map((agent) =>
-          agent.agentId === id
-            ? {
-                ...agent,
-                status: "cancelled",
-                elapsedMs: Date.now() - Date.parse(now),
-                startedAt: null,
-              }
-            : agent,
-        ),
-      ),
+    onStop: (id) => {
+      const shouldFail = scenario === "lifecycle" && !stopRequest?.error;
+      setStopRequest({ agentId: id });
+      window.setTimeout(() => {
+        if (shouldFail) {
+          setStopRequest({
+            agentId: id,
+            error: "Fixture: stop request failed",
+          });
+          return;
+        }
+        setStopRequest(undefined);
+        setAgents((current) =>
+          current.map((agent) =>
+            agent.agentId === id
+              ? {
+                  ...agent,
+                  status: "cancelled",
+                  elapsedMs: Date.now() - Date.parse(now),
+                  startedAt: null,
+                }
+              : agent,
+          ),
+        );
+      }, 350);
+    },
   };
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
@@ -307,6 +402,16 @@ function Fixture() {
         <button onClick={() => setRefreshError(true)}>
           Simulate refresh failure
         </button>
+        {scenario === "lifecycle" ? (
+          <>
+            <button onClick={() => setHistoryRead("loading")}>
+              Simulate history loading
+            </button>
+            <button onClick={() => setHistoryRead("error")}>
+              Simulate history failure
+            </button>
+          </>
+        ) : null}
         <button
           onClick={() =>
             setTheme((current) => (current === "dark" ? "light" : "dark"))

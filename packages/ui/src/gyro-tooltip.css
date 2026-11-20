@@ -1,5 +1,7 @@
 /* The themed bubble that replaces the system `title` tooltip. */
 .gyro-tooltip {
+  --gyro-tooltip-enter: 90ms;
+  --gyro-tooltip-exit: calc(var(--gyro-tooltip-enter) * var(--gyro-exit-motion-factor, 0.8));
   position: fixed;
   top: 0;
   left: 0;
@@ -19,16 +21,18 @@
   overflow-wrap: anywhere;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 90ms ease;
+  visibility: hidden;
+  transition: opacity var(--gyro-tooltip-exit) ease,
+    visibility 0s linear var(--gyro-tooltip-exit);
 }
 .gyro-tooltip.is-visible {
   opacity: 1;
-}
-.gyro-tooltip[hidden] {
-  display: none;
+  visibility: visible;
+  transition: opacity var(--gyro-tooltip-enter) ease;
 }
 @media (prefers-reduced-motion: reduce) {
-  .gyro-tooltip {
+  .gyro-tooltip,
+  .gyro-tooltip.is-visible {
     transition: none;
   }
 }

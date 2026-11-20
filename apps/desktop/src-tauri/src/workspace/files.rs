@@ -170,6 +170,39 @@ pub(crate) async fn resolve_file_mutation_proposal(
     .map_err(|error| format!("file mutation decision worker failed: {error}"))?
 }
 
+#[tauri::command]
+pub(crate) async fn undo_recorded_chat_edit(
+    app: tauri::AppHandle,
+    session_id: String,
+    turn_id: String,
+    undo_id: String,
+) -> Result<gyro_core::SessionEvent, String> {
+    crate::features::remote_access::require_local_control(&app, &session_id)?;
+    let reservation = crate::provider_run_cleanup::ProviderRunReservation::reserve(&app, &session_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri::Manager;
+        let _reservation = reservation;
+        let store = crate::stores::open_store()?;
+        let session_id = crate::stores::parse_uuid(&session_id)?;
+        let turn_id = crate::stores::parse_uuid(&turn_id)?;
+        let undo_id = crate::stores::parse_uuid(&undo_id)?;
+        let _lease = crate::providers::session_lifecycle::ProviderSessionLease::for_run(&store, session_id)
+            .map_err(to_string)?;
+        gyro_core::mutations::undo_recorded_edit(&store, session_id, turn_id, undo_id, |workspace, paths| {
+            let manager = app.state::<crate::state::managers::CapabilityIdeEvidenceManager>();
+            let evidence = manager.evidence.lock().map_err(|_| anyhow::anyhow!("Editor state is unavailable."))?;
+            let snapshot = evidence.get(&workspace.to_string_lossy())
+                .ok_or_else(|| anyhow::anyhow!("Open the recorded workspace to check for unsaved changes."))?;
+            for path in paths {
+                crate::workspace_mutations::assert_clean_proposal_buffer(snapshot, path)?;
+            }
+            Ok(())
+        }).map_err(to_string)
+    })
+    .await
+    .map_err(to_string)?
+}
+
 pub(crate) fn read_workspace_file_impl(
     workspace_path: &str,
     path: &str,

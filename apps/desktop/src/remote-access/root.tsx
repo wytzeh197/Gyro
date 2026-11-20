@@ -36,11 +36,18 @@ export function RemoteWorkspaceRoot({
   const [selectedHost, setSelectedHost] = useState<Peer>();
   const [selection, setSelection] = useState<RemoteSelection>();
   const peers = status?.peers ?? [];
+  const discoverablePeers = useMemo(
+    () =>
+      (status?.peers ?? []).filter((peer) =>
+        peer.transport === "ssh"
+          ? status?.sshHosts?.some((host) => host.id === peer.id && host.connected)
+          : status?.settings.enabled && peer.role !== "client",
+      ),
+    [status],
+  );
   const { catalogs, refresh: refreshCatalog } = useRemoteCatalog(
     ports,
-    peers.filter(
-      (peer) => status?.settings.enabled || peer.transport === "ssh",
-    ),
+    discoverablePeers,
   );
   const refreshSequence = useRef(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -160,6 +167,12 @@ export function RemoteWorkspaceRoot({
     window.addEventListener("keydown", shortcut);
     return () => window.removeEventListener("keydown", shortcut);
   }, [selection, openSettings, selectRemote]);
+  const availableCatalogs = useMemo(() => {
+    const discoverableIds = new Set(discoverablePeers.map((peer) => peer.id));
+    return catalogs.filter(
+      (catalog) => catalog.online && discoverableIds.has(catalog.host.id),
+    );
+  }, [catalogs, discoverablePeers]);
   const context = useMemo(
     () => ({
       ports,
@@ -172,7 +185,7 @@ export function RemoteWorkspaceRoot({
       openSettings,
       selectRemote,
       refreshCatalog,
-      connectedHostIds: catalogs.filter((c) => c.online).map((c) => c.host.id),
+      connectedHostIds: availableCatalogs.map((c) => c.host.id),
     }),
     [
       ports,
@@ -185,12 +198,9 @@ export function RemoteWorkspaceRoot({
       openSettings,
       selectRemote,
       refreshCatalog,
-      catalogs,
+      availableCatalogs,
     ],
   );
-  // Cached catalogs preserve recovery state, but only reachable hosts belong
-  // in navigation and new-chat project choices.
-  const availableCatalogs = catalogs.filter((catalog) => catalog.online);
   const settings = (
     <Suspense fallback={fallback()}>
       <Settings />

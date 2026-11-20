@@ -238,6 +238,49 @@ try {
   }
   await call("Page.enable");
   await call("Runtime.enable");
+  await load("closed");
+  await click("Change actions");
+  const changeMenu = '.gyro-change-summary-options [role="menu"]';
+  assert.equal(
+    await evaluate(`document.querySelector(${JSON.stringify(changeMenu)})?.textContent.trim()`),
+    "Undo",
+  );
+  await call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape" });
+  assert.equal(
+    await evaluate("document.activeElement?.getAttribute('aria-label')"),
+    "Change actions",
+  );
+  await click("Review src/sync.test.ts");
+  assert.equal(
+    await evaluate("document.querySelector('.gyro-review-identity strong')?.textContent"),
+    "src/sync.test.ts",
+  );
+  await click("Compare working tree");
+  assert.match(
+    await evaluate("document.querySelector('.gyro-plain-diff-summary')?.textContent"),
+    /Index ↔ Working Tree/,
+  );
+  await click("Back to recorded turn");
+  assert.match(
+    await evaluate("document.querySelector('.gyro-plain-diff-summary')?.textContent"),
+    /Recorded turn/,
+  );
+  await click("Second opinion");
+  await click("Review src/queue/backoff.ts");
+  assert.equal(
+    await evaluate("document.querySelector('.gyro-review-identity strong')?.textContent"),
+    "src/queue/backoff.ts",
+    "opening a changed file returns to Changes and selects that file",
+  );
+  await load("closed", { split: true, width: 860, height: 620 });
+  await click("Review src/sync.test.ts");
+  await until(
+    () => evaluate(`[...document.querySelectorAll('.gyro-review-identity strong')]
+      .some(title => title.textContent === 'src/sync.test.ts' &&
+        title.getBoundingClientRect().height > 0)`),
+    "the selected file renders inside the narrow Review overlay",
+  );
+  console.log("PASS changed file handoff and comparison scope");
   for (const theme of ["dark", "light"]) {
     for (const tool of [
       "review",

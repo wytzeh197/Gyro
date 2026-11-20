@@ -296,7 +296,7 @@ function TourCoachmark({
     finalAction === "first-task"
       ? "Try a first task"
       : finalAction === "connect"
-        ? "Connect an account"
+        ? "Set up a model"
         : isLast
           ? "Finish"
           : "Next";

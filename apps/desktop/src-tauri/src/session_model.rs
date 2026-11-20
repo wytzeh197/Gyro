@@ -2,6 +2,7 @@ use crate::stores::{open_store, parse_uuid, to_string};
 use gyro_core::{Session, SessionEventKind};
 #[tauri::command]
 pub(super) async fn set_session_model(
+    app: tauri::AppHandle,
     session_id: String,
     provider_id: Option<String>,
     provider_label: Option<String>,
@@ -16,6 +17,9 @@ pub(super) async fn set_session_model(
             .get_session(session_id)
             .map_err(to_string)?
             .ok_or_else(|| "session not found".to_string())?;
+        if previous.provider_id != provider_id {
+            crate::chat_permissions::revoke(&app, session_id)?;
+        }
         let updated = store
             .update_session_model(
                 session_id,

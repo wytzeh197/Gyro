@@ -186,6 +186,15 @@ pub(super) fn resolve_file_mutation_proposal_impl(
         decision,
         |proposal| {
             use tauri::Manager;
+            if let Some(turn) = proposal.turn_id {
+                let current = store.latest_provider_status_for_turn(proposal.session_id, turn)?;
+                anyhow::ensure!(current.as_deref() != Some("cancelled"), "The response stopped. Request a new edit.");
+                let active = app.state::<crate::state::managers::ProviderCancellationManager>();
+                let stopping = active.flags.lock().map_err(|_| anyhow::anyhow!("Run state is unavailable"))?
+                    .get(&proposal.session_id.to_string())
+                    .is_some_and(|run| run.cancellation.is_cancelled());
+                anyhow::ensure!(!stopping, "The response is stopping. Request a new edit.");
+            }
             let manager = app.state::<crate::state::managers::CapabilityIdeEvidenceManager>();
             let evidence = manager
                 .evidence
@@ -215,7 +224,7 @@ pub(super) fn resolve_file_mutation_proposal_impl(
     })
 }
 
-fn assert_clean_proposal_buffer(
+pub(crate) fn assert_clean_proposal_buffer(
     snapshot: &gyro_core::WorkspaceContextSnapshot,
     path: &str,
 ) -> anyhow::Result<()> {

@@ -11,7 +11,7 @@ pub(super) fn workspace_result_bytes_schema() -> serde_json::Value {
         "type": "integer", "minimum": MIN_WORKSPACE_RESULT_BYTES,
         "maximum": gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES,
         "default": DEFAULT_WORKSPACE_RESULT_BYTES,
-        "description": "Maximum serialized result data bytes. Keep the default for routine inspection; increase only when additional context is needed. Integer values are clamped to the supported range; null uses the default."
+        "description": "Result size cap in bytes. Raise it only when the default page is not enough; out-of-range values are clamped."
     })
 }
 

@@ -1,4 +1,12 @@
+import { humanModelName } from "./model-name";
+import { turnReviewPayload, useTurnReviews, type TurnReview } from "./code-reviews/turn-progress";
+import { reviewIsActive } from "./code-reviews/types";
+import { ComposerReviewerPicker, connectedReviewerOptions } from "./composer-reviewer-picker";
+import { secondOpinionCommand, type ComposerReviewer, InlineCommandText, useInlineCommandDraft, type InlineCommandDraft } from "./composer-inline-draft";
+import { SurfacePresence } from "./surface-presence";
+import { forwardRef, useImperativeHandle, type ForwardedRef } from "react";
 import { gitSetupMessage, hasOnlyGitWarnings, preparationMessage, preparationStatusLabel } from "./workspace-preparation";
+import type { GithubSetupAction } from "./github-setup";
 import { ProjectMemoryPanel } from "./project-memory/panel";
 import type { ProjectMemoryRuntime } from "./project-memory/types";
 import {
@@ -37,6 +45,7 @@ import {
   AtSign,
   FileDiff,
   FileText,
+  Boxes,
   Gauge,
   GitBranch,
   GitCommitHorizontal,
@@ -158,6 +167,7 @@ import {
 import {
   bareChatUrl,
   chatBareUrlPattern,
+  type InlineLinkRenderer,
   chatInlineTokenPattern,
   isCitedImageTarget,
   linkedChatFile,
@@ -205,7 +215,7 @@ import {
   type ChatTaskSuggestionHandlers,
   type ChatTaskSuggestionsController,
 } from "./chat-task-suggestions";
-import { CheckWorkStatus } from "./check-work-context";
+import { CheckWorkContext, CheckWorkStatus } from "./check-work-context";
 import { CloudChatBackup, type ChatBackupReview } from "./cloud-chat-backup";
 import { CloudSettings } from "./cloud-settings";
 import { groupWorkflowEvents, workflowDetails } from "./code-mode";
@@ -299,7 +309,10 @@ import {
   budgetOptions,
   usagePauseDetail,
 } from "./settings-presentation";
-import { ProviderModelDefaults } from "./settings-provider-defaults";
+import {
+  ProviderDefaultModelPicker,
+  ProviderModelDefaults,
+} from "./settings-provider-defaults";
 import {
   ShortcutConflicts,
   workspaceKeybindingSignature,
@@ -309,6 +322,7 @@ import { SettingsTransferPanel } from "./settings-transfer-panel";
 import { type SidebarProjectSettings } from "./sidebar-project-card";
 import {
   pendingSubagentApprovals,
+  currentSubagentApprovals,
   subagentsForStatus,
   type SubagentSurfaceState,
 } from "./subagents";
@@ -379,7 +393,7 @@ export {
   taskCommandLine,
 } from "./workspace-sidebar";
 
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import gyroLogoTransparentLight from "./assets/gyro-logo-white.svg";
 import gyroLogoTransparentDark from "./assets/gyro-logo.svg";
 import {
@@ -461,10 +475,10 @@ import {
   type ComposerContextUsage,
   type ComposerLimitWindow,
 } from "./context-usage";
+import { CouncilSettings } from "./council-settings";
+import { COUNCIL_WRITER_COPY, CouncilScopeDock, councilSynthesizerAction, councilWriterOptions } from "./council-composer";
+import { CouncilEnvironmentSection, councilLiveProgress } from "./council-environment";
 import {
-  COUNCIL_COMING_SOON,
-  COUNCIL_COMING_SOON_LABEL,
-  councilPreflightLabel,
   normalizedCouncilConfig,
   readyCouncilProviders,
   resolveCouncilSeatRequests,
@@ -488,10 +502,9 @@ import {
   totalFileChangeCounts,
 } from "./file-change-counts";
 import { FileChangeCountBadges } from "./file-change-counts-view";
-import type { DiffPreviewLine, FileReviewRecord } from "./file-review";
+import type { FileReviewRecord } from "./file-review";
 import {
   changeSummaryLine,
-  diffPreviewLines,
   fileReviewDecisions,
   isKeptCurrent,
 } from "./file-review";
@@ -967,7 +980,7 @@ function ChatSwitcher({
       >
         <ChatSwitcherIcon />
       </button>
-      {host && menu ? createPortal(menu, host) : menu}
+      <SurfacePresence portal={host} descendants>{menu}</SurfacePresence>
     </div>
   );
 }
@@ -1095,8 +1108,11 @@ type AppChromeProps = {
   branchCatalog?: GitBranchCatalog;
   isBranchLoading?: boolean;
   onSelectWorkspaceBranch?: (branch: string) => void;
+  onOpenBranchPicker?: () => void;
   onCreateWorkspaceBranch?: (startPoint?: string) => void;
   onRefreshGithub?: () => void | Promise<void>;
+  onGithubSetup?: (action: GithubSetupAction) => void | Promise<void>;
+  githubSetupRunning?: GithubSetupAction;
   onSelectGithubRun?: (runId: number) => void | Promise<void>;
   onViewGithubRunLogs?: (runId: number) => void | Promise<void>;
   onRerunGithubRun?: (
@@ -1179,7 +1195,7 @@ const settingsSidebarItems: Array<{
   {
     id: "providers",
     label: "Models & accounts",
-    icon: Gauge,
+    icon: Boxes,
     group: "AI & Agents",
   },
   {
@@ -1231,7 +1247,7 @@ const settingsSidebarItems: Array<{
     icon: CreditCard,
     group: "Gyro account",
   },
-  { id: "advanced", label: "Data & privacy", icon: Settings, group: "System" },
+  { id: "advanced", label: "Data & privacy", icon: ShieldCheck, group: "System" },
   { id: "remote-access", label: "Remote access", icon: Laptop, group: "System" },
   { id: "updates", label: "Updates", icon: RefreshCw, group: "System" },
   { id: "about", label: "Help", icon: HelpCircle, group: "System" },
@@ -1460,8 +1476,8 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   {
     section: "providers",
     label: "Model Council",
-    detail: "Parallel multi-provider synthesis — coming soon",
-    keywords: "council multi model ensemble synthesize preset coming soon",
+    detail: "Ask several models at once and combine their answers",
+    keywords: "council multi model ensemble synthesize preset seats /council",
   },
   {
     section: "providers",
@@ -1521,13 +1537,19 @@ const settingsSearchEntries: SettingsSearchEntry[] = [
   {
     section: "updates",
     label: "Updates",
-    detail: "Automatic checks, release channel, and version status",
+    detail: "Automatic updates, release channel, and version status",
   },
   {
     section: "updates",
     label: "Automatic checks",
     detail: "Check for updates after launch and focus",
     keywords: "updater download",
+  },
+  {
+    section: "updates",
+    label: "Automatic updates",
+    detail: "Download in the background and install on quit",
+    keywords: "auto update download install",
   },
   {
     section: "updates",
@@ -2113,8 +2135,11 @@ export function AppChrome({
   branchCatalog,
   isBranchLoading = false,
   onSelectWorkspaceBranch,
+  onOpenBranchPicker,
   onCreateWorkspaceBranch,
   onRefreshGithub,
+  onGithubSetup,
+  githubSetupRunning,
   onSelectGithubRun,
   onViewGithubRunLogs,
   onRerunGithubRun,
@@ -2905,7 +2930,7 @@ export function AppChrome({
                   ) : (
                     <span aria-hidden="true" />
                   )}
-                  {isSettingsSearchFocused && settingsQuery.trim() ? (
+                  <SurfacePresence>{isSettingsSearchFocused && settingsQuery.trim() ? (
                     <div
                       className="gyro-settings-search-results"
                       id="settings-search-results"
@@ -2957,7 +2982,7 @@ export function AppChrome({
                         </div>
                       )}
                     </div>
-                  ) : null}
+                  ) : null}</SurfacePresence>
                 </div>
               }
               onBack={() => {
@@ -3033,9 +3058,12 @@ export function AppChrome({
               branchCatalog={branchCatalog}
               isBranchLoading={isBranchLoading}
               onSelectWorkspaceBranch={onSelectWorkspaceBranch}
+              onOpenBranchPicker={onOpenBranchPicker}
               onCreateWorkspaceBranch={onCreateWorkspaceBranch}
               onStageAllSourceControl={onStageAllSourceControl}
               onRefreshGithub={onRefreshGithub}
+              onGithubSetup={onGithubSetup}
+              githubSetupRunning={githubSetupRunning}
               onSelectGithubRun={onSelectGithubRun}
               onViewGithubRunLogs={onViewGithubRunLogs}
               onRerunGithubRun={onRerunGithubRun}
@@ -3373,7 +3401,7 @@ export function WorkspacePreparationControl({
           {progress.status === "preparing" ? `${percent}%` : preparationStatusLabel(progress)}
         </span>
       </button>
-      {isOpen ? (
+      <SurfacePresence>{isOpen ? (
         <section
           aria-label="Workspace preparation details"
           className="gyro-workspace-preparation-popover"
@@ -3456,7 +3484,7 @@ export function WorkspacePreparationControl({
             </button>
           ) : null}
         </section>
-      ) : null}
+      ) : null}</SurfacePresence>
     </div>
   );
 }
@@ -4906,6 +4934,8 @@ type ChatSurfaceProps = {
   onStartGoalChat?: (goal: string) => void;
   promptHistory?: string[];
   chatMode?: ChatMode;
+  /** "chat" once the user chose to keep Council for every message here. */
+  councilScope?: "chat";
   /** Mode of the latest submitted turn, independent of the next draft. */
   submittedChatMode?: ChatMode;
   attachments?: ChatAttachment[];
@@ -4993,12 +5023,14 @@ type ChatSurfaceProps = {
   codeReviewEntry?: import("./code-reviews/types").CodeReviewEntryRequest;
   onSaveWorkflow?: (turnId?:string)=>void;
   codeReviews?: CodeReviewRuntime;
+  supportsSecondOpinion?: boolean;
   subagents?: SubagentSurfaceState;
   planEditorRequest?: {
     kind: "goal" | "item";
     token: number;
   };
-  onDraftChange?: (value: string) => void;
+  draftReviewer?: ComposerReviewer;
+  onDraftChange?: (value: string, reviewer?: ComposerReviewer) => void;
   onRemoveAttachment?: (attachmentId: string) => void;
   onEditQueuedMessage?: (messageId: string) => void;
   onRemoveQueuedMessage?: (messageId: string) => void;
@@ -5011,6 +5043,8 @@ type ChatSurfaceProps = {
   onMediaDropError?: (message: string) => void;
   onReusePrompt?: (message: string) => void;
   onStopChat?: () => void;
+  isStoppingChat?: boolean;
+  onUndoRecordedEdit?: (sessionId: string, turnId: string, undoId: string) => Promise<void>;
   onCloseChat?: () => void;
   onPaneDragStart?: (event: ReactDragEvent<HTMLSpanElement>) => void;
   onPaneDragEnd?: () => void;
@@ -5023,7 +5057,7 @@ type ChatSurfaceProps = {
   onCouncilAction?: (
     action: CouncilActionRequest,
   ) => void | Promise<string | void>;
-  onSend: (message: string) => void;
+  onSend: (message: string, context?: { secondOpinion?: ComposerReviewer }) => void;
   /** Share completed question requests with navigation before send finishes. */
   questionState?: {
     resolvedId?: string;
@@ -5081,7 +5115,6 @@ type ChatSurfaceProps = {
     }) => void;
     onAsk?: (path: string) => void;
   };
-  onLoadChangeDiff?: (path: string) => Promise<string>;
   onLoadComparisonDiff?: (
     file: {
       path: string;
@@ -5223,6 +5256,7 @@ export function ChatSurface({
   isGoalModeActive = false,
   promptHistory = [],
   chatMode = "normal",
+  councilScope,
   submittedChatMode = chatMode,
   attachments = [],
   queuedMessages = [],
@@ -5250,6 +5284,7 @@ export function ChatSurface({
   codeReviewEntry,
   onSaveWorkflow,
   codeReviews,
+  supportsSecondOpinion,
   subagents,
   planEditorRequest,
   isEnvironmentRailOpen,
@@ -5267,6 +5302,7 @@ export function ChatSurface({
   maxDraftLength,
   providerStatuses,
   onDraftChange,
+  draftReviewer,
   onRemoveAttachment,
   onEditQueuedMessage,
   onRemoveQueuedMessage,
@@ -5278,6 +5314,8 @@ export function ChatSurface({
   onMediaDropError,
   onReusePrompt,
   onStopChat,
+  isStoppingChat,
+  onUndoRecordedEdit,
   onCloseChat,
   onContinueChat,
   hasMoreBefore = false,
@@ -5291,7 +5329,6 @@ export function ChatSurface({
   onProviderApprovalAction,
   onProviderStatusAction,
   fileReview,
-  onLoadChangeDiff,
   onLoadComparisonDiff,
   onOpenToolPanel,
   onSelectChatPanel,
@@ -5366,6 +5403,10 @@ export function ChatSurface({
   const [reviewScope, setReviewScope] = useState<ReviewScope>({
     kind: "proposed",
   });
+  const [reviewChangesEntry, setReviewChangesEntry] = useState<{
+    token: number;
+    path?: string;
+  }>();
   const [reviewTurnFiles, setReviewTurnFiles] = useState<
     Array<{
       path: string;
@@ -5379,9 +5420,9 @@ export function ChatSurface({
     setLocalDraft(draft);
   }, [draft, draftResetToken]);
   const handleDraftChange = useCallback(
-    (value: string) => {
+    (value: string, reviewer?: ComposerReviewer) => {
       setLocalDraft(value);
-      onDraftChange?.(value);
+      onDraftChange?.(value, reviewer);
     },
     [onDraftChange],
   );
@@ -5392,17 +5433,16 @@ export function ChatSurface({
     isGoalComposerActive && sessionGoal?.text
       ? (goalDraft ?? sessionGoal.text)
       : localDraft;
-  const handleComposerDraftChange = useCallback(
-    (value: string) => {
-      if (isGoalComposerActive && sessionGoal?.text) {
-        setGoalDraft(value);
-        setGoalSaveNotice("");
-        return;
-      }
-      handleDraftChange(value);
-    },
-    [handleDraftChange, isGoalComposerActive, sessionGoal?.text],
+  const messageInput = useInlineCommandDraft(
+    localDraft, handleDraftChange, JSON.stringify([paneKey, draftResetToken]),
+    localDraft === draft ? draftReviewer : undefined,
   );
+  const goalInput = useInlineCommandDraft(
+    goalDraft ?? sessionGoal?.text ?? "",
+    (value) => { setGoalDraft(value); setGoalSaveNotice(""); },
+    JSON.stringify([paneKey, draftResetToken, isGoalComposerActive]),
+  );
+  const inlineDraft = isGoalComposerActive && sessionGoal?.text ? goalInput : messageInput;
   const cancelGoalComposer = useCallback(() => {
     onCancelGoalComposer?.();
   }, [onCancelGoalComposer]);
@@ -5458,10 +5498,13 @@ export function ChatSurface({
       }
       return;
     }
-    onSend(localDraft);
+    const reviewer = inlineDraft.reviewCommand?.reviewer;
+    if (reviewer) onSend(localDraft.trimEnd(), { secondOpinion: reviewer });
+    else onSend(localDraft);
   }, [
     closeGoalComposer,
     composerBlockedReason,
+    inlineDraft.reviewCommand,
     composerDraft,
     handleDraftChange,
     isGoalComposerActive,
@@ -5677,6 +5720,34 @@ export function ChatSurface({
     Boolean(sessionPlan) &&
     !isGoalComposerActive &&
     queuedMessages.length === 0;
+  // Picking Council asks once whether it covers one turn or the whole chat.
+  // Switching to a chat already in Council mode does not ask again.
+  const [councilScopeAskKey, setCouncilScopeAskKey] = useState<string>();
+  const lastCouncilModeRef = useRef({ mode: chatMode, paneKey });
+  useEffect(() => {
+    const last = lastCouncilModeRef.current;
+    lastCouncilModeRef.current = { mode: chatMode, paneKey };
+    if (chatMode !== "council") {
+      setCouncilScopeAskKey(undefined);
+      return;
+    }
+    if (last.paneKey === paneKey && last.mode !== "council" && !councilScope) {
+      setCouncilScopeAskKey(paneKey);
+    }
+  }, [chatMode, councilScope, paneKey]);
+  const showCouncilScope =
+    councilScopeAskKey === paneKey &&
+    chatMode === "council" &&
+    !showQuestionPopup &&
+    !showPlanDecision;
+  const councilScopeDock = showCouncilScope ? (
+    <CouncilScopeDock
+      onChoose={(scope) => {
+        setCouncilScopeAskKey(undefined);
+        onComposerAction?.(`council-scope-${scope}`);
+      }}
+    />
+  ) : undefined;
   const handlePlanDecision = useCallback(
     async (decision: "approve" | "reject") => {
       if (!planDecisionKey || isPlanDecisionPending) {
@@ -5707,8 +5778,10 @@ export function ChatSurface({
   useEffect(() => {
     setGoalDraft(undefined);
     setGoalSaveNotice("");
+    setAgentReviewEntry(undefined);
     setReviewScope({ kind: "proposed" });
     setReviewTurnFiles(undefined);
+    setReviewChangesEntry(undefined);
   }, [transcriptSessionId]);
   const defaultReview = useMemo(
     () =>
@@ -5792,7 +5865,7 @@ export function ChatSurface({
         (boundToSession ? sessionModel?.modelLabel : undefined) ??
         model?.displayName ??
         sessionModel?.modelLabel ??
-        modelId ??
+        humanModelName(modelId) ??
         undefined,
       contextWindowTokens: model?.contextWindowTokens,
     };
@@ -5869,6 +5942,7 @@ export function ChatSurface({
     () => looseEvents.filter((event) => !isModelSwitchEvent(event)),
     [looseEvents],
   );
+  const opinionsByTurn = useTurnReviews(transcriptEvents, codeReviews);
   const transcriptItems = useMemo(
     () =>
       interleaveModelSwitches(turns, looseEvents.filter(isModelSwitchEvent)),
@@ -6065,17 +6139,26 @@ export function ChatSurface({
             return <ChatEvent event={item.event} key={item.event.id} />;
           }
           const { turn, turnIndex } = item;
+          const turnId = turn.user?.turnId ?? turn.id;
+          const opinion = opinionsByTurn.get(turnId);
+          const openPanel = onOpenCompanionTab ?? onSelectChatPanel;
           return (
             <ChatTurn
               config={config}
+              opinion={opinion}
+              onOpenOpinion={opinion?.reviewId && codeReviews && openPanel ? () => {
+                setAgentReviewEntry({ token: Date.now(), reviewId: opinion.reviewId, scope: { kind: "turn", turnId } });
+                openPanel("review");
+              } : undefined}
               onReviewWithAgent={codeReviews ? () => {
-                const turnId=turn.user?.turnId ?? turn.id;
-                setReviewScope({kind:"turn",turnId});
-                setAgentReviewEntry({token:Date.now(),scope:{kind:"turn",turnId}});
-                if(onOpenCompanionTab)onOpenCompanionTab("review");else onSelectChatPanel?.("review");
+                const turnId = turn.user?.turnId ?? turn.id;
+                const scope = { kind: "turn", turnId } as const;
+                setAgentReviewEntry({ token: Date.now(), scope });
+                (onOpenCompanionTab ?? onSelectChatPanel)?.("review");
               } : undefined}
               isOnline={isOnline}
               subagents={subagents}
+              visibleSubagentId={activeRailPanel === "agents" ? subagents?.selectedAgentId : undefined}
               artifactActions={transcriptArtifactActions}
               isActive={turn.id === activeTurnId}
               keepAlives={keepAlivesByTurn.get(turn.id) ?? NO_KEEP_ALIVES}
@@ -6085,24 +6168,24 @@ export function ChatSurface({
               onRelaunchKeepAlive={onRelaunchKeepAlive}
               onStopKeepAlive={onStopKeepAlive}
               fileReview={fileReviewForTurn(turn.id)}
+              onUndoRecordedEdit={onUndoRecordedEdit}
               key={turn.id}
-              onLoadChangeDiff={onLoadChangeDiff}
               onOpenChanges={(path, files) => {
                 setReviewScope({ kind: "turn", turnId: turn.id });
+                setReviewChangesEntry({ token: Date.now(), path });
                 setReviewTurnFiles(
                   (files ?? []).map((file) => ({
                     ...file,
                     patches: turnReviewPatches(turn.timelineEvents, file.path),
                   })),
                 );
-                if (path) railDiffTools?.onSelectFile?.(path);
-                if (onSelectChatPanel) {
-                  onSelectChatPanel("review");
-                  return;
+                const openReview = onOpenCompanionTab ?? onSelectChatPanel;
+                if (openReview) openReview("review");
+                else {
+                  if (path) railDiffTools?.onSelectFile?.(path);
+                  onOpenToolPanel?.("diff");
                 }
-                onOpenToolPanel?.("diff");
               }}
-              onUndoChanges={railDiffTools?.onUndo}
               onCouncilAction={onCouncilAction}
               onMutationApprovalAction={onMutationApprovalAction}
               onProviderApprovalAction={onProviderApprovalAction}
@@ -6132,7 +6215,7 @@ export function ChatSurface({
     ),
     [
       hasMoreBefore,
-      codeReviews, onOpenCompanionTab, onSelectChatPanel,
+      codeReviews, opinionsByTurn, onOpenCompanionTab, onSelectChatPanel,
       subagents,
       isOnline,
       onMutationApprovalAction,
@@ -6148,7 +6231,6 @@ export function ChatSurface({
       onFileReviewAsk,
       onFileReviewKeep,
       onGoalAction,
-      onLoadChangeDiff,
       onOpenKeepAlive,
       onOpenToolPanel,
       onRelaunchKeepAlive,
@@ -6157,8 +6239,8 @@ export function ChatSurface({
       keepAlives,
       onProviderApprovalAction,
       onProviderStatusAction,
-      railDiffTools?.onUndo,
       railDiffTools?.onSelectFile,
+      onUndoRecordedEdit,
       handlePlanDecision,
       handleArtifactPrompt,
       transcriptArtifactActions,
@@ -6240,7 +6322,7 @@ export function ChatSurface({
     if (!isCompanionPanel) setEnvironmentOverlayKey(undefined);
   }, [isCompanionPanel]);
   const isEnvironmentPopoverOpen =
-    (!isEmptyStart || Boolean(environmentRemote)) &&
+    (!isEmptyStart || Boolean(environmentRemote) || chatMode === "council") &&
     (isCompanionPanel
       ? environmentOverlayKey === environmentKey
       : activeRailPanel === "environment");
@@ -6253,6 +6335,82 @@ export function ChatSurface({
       );
     } else onToggleEnvironmentRail?.();
   };
+  // Council lives in the Environment card: the composer chip opens the card
+  // with the Council section unfolded.
+  const [councilSectionOpen, setCouncilSectionOpen] = useState(false);
+  const openCouncilEnvironment = () => {
+    setCouncilSectionOpen(true);
+    if (!isEnvironmentPopoverOpen) toggleEnvironment();
+  };
+  const councilResolution = useMemo(
+    () =>
+      chatMode === "council"
+        ? resolveCouncilSeatRequests(config, readyCouncilProviders(config, providerStatuses))
+        : undefined,
+    [chatMode, config, providerStatuses],
+  );
+  const councilCost = useMemo(
+    () =>
+      chatMode === "council"
+        ? estimateTurnCost({
+            chatMode: "council",
+            contextTokens: contextUsage?.usedTokens ?? 0,
+            seatCount: councilResolution?.seats.length,
+            sessionTotals: sessionUsage,
+          })
+        : undefined,
+    [chatMode, contextUsage?.usedTokens, councilResolution?.seats.length, sessionUsage],
+  );
+  const councilWriterChoices = useMemo(
+    () => (chatMode === "council" ? councilWriterOptions(config, providerStatuses) : []),
+    [chatMode, config, providerStatuses],
+  );
+  const councilProgress = useMemo(
+    () => (chatMode === "council" ? councilLiveProgress(events) : undefined),
+    [chatMode, events],
+  );
+  const councilSection =
+    chatMode === "council" && councilResolution ? (
+      <CouncilEnvironmentSection
+        calls={councilCost?.calls ?? councilResolution.seats.length + 1}
+        config={config}
+        costLabel={councilCost?.label}
+        enabled={config.council?.enabled !== false}
+        onAction={onComposerAction}
+        onOpenChange={setCouncilSectionOpen}
+        open={councilSectionOpen}
+        progress={councilProgress}
+        resolution={councilResolution}
+        scope={councilScope === "chat" ? "chat" : "turn"}
+        writerOptions={councilWriterChoices}
+      />
+    ) : undefined;
+  const opinionEntry =
+    codeReviewEntry &&
+    (!agentReviewEntry || codeReviewEntry.token > agentReviewEntry.token)
+      ? codeReviewEntry
+      : agentReviewEntry;
+  const changesEntry =
+    reviewChangesEntry &&
+    (!opinionEntry || reviewChangesEntry.token >= opinionEntry.token)
+      ? reviewChangesEntry
+      : undefined;
+  const comparisonScope =
+    reviewScope.kind === "proposed" ? defaultReview.scope : reviewScope;
+  const openCheck = useContext(CheckWorkContext);
+  // Check runs against the current workspace and uses the chat's latest task.
+  const latestCheckTurn = events.findLast(
+    (event) => event.kind === "user-message" && event.turnId,
+  );
+  const onCheckReview =
+    openCheck &&
+    !isComposerSending &&
+    comparisonScope.kind === "turn" &&
+    latestCheckTurn &&
+    latestCheckTurn.sessionId === transcriptSessionId &&
+    latestCheckTurn.turnId === comparisonScope.turnId
+      ? () => openCheck(latestCheckTurn.sessionId)
+      : undefined;
   const legacySidePanel =
     (activeRailPanel || hasCompanion) &&
     displayedRailPanel !== "tools" &&
@@ -6270,14 +6428,14 @@ export function ChatSurface({
         isAgentRunning={isComposerSending === true}
         onStopAgent={onStopChat}
         diffReview={diffReview}
-        reviewScope={
-          reviewScope.kind === "proposed" ? defaultReview.scope : reviewScope
-        }
+        reviewScope={comparisonScope}
+        onCheckReview={onCheckReview}
         reviewTurnFiles={
           reviewScope.kind === "proposed"
             ? defaultReview.turnFiles
             : reviewTurnFiles
         }
+        reviewChangesEntry={reviewChangesEntry}
         onLoadComparisonDiff={onLoadComparisonDiff}
         sourceControl={sourceControl}
         onPlanItemStatusChange={onPlanItemStatusChange}
@@ -6292,6 +6450,7 @@ export function ChatSurface({
           if (panel === "changes") {
             setReviewScope({ kind: "proposed" });
             setReviewTurnFiles(undefined);
+            setReviewChangesEntry({ token: Date.now() });
           }
           onSelectChatPanel?.(panel);
         }}
@@ -6326,6 +6485,7 @@ export function ChatSurface({
         if (tab === "review") {
           setReviewScope({ kind: "proposed" });
           setReviewTurnFiles(undefined);
+          setReviewChangesEntry({ token: Date.now() });
         }
         (onOpenCompanionTab ?? onSelectChatPanel)?.(tab);
       }}
@@ -6370,7 +6530,41 @@ export function ChatSurface({
           workspacePath={workspacePath}
         />
       ) : displayedRailPanel === "review" || displayedRailPanel === "changes" ? (
-        <CodeReviewPanel key={codeReviews?.key} entry={codeReviewEntry && (!agentReviewEntry || codeReviewEntry.token > agentReviewEntry.token) ? codeReviewEntry : agentReviewEntry} runtime={codeReviews} scope={reviewScope.kind === "proposed" ? defaultReview.scope : reviewScope} changes={legacySidePanel} onComposeFix={onDraftChange ? (message) => {if(draft.trim())return false;onDraftChange(message);return true;} : undefined} />
+        <CodeReviewPanel
+          config={config}
+          key={codeReviews?.key}
+          entry={changesEntry ? undefined : opinionEntry}
+          changesEntry={changesEntry?.token}
+          runtime={codeReviews}
+          scope={comparisonScope}
+          changes={legacySidePanel}
+          onOpenFile={railDiffTools?.onOpenInEditor}
+          renderMarkdown={(text, renderLink) => (
+            <div className="gyro-response-body">
+              {assistantResponseBlocks(text).map((block, index) => (
+                <AssistantResponseBlockView key={index} block={block} onOpenBrowserUrl={onBrowserNavigate} renderLink={renderLink} />
+              ))}
+            </div>
+          )}
+          onDraftReview={isGoalComposerActive || showQuestionPopup || showPlanDecision ? undefined : (message, button) => {
+            const existing = messageInput.display;
+            if (!existing.includes(message)) {
+              messageInput.change(existing ? existing + "\n\n" + message : message);
+            }
+            const textarea = transcriptRef.current?.closest(".gyro-chat-thread-canvas")
+              ?.querySelector<HTMLTextAreaElement>('textarea[data-tour="composer.input"]');
+            const panel = button.closest(".gyro-chat-companion")?.getBoundingClientRect();
+            const input = textarea?.getBoundingClientRect();
+            if (panel && input && panel.left < input.right && panel.right > input.left &&
+                panel.top < input.bottom && panel.bottom > input.top) closeCompanion();
+            textarea?.focus({ preventScroll: true });
+          }}
+          onComposeFix={onDraftChange ? (message) => {
+            if (draft.trim()) return false;
+            onDraftChange(message);
+            return true;
+          } : undefined}
+        />
       ) : displayedRailPanel === "memory" ? (
         <ProjectMemoryPanel runtime={projectMemory} />
       ) : displayedRailPanel === "agents" ? (
@@ -6407,11 +6601,11 @@ export function ChatSurface({
           onOpenBrowserUrl={onBrowserNavigate}
           parentTitle={sessionTitle}
           sideChat={sideChat}
-          renderComposer={({ draft, onDraftChange, onSend, isSending }) => (
+          renderComposer={({ draft, inlineDraft, onSend, isSending }) => (
             <Composer
               config={config}
               draft={draft}
-              onDraftChange={onDraftChange}
+              inlineDraft={inlineDraft}
               onSend={onSend}
               isSending={isSending}
               onStop={sideChat?.onStop}
@@ -6455,6 +6649,7 @@ export function ChatSurface({
         onOpenReview={(scope) => {
           setReviewScope(scope);
           setReviewTurnFiles(undefined);
+          setReviewChangesEntry({ token: Date.now() });
           if (onOpenCompanionTab) onOpenCompanionTab("review");
           else onSelectChatPanel?.("review");
         }}
@@ -6463,6 +6658,7 @@ export function ChatSurface({
           else onSelectChatPanel?.(tab);
         }}
         onRunGitAction={railDiffTools?.onRunGitAction}
+        council={councilSection}
         placement="panel"
         plan={sessionPlan}
         remote={environmentRemote}
@@ -6602,6 +6798,8 @@ export function ChatSurface({
           ) : null}
           {chatNotice}
           <Composer
+            onOpenCouncil={openCouncilEnvironment}
+            overlay={councilScopeDock}
             attachments={attachments}
             chatMode={chatMode}
             config={config}
@@ -6612,15 +6810,17 @@ export function ChatSurface({
             draft={composerDraft}
             branchName={branchName}
             branchCatalog={branchCatalog}
-            onDraftChange={handleComposerDraftChange}
+            inlineDraft={inlineDraft}
             onRemoveAttachment={onRemoveAttachment}
             canAttachEditorSnapshot={canAttachEditorSnapshot}
             onAttachProblem={onAttachProblem}
             onAttachMediaFiles={onAttachMediaFiles}
             onAttachMediaPaths={onAttachMediaPaths}
             onMediaDropError={onMediaDropError}
+            supportsSecondOpinion={supportsSecondOpinion && !isGoalComposerActive && chatMode === "normal" && !composerAnswerRef.current}
             onSend={handleSend}
             onStop={onStopChat}
+            isStopping={isStoppingChat}
             isSending={isComposerSending}
             isBranchLoading={isBranchLoading}
             maxDraftLength={maxDraftLength}
@@ -6659,6 +6859,7 @@ export function ChatSurface({
             onResumeUsage={onResumeUsage}
           />
         </section>
+        {environmentPopover}
         <SharedChatCompanion>{sidePanel}</SharedChatCompanion>
       </div>
     );
@@ -6852,6 +7053,7 @@ export function ChatSurface({
             </p>
           ) : null}
           <Composer
+            onOpenCouncil={openCouncilEnvironment}
             queue={
               queuedMessages.length > 0 ? (
                 <ChatMessageQueue
@@ -6886,7 +7088,7 @@ export function ChatSurface({
                   }}
                   plan={sessionPlan}
                 />
-              ) : undefined
+              ) : councilScopeDock
             }
             attachments={attachments}
             chatMode={chatMode}
@@ -6897,15 +7099,17 @@ export function ChatSurface({
             )}
             draft={composerDraft}
             branchName={branchName}
-            onDraftChange={handleComposerDraftChange}
+            inlineDraft={inlineDraft}
             onRemoveAttachment={onRemoveAttachment}
             canAttachEditorSnapshot={canAttachEditorSnapshot}
             onAttachProblem={onAttachProblem}
             onAttachMediaFiles={onAttachMediaFiles}
             onAttachMediaPaths={onAttachMediaPaths}
             onMediaDropError={onMediaDropError}
+            supportsSecondOpinion={supportsSecondOpinion && !isGoalComposerActive && chatMode === "normal" && !composerAnswerRef.current}
             onSend={handleSend}
             onStop={onStopChat}
+            isStopping={isStoppingChat}
             isSending={isComposerSending}
             branchCatalog={branchCatalog}
             isBranchLoading={isBranchLoading}
@@ -7143,7 +7347,7 @@ function ChatMessageQueue({
                 <MoreHorizontal size={15} />
               </button>
             </div>
-            {menuMessageId === message.id ? (
+            <SurfacePresence>{menuMessageId === message.id ? (
               <div
                 aria-label={`Options for queue position ${index + 1}`}
                 className="gyro-chat-message-queue-menu is-up"
@@ -7174,7 +7378,7 @@ function ChatMessageQueue({
                   <span>Delete</span>
                 </button>
               </div>
-            ) : null}
+            ) : null}</SurfacePresence>
           </article>
         ))}
         {canFold ? (
@@ -7359,7 +7563,7 @@ function ChatSurfaceControls({
               <span aria-hidden="true" className="gyro-model-activity-dot" />
             ) : null}
           </button>
-          {openMenu === "overflow" ? (
+          <SurfacePresence>{openMenu === "overflow" ? (
             <div className="gyro-chat-companion-menu is-header" role="menu">
               {onSaveWorkflow?<button role="menuitem" type="button" onClick={()=>{setOpenMenu(undefined);onSaveWorkflow();}}><ScrollText size={14}/><span>Save as workflow</span></button>:null}
               {showPlanInOverflow ? (
@@ -7461,7 +7665,7 @@ function ChatSurfaceControls({
                 </button>
               ) : null}
             </div>
-          ) : null}
+          ) : null}</SurfacePresence>
         </div>
       ) : null}
       {showClose && onCloseChat ? (
@@ -7498,6 +7702,8 @@ function ChatSidePanel({
   diffReview,
   reviewScope = { kind: "proposed" } as ReviewScope,
   reviewTurnFiles,
+  reviewChangesEntry,
+  onCheckReview,
   onLoadComparisonDiff,
   sourceControl,
   onPlanItemStatusChange,
@@ -7541,6 +7747,8 @@ function ChatSidePanel({
   capabilityPolicy?: ProjectCapabilityPolicy;
   diffReview?: DiffReview;
   reviewScope?: ReviewScope;
+  reviewChangesEntry?: { token: number; path?: string };
+  onCheckReview?: () => void;
   reviewTurnFiles?: Array<{
     patches?: string[];
     path: string;
@@ -7742,6 +7950,9 @@ function ChatSidePanel({
           />
         ) : (
           <GitComparisonReview
+            key={reviewChangesEntry?.token}
+            initialFilePath={reviewChangesEntry?.path}
+            onCheckWork={onCheckReview}
             onLoadDiff={onLoadComparisonDiff}
             onOpenFile={railDiffTools?.onOpenInEditor}
             scope={reviewScope}
@@ -8870,12 +9081,13 @@ function SideChatPanel({
   sideChat?: SideChatState;
   renderComposer: (props: {
     draft: string;
-    onDraftChange: (value: string) => void;
+    inlineDraft: InlineCommandDraft;
     onSend: () => void;
     isSending: boolean;
   }) => ReactNode;
 }) {
   const [draft, setDraft] = useState("");
+  const inlineDraft = useInlineCommandDraft(draft, setDraft, "side");
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const messages = sideChat?.messages ?? [];
   const isSending = sideChat?.isSending === true;
@@ -8973,7 +9185,7 @@ function SideChatPanel({
       <div className="gyro-side-chat-composer gyro-chat-composer-dock">
         {renderComposer({
           draft,
-          onDraftChange: setDraft,
+          inlineDraft,
           onSend: send,
           isSending,
         })}
@@ -9261,7 +9473,7 @@ function ChatContextSection({
             ) : null}
           </button>
         ))}
-        {activePopover ? (
+        <SurfacePresence>{activePopover ? (
           <ComposerPopover
             className={`gyro-chat-context-picker ${
               activePopover === "project"
@@ -9283,7 +9495,7 @@ function ChatContextSection({
                   : "Branch"
             }
           />
-        ) : null}
+        ) : null}</SurfacePresence>
       </div>
     </section>
   );
@@ -9828,7 +10040,7 @@ export function ChatEnvironmentPopover({
           ) : null}
         </div>
       </div>
-      {showBranches ? (
+      <SurfacePresence>{showBranches ? (
         <ComposerPopover
           className="gyro-environment-branch-menu"
           id={branchMenuId}
@@ -9839,7 +10051,7 @@ export function ChatEnvironmentPopover({
           }}
           title="Branch"
         />
-      ) : null}
+      ) : null}</SurfacePresence>
       {order.map((key) => (
         <Fragment key={key}>{blocks[key]}</Fragment>
       ))}
@@ -10889,15 +11101,10 @@ function WorkspaceSettingsEditor({
           <SettingsGroup
             id="language-services"
             label="Language services"
+            description="Detected locally for the active project. Gyro does not auto-install external tools."
             summary={`${languageServers.length} detected`}
           >
             <section className="gyro-workspace-services">
-              <header>
-                <p>
-                  Detected locally for the active project. Gyro does not
-                  auto-install external tools.
-                </p>
-              </header>
               <div>
                 {languageServers.length > 0 ? (
                   languageServers.map((server) => (
@@ -10918,22 +11125,19 @@ function WorkspaceSettingsEditor({
           <SettingsGroup
             id="local-contributions"
             label="Local contributions"
+            description="Declarative commands and views loaded from a local manifest. Contributions stay disabled until you enable them."
             summary={`${contributions.length} registered`}
+            actions={
+              <button
+                className="gyro-secondary-button"
+                onClick={() => contributionInputRef.current?.click()}
+                type="button"
+              >
+                <Plus size={13} /> Install from manifest
+              </button>
+            }
           >
             <section className="gyro-workspace-contributions">
-              <header>
-                <div>
-                  <p>
-                    Declarative commands and views loaded from a local manifest.
-                    Contributions stay disabled until you enable them.
-                  </p>
-                </div>
-                <button
-                  onClick={() => contributionInputRef.current?.click()}
-                  type="button"
-                >
-                  <Plus size={13} /> Install from manifest
-                </button>
                 <input
                   accept=".json,.gyro-extension"
                   aria-label="Install local contribution manifest"
@@ -10956,7 +11160,6 @@ function WorkspaceSettingsEditor({
                   ref={contributionInputRef}
                   type="file"
                 />
-              </header>
               {contributionError ? (
                 <p className="gyro-workspace-contribution-error" role="alert">
                   {contributionError}
@@ -10989,18 +11192,20 @@ function WorkspaceSettingsEditor({
                       ))}
                     </div>
                     <div className="gyro-workspace-contribution-actions">
-                      <button
-                        disabled={contribution.source === "core"}
-                        onClick={() =>
-                          onToggleContribution?.(
-                            contribution.id,
-                            !contribution.enabled,
-                          )
-                        }
-                        type="button"
-                      >
-                        {contribution.enabled ? "Disable" : "Enable"}
-                      </button>
+                      {/* Bundled contributions are always on; a dead toggle is noise. */}
+                      {contribution.source === "core" ? null : (
+                        <button
+                          onClick={() =>
+                            onToggleContribution?.(
+                              contribution.id,
+                              !contribution.enabled,
+                            )
+                          }
+                          type="button"
+                        >
+                          {contribution.enabled ? "Disable" : "Enable"}
+                        </button>
+                      )}
                       {contribution.source === "local" ? (
                         <button
                           className="is-danger"
@@ -11623,6 +11828,7 @@ export function IdeStatusBar({
   isBranchLoading = false,
   isPanelOpen = false,
   onSelectBranch,
+  onOpenBranchPicker,
   onCreateBranch,
   onShowProblems,
   onTogglePanel,
@@ -11645,6 +11851,7 @@ export function IdeStatusBar({
   isBranchLoading?: boolean;
   isPanelOpen?: boolean;
   onSelectBranch?: (branch: string) => void;
+  onOpenBranchPicker?: () => void;
   onCreateBranch?: () => void;
   onShowProblems?: () => void;
   onTogglePanel?: () => void;
@@ -11779,6 +11986,7 @@ export function IdeStatusBar({
             isLoading={isBranchLoading}
             onCreateBranch={onCreateBranch}
             onSelectBranch={onSelectBranch}
+            onOpenBranchPicker={onOpenBranchPicker}
           />
         </div>
         {sync ? (
@@ -12159,96 +12367,95 @@ function EditorGroupPane({
           ) : null}
         </div>
       </div>
-      {actionMenu
-        ? createPortal(
-            <div
-              className="gyro-session-menu gyro-editor-action-menu"
-              ref={actionMenuRef}
-              role="menu"
-              aria-label={
-                actionMenu.kind === "split" ? "Split editor" : "File actions"
-              }
-              style={{
-                position: "fixed",
-                right: "auto",
-                width: 200,
-                zIndex: 180,
-                left: Math.max(
-                  8,
-                  Math.min(actionMenu.x, window.innerWidth - 216),
-                ),
-                top: Math.max(
-                  8,
-                  Math.min(actionMenu.y, window.innerHeight - 120),
-                ),
-              }}
-            >
-              {actionMenu.kind === "split" ? (
-                <>
-                  <button
-                    role="menuitem"
-                    type="button"
-                    onClick={() =>
-                      runMenuAction(() => onSplitEditorGroup?.("right"))
-                    }
-                  >
-                    <PanelRight size={14} /> Split right
-                  </button>
-                  <button
-                    role="menuitem"
-                    type="button"
-                    onClick={() =>
-                      runMenuAction(() => onSplitEditorGroup?.("down"))
-                    }
-                  >
-                    <PanelBottom size={14} /> Split down
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    role="menuitem"
-                    type="button"
-                    disabled={!canSave || actionMenu.path !== activePath}
-                    onClick={() =>
-                      runMenuAction(
-                        () =>
-                          actionMenu.path && onEditorSave?.(actionMenu.path),
-                      )
-                    }
-                  >
-                    <Check size={14} /> Save file
-                  </button>
-                  <button
-                    role="menuitem"
-                    type="button"
-                    disabled={!canSave || actionMenu.path !== activePath}
-                    onClick={() =>
-                      runMenuAction(
-                        () =>
-                          actionMenu.path && onEditorRevert?.(actionMenu.path),
-                      )
-                    }
-                  >
-                    <RotateCcw size={14} /> Revert unsaved changes
-                  </button>
-                  <button
-                    role="menuitem"
-                    type="button"
-                    onClick={() =>
-                      runMenuAction(
-                        () => actionMenu.path && onCloseTab?.(actionMenu.path),
-                      )
-                    }
-                  >
-                    <X size={14} /> Close file
-                  </button>
-                </>
-              )}
-            </div>,
-            document.body,
-          )
-        : null}
+      <SurfacePresence portal="body">
+        {actionMenu ? (
+          <div
+            className="gyro-session-menu gyro-editor-action-menu"
+            ref={actionMenuRef}
+            role="menu"
+            aria-label={
+              actionMenu.kind === "split" ? "Split editor" : "File actions"
+            }
+            style={{
+              position: "fixed",
+              right: "auto",
+              width: 200,
+              zIndex: 180,
+              left: Math.max(
+                8,
+                Math.min(actionMenu.x, window.innerWidth - 216),
+              ),
+              top: Math.max(
+                8,
+                Math.min(actionMenu.y, window.innerHeight - 120),
+              ),
+            }}
+          >
+            {actionMenu.kind === "split" ? (
+              <>
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() =>
+                    runMenuAction(() => onSplitEditorGroup?.("right"))
+                  }
+                >
+                  <PanelRight size={14} /> Split right
+                </button>
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() =>
+                    runMenuAction(() => onSplitEditorGroup?.("down"))
+                  }
+                >
+                  <PanelBottom size={14} /> Split down
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  role="menuitem"
+                  type="button"
+                  disabled={!canSave || actionMenu.path !== activePath}
+                  onClick={() =>
+                    runMenuAction(
+                      () =>
+                        actionMenu.path && onEditorSave?.(actionMenu.path),
+                    )
+                  }
+                >
+                  <Check size={14} /> Save file
+                </button>
+                <button
+                  role="menuitem"
+                  type="button"
+                  disabled={!canSave || actionMenu.path !== activePath}
+                  onClick={() =>
+                    runMenuAction(
+                      () =>
+                        actionMenu.path && onEditorRevert?.(actionMenu.path),
+                    )
+                  }
+                >
+                  <RotateCcw size={14} /> Revert unsaved changes
+                </button>
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() =>
+                    runMenuAction(
+                      () => actionMenu.path && onCloseTab?.(actionMenu.path),
+                    )
+                  }
+                >
+                  <X size={14} /> Close file
+                </button>
+              </>
+            )}
+          </div>
+        ) : null}
+      </SurfacePresence>
       {breadcrumbsEnabled && activePath && !review ? (
         <EditorBreadcrumbs
           displayPath={breadcrumbPath ?? activePath}
@@ -12508,7 +12715,7 @@ export type ChatRailDiffTools = {
   onAcceptAll?: () => void;
   onAcceptFile?: (path: string) => void;
   onComment?: (path: string) => void;
-  onOpenInEditor?: (path: string) => void;
+  onOpenInEditor?: (path: string, lineNumber?: number) => void;
   onRejectAll?: () => void;
   onRejectFile?: (path: string) => void;
   onRunGitAction?: (actionId: GitReviewActionId) => void;
@@ -12643,7 +12850,7 @@ function TerminalDiffControl({
           )}
         </span>
       </button>
-      {isOpen && sourceControl ? (
+      <SurfacePresence>{isOpen && sourceControl ? (
         <section
           aria-label="Terminal workspace changes"
           className="gyro-terminal-diff-popover"
@@ -12722,7 +12929,7 @@ function TerminalDiffControl({
             </button>
           </footer>
         </section>
-      ) : null}
+      ) : null}</SurfacePresence>
     </div>
   );
 }
@@ -12835,7 +13042,7 @@ function TerminalActionsMenu({
       >
         <MoreHorizontal size={15} />
       </button>
-      {isOpen && paneId ? (
+      <SurfacePresence>{isOpen && paneId ? (
         <div
           className="gyro-terminal-actions-menu"
           role="menu"
@@ -12921,7 +13128,7 @@ function TerminalActionsMenu({
             Close pane
           </button>
         </div>
-      ) : null}
+      ) : null}</SurfacePresence>
     </div>
   );
 }
@@ -14555,7 +14762,7 @@ export function WorkspaceToolPanel({
         renderTerminalPaneBody={renderTerminalPaneBody}
         terminalOutput={terminalOutput}
       />
-      {isLauncherOpen ? (
+      <SurfacePresence>{isLauncherOpen ? (
         <div
           className="gyro-workspace-tool-picker"
           onKeyDown={(event) => {
@@ -14599,7 +14806,7 @@ export function WorkspaceToolPanel({
             ))}
           </nav>
         </div>
-      ) : null}
+      ) : null}</SurfacePresence>
     </section>
   );
 }
@@ -19173,17 +19380,22 @@ export function SettingsSurface({
   }, [isResetConfirmOpen]);
 
   const isCheckingUpdate = updateState?.status === "checking";
+  const automaticUpdateChecks = config.automaticUpdateChecks !== false;
+  const automaticUpdates =
+    automaticUpdateChecks && config.automaticUpdates === true;
   // One level drives the card's mark and the status dot, so "waiting for you"
   // cannot read as "fine" in one place and "in progress" in another.
   const updateLevel = updateStatusLevel(updateState);
   const updateVersion = updateInstalledVersion(updateState);
   const updateFactRows = updateFacts(updateState);
-  const updateNotice = updateAnnouncement(updateState);
+  const updateNotice = updateAnnouncement(updateState, automaticUpdates);
   // Only some statuses carry a sentence; "available" is fully described by the
   // status dot and the primary button, so it renders no paragraph.
-  const updateSummary = updateStatusSummary(updateState);
-  // The check button would fight the updater while it is mid-install.
-  const isUpdateBusy = isCheckingUpdate || updateState?.status === "installing";
+  const updateSummary = updateStatusSummary(updateState, automaticUpdates);
+  const isUpdateBusy =
+    isCheckingUpdate ||
+    updateState?.status === "downloading" ||
+    updateState?.status === "installing";
   // The bar prefers measured bytes and falls back to the reported percentage,
   // so it still fills on updaters that only send a percent.
   const updatePercent = updateState
@@ -19200,7 +19412,11 @@ export function SettingsSurface({
       updateState?.status === "ready" ||
       updateState?.status === "failed");
 
+  // "Add a provider" stays out of the page until the header button (or a
+  // row's API-key action) asks for it; the header button is the one entry.
+  const [addProviderShown, setAddProviderShown] = useState(false);
   const revealProviderConnection = (id: string) => {
+    if (!document.getElementById(id)) flushSync(() => setAddProviderShown(true));
     const container = document.getElementById(id);
     const section =
       container?.querySelector<HTMLElement>("[data-settings-disclosure]") ??
@@ -19299,7 +19515,18 @@ export function SettingsSurface({
                 </div>
               </div>
               <div className="gyro-provider-default-model">
-                <strong>{defaultModelLabel(provider)}</strong>
+                {provider.authStatus === "connected" &&
+                defaultModelId &&
+                !needsModelInstall &&
+                onSelectProviderDefaultModel ? (
+                  <ProviderDefaultModelPicker
+                    onChange={onSelectProviderDefaultModel}
+                    provider={provider}
+                    selectedId={defaultModelId}
+                  />
+                ) : (
+                  <strong>{defaultModelLabel(provider)}</strong>
+                )}
                 {needsModelInstall ? (
                   <small>
                     Run <code>ollama pull &lt;model&gt;</code>.
@@ -19792,114 +20019,19 @@ export function SettingsSurface({
                     </h3>
                   </div>
                   {providerConnectionTable(connectedRemoteProviders)}
-                  {COUNCIL_COMING_SOON ? (
-                    <details className="gyro-settings-disclosure gyro-model-council-disclosure">
-                      <summary>
-                        <ChevronRight aria-hidden="true" size={14} />
-                        <span>Model Council</span>
-                        <small>Coming soon</small>
-                      </summary>
-                      <p>
-                        Compare answers from multiple providers in one
-                        conversation. This feature is still in development.
-                      </p>
-                    </details>
-                  ) : (
-                    <SettingsGroup
-                      badge={
-                        COUNCIL_COMING_SOON
-                          ? COUNCIL_COMING_SOON_LABEL
-                          : undefined
-                      }
-                      label="Model Council"
-                      collapsible
-                    >
-                      <SettingsRow
-                        label="Enable Council mode"
-                        detail={
-                          COUNCIL_COMING_SOON
-                            ? "Parallel multi-provider answers with synthesis. Still in development and not yet available to run."
-                            : "Parallel multi-provider answers with synthesis for high-stakes coding decisions."
-                        }
-                      >
-                        <SettingsSwitch
-                          label="Enable Council mode"
-                          checked={
-                            normalizedCouncilConfig(config.council).enabled
-                          }
-                          disabled={COUNCIL_COMING_SOON}
-                          onChange={(checked) =>
-                            onConfigChange?.({
-                              ...config,
-                              council: {
-                                ...normalizedCouncilConfig(config.council),
-                                enabled: checked,
-                              },
-                            })
-                          }
-                        />
-                      </SettingsRow>
-                      <SettingsRow
-                        label="Default preset"
-                        detail="Which council membership to use when you enable Council mode."
-                      >
-                        <SettingsSelect
-                          aria-label="Default Council preset"
-                          disabled={COUNCIL_COMING_SOON}
-                          onChange={(event) =>
-                            onConfigChange?.({
-                              ...config,
-                              council: {
-                                ...normalizedCouncilConfig(config.council),
-                                defaultPresetId: event.target.value,
-                              },
-                            })
-                          }
-                          value={
-                            normalizedCouncilConfig(config.council)
-                              .defaultPresetId
-                          }
-                        >
-                          {normalizedCouncilConfig(config.council).presets.map(
-                            (preset) => (
-                              <option key={preset.id} value={preset.id}>
-                                {preset.name}
-                              </option>
-                            ),
-                          )}
-                        </SettingsSelect>
-                      </SettingsRow>
-                      <SettingsRow
-                        label="Synthesize on partial"
-                        detail="When one seat fails, still synthesize from the seats that finished."
-                      >
-                        <SettingsSwitch
-                          label="Synthesize on partial"
-                          checked={
-                            normalizedCouncilConfig(config.council)
-                              .synthesizeOnPartial
-                          }
-                          disabled={COUNCIL_COMING_SOON}
-                          onChange={(checked) =>
-                            onConfigChange?.({
-                              ...config,
-                              council: {
-                                ...normalizedCouncilConfig(config.council),
-                                synthesizeOnPartial: checked,
-                              },
-                            })
-                          }
-                        />
-                      </SettingsRow>
-                    </SettingsGroup>
-                  )}
+                  <CouncilSettings
+                    config={config}
+                    onConfigChange={onConfigChange}
+                    providers={providerConfigs}
+                  />
                 </SettingsGroup>
               ) : null}
+              {needsProviderSetup || addProviderShown ? (
               <SettingsDisclosure
                 id="add-provider"
                 title="Add a provider"
                 description="Choose a provider, add an API key, or connect local models."
-                defaultOpen={needsProviderSetup}
+                defaultOpen
               >
                 <nav
                   className="gyro-provider-setup-methods"
@@ -19959,6 +20091,7 @@ export function SettingsSurface({
                   onRestoreProvider={onRestoreProvider}
                 />
               </SettingsDisclosure>
+              ) : null}
               <ProviderModelDefaults
                 config={config}
                 onChange={onSelectProviderDefaultModel}
@@ -20541,15 +20674,33 @@ export function SettingsSurface({
               <SettingsGroup id="preferences" label="Preferences">
                 <SettingsRow
                   label="Automatic checks"
-                  detail="Checks after launch and when Gyro regains focus. Downloads still require a click."
+                  detail="Check for new versions in the background."
                 >
                   <SettingsSwitch
                     label="Automatic update checks"
-                    checked={config.automaticUpdateChecks !== false}
+                    checked={automaticUpdateChecks}
                     onChange={(checked) =>
                       onConfigChange?.({
                         ...config,
                         automaticUpdateChecks: checked,
+                        automaticUpdates: checked && automaticUpdates,
+                      })
+                    }
+                  />
+                </SettingsRow>
+                <SettingsRow
+                  label="Automatic updates"
+                  detail="Download updates in the background and install them when you quit Gyro."
+                >
+                  <SettingsSwitch
+                    label="Automatic updates"
+                    checked={automaticUpdates}
+                    disabled={!onConfigChange}
+                    onChange={(checked) =>
+                      onConfigChange?.({
+                        ...config,
+                        automaticUpdateChecks: checked || automaticUpdateChecks,
+                        automaticUpdates: checked,
                       })
                     }
                   />
@@ -20746,7 +20897,7 @@ export function SettingsSurface({
             </SettingsSection>
           ) : null}
         </section>
-        {isResetConfirmOpen ? (
+        <SurfacePresence descendants>{isResetConfirmOpen ? (
           <div
             className="gyro-settings-confirm-overlay"
             role="presentation"
@@ -20787,7 +20938,7 @@ export function SettingsSurface({
               </div>
             </section>
           </div>
-        ) : null}
+        ) : null}</SurfacePresence>
       </div>
     </SettingsDisclosureProvider>
   );
@@ -21493,9 +21644,10 @@ function BranchLabel({ name }: { name: string }) {
   );
 }
 
-function ComposerPopover({
+const ComposerPopover = forwardRef(function ComposerPopover({
   align = "start",
   className,
+  description,
   keepInBounds = false,
   nativeTooltips = true,
   id,
@@ -21506,6 +21658,7 @@ function ComposerPopover({
 }: {
   align?: "start" | "end";
   className?: string;
+  description?: string;
   keepInBounds?: boolean;
   nativeTooltips?: boolean;
   id: string;
@@ -21513,8 +21666,9 @@ function ComposerPopover({
   onAction: (action?: string, item?: ComposerPopoverItem) => void;
   placement?: "up" | "down";
   title?: string;
-}) {
+}, surfaceRef: ForwardedRef<HTMLDivElement>) {
   const panelRef = useRef<HTMLDivElement>(null);
+  useImperativeHandle(surfaceRef, () => panelRef.current!, []);
   const [query, setQuery] = useState("");
   const hasBranchList = items.some((item) => item.kind === "branch");
   // Long branch lists get a filter; short ones stay a plain menu.
@@ -21625,6 +21779,7 @@ function ComposerPopover({
           : undefined
       }
       aria-label={title ?? "Menu"}
+      aria-describedby={description ? `${id}-description` : undefined}
       className={[
         "gyro-composer-popover",
         hasBranchList ? "has-branch-list" : "",
@@ -21639,6 +21794,11 @@ function ComposerPopover({
     >
       {title ? (
         <div className="gyro-composer-popover-title">{title}</div>
+      ) : null}
+      {description ? (
+        <p className="gyro-composer-popover-description" id={`${id}-description`}>
+          {description}
+        </p>
       ) : null}
       {searchable ? (
         <label className="gyro-composer-menu-search">
@@ -21817,7 +21977,7 @@ function ComposerPopover({
       </Fragment>
     );
   }
-}
+});
 
 function providerAuthOwnerLabel(owner?: ProviderStatus["authOwner"]) {
   if (owner === "provider-env") {
@@ -22079,6 +22239,11 @@ function providerApprovalCopy(
   const mode = approvalModeForConfig(config);
   const backendSummary = approvalBackendSummary(config);
   const isAnthropic = providerId === "anthropic";
+  const hasWorkspaceBoundary = isAnthropic || providerId === "openai";
+  const autoLabel = hasWorkspaceBoundary ? "Workspace access" : "Provider permissions";
+  const autoDetail = hasWorkspaceBoundary
+    ? "Work in the selected workspace. HTTPS command access requires approval."
+    : "The provider controls its own native tools. Gyro approvals apply to Gyro tools.";
   const providerTitle =
     providerId === "anthropic"
       ? "Anthropic permissions"
@@ -22093,12 +22258,14 @@ function providerApprovalCopy(
     ? {
         title: providerTitle,
         gatedLabel: "Ask for approval",
-        gatedDetail: "Always ask before commands and file edits",
-        autoLabel: "Approve for me",
-        autoDetail: "Allow work within provider and project limits",
+        gatedDetail: hasWorkspaceBoundary
+          ? "Ask before commands and file edits in this workspace"
+          : "Ask for actions reported by the provider and through Gyro tools",
+        autoLabel,
+        autoDetail,
         directLabel: "Full access",
         directDetail:
-          "Unrestricted access to the internet and any file on your computer",
+          "Unrestricted file and network access for this chat until you quit Gyro",
         commandValue: config.requireCommandApproval ? "Ask first" : "Allow",
         commandDetail: "Claude tool calls use the backend command policy.",
         editValue: config.requireFileEditApproval ? "Review" : "Auto-accept",
@@ -22107,12 +22274,14 @@ function providerApprovalCopy(
     : {
         title: providerTitle,
         gatedLabel: "Ask for approval",
-        gatedDetail: "Always ask before commands and file edits",
-        autoLabel: "Approve for me",
-        autoDetail: "Allow work within provider and project limits",
+        gatedDetail: hasWorkspaceBoundary
+          ? "Ask before commands and file edits in this workspace"
+          : "Ask for actions reported by the provider and through Gyro tools",
+        autoLabel,
+        autoDetail,
         directLabel: "Full access",
         directDetail:
-          "Unrestricted access to the internet and any file on your computer",
+          "Unrestricted file and network access for this chat until you quit Gyro",
         commandValue: config.requireCommandApproval ? "Ask" : "Allow",
         commandDetail: "Codex command execution uses the backend policy.",
         editValue: config.requireFileEditApproval ? "Review" : "Auto-apply",
@@ -22126,7 +22295,9 @@ function providerApprovalCopy(
         ? base.directLabel
         : mode === "auto"
           ? base.autoLabel
-          : base.gatedLabel,
+          : mode === "custom"
+            ? "Custom permissions"
+            : base.gatedLabel,
     settingsDetail: `Backend: ${backendSummary}`,
   };
 }
@@ -22169,10 +22340,11 @@ function Composer({
   chatMode = "normal",
   draftKey = NEW_CHAT_DRAFT_KEY,
   constrainToParent = false,
-  draft,
+  draft: plainDraft,
   branchName,
   branchCatalog,
-  onDraftChange,
+  inlineDraft,
+  supportsSecondOpinion,
   onRemoveAttachment,
   canAttachEditorSnapshot = false,
   onAttachProblem,
@@ -22195,6 +22367,7 @@ function Composer({
   limitWindows = [],
   quotaNotice,
   canCompactContext = false,
+  onOpenCouncil,
   onComposerAction,
   onCancelGoalComposer,
   dictation = browserDictation(),
@@ -22214,6 +22387,7 @@ function Composer({
   savedProjects = [],
   surfaceControls,
   isSending = false,
+  isStopping = false,
   isBranchLoading,
   maxDraftLength,
   popoverPlacement,
@@ -22236,7 +22410,8 @@ function Composer({
   draft: string;
   branchName?: string;
   branchCatalog?: GitBranchCatalog;
-  onDraftChange: (value: string) => void;
+  inlineDraft: InlineCommandDraft;
+  supportsSecondOpinion?: boolean;
   onRemoveAttachment?: (attachmentId: string) => void;
   /** True when an open project file can be captured for the Editor action. */
   canAttachEditorSnapshot?: boolean;
@@ -22261,6 +22436,8 @@ function Composer({
   quotaNotice?: string;
   /** This chat has a provider-backed context that can be compacted manually. */
   canCompactContext?: boolean;
+  /** Opens the Environment card at its Council section. */
+  onOpenCouncil?: () => void;
   onComposerAction?: (action: string) => void;
   onCancelGoalComposer?: () => void;
   /** Local speech-to-text. Defaults to the browser microphone. */
@@ -22304,6 +22481,7 @@ function Composer({
   }>;
   surfaceControls?: ReactNode;
   isSending?: boolean;
+  isStopping?: boolean;
   isBranchLoading?: boolean;
   maxDraftLength?: number;
   popoverPlacement?: "down" | "up";
@@ -22320,6 +22498,12 @@ function Composer({
   const [activePopover, setActivePopover] = useState<ComposerPopoverId | null>(
     null,
   );
+  const { display: draft, change: onDraftChange } = inlineDraft;
+  const [reviewerPickerOpen, setReviewerPickerOpen] = useState(false);
+  const [writerPickerOpen, setWriterPickerOpen] = useState(false);
+  const [slashCaret, setSlashCaret] = useState<number>();
+  const completionCaret = useRef<number>();
+  const mirrorRef = useRef<HTMLDivElement>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
     // Reclaim the caret after a branch swap removed the focused textarea.
@@ -22332,6 +22516,14 @@ function Composer({
     const end = textarea.value.length;
     textarea.setSelectionRange(end, end);
   }, []);
+  useLayoutEffect(() => {
+    const textarea = composerTextareaRef.current;
+    if (textarea && completionCaret.current !== undefined) {
+      textarea.setSelectionRange(completionCaret.current, completionCaret.current);
+      completionCaret.current = undefined;
+    }
+    if (textarea && mirrorRef.current) mirrorRef.current.scrollTop = textarea.scrollTop;
+  }, [draft, inlineDraft.commands]);
   const dictationAnchorRef = useRef<{ base: string; caret: number } | null>(
     null,
   );
@@ -22507,7 +22699,7 @@ function Composer({
   const [historyIndex, setHistoryIndex] = useState<number>();
   const [activeSlashCommandIndex, setActiveSlashCommandIndex] = useState(0);
   const [isSlashMenuDismissed, setIsSlashMenuDismissed] = useState(false);
-  /** `/help` keeps the catalog open after removing its inline trigger. */
+  /** Keep the full catalog open while its inline command is selected. */
   const [isSlashHelpOpen, setIsSlashHelpOpen] = useState(false);
   const slashCommandRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const dismissActiveComposerPopover = useCallback(() => {
@@ -22575,6 +22767,10 @@ function Composer({
       textarea.style.height = `${nextHeight}px`;
       textarea.style.overflowY =
         draft.length > 0 && contentHeight > maximum ? "auto" : "hidden";
+      if (mirrorRef.current) {
+        mirrorRef.current.style.width = `${textarea.clientWidth}px`;
+        mirrorRef.current.scrollTop = textarea.scrollTop;
+      }
     };
     updateHeight();
 
@@ -22711,7 +22907,7 @@ function Composer({
   const providerModelLabel = boundToSession
     ? (sessionModel?.modelLabel ??
       resolvedBoundModel?.displayName ??
-      sessionModel?.modelId ??
+      humanModelName(sessionModel?.modelId) ??
       selectedProvider?.displayName ??
       "Select provider")
     : selectedProvider
@@ -22729,8 +22925,13 @@ function Composer({
     : selectedProvider
       ? selectedReasoningEffort(selectedProvider)
       : sessionModel?.reasoningEffort;
-  const approvalMode = approvalModeForConfig(config);
-  const approvalCopy = providerApprovalCopy(selectedProvider?.id, config);
+  const turnConfig = config.fullAccess && (chatMode !== "normal" || isGoalComposerActive || sessionGoal?.status === "active")
+    ? { ...config, fullAccess: false, requireCommandApproval: true, requireFileEditApproval: true }
+    : config;
+  const approvalMode = approvalModeForConfig(turnConfig);
+  const approvalCopy = providerApprovalCopy(modelProviderId, turnConfig);
+  const commandApproval = !turnConfig.fullAccess && turnConfig.requireCommandApproval;
+  const fileEditApproval = !turnConfig.fullAccess && turnConfig.requireFileEditApproval;
   const approvalChipClassName =
     approvalMode === "direct"
       ? "gyro-composer-chip is-warning"
@@ -22743,9 +22944,7 @@ function Composer({
       : approvalMode === "auto"
         ? AutoApproveIcon
         : Hand;
-  const isStopAction = Boolean(
-    !isGoalComposerActive && isSending && onStop && draft.trim().length === 0,
-  );
+  const canStop = isSending && Boolean(onStop);
   const hasUserWorkspace = Boolean(isUserSelectedWorkspacePath(workspacePath));
   const councilResolution = useMemo(() => {
     if (chatMode !== "council") {
@@ -22958,6 +23157,14 @@ function Composer({
       detail: "Define the outcome",
     },
   ];
+  const reviewerOptions = supportsSecondOpinion ? connectedReviewerOptions(providerConfigs, providerStatuses) : [];
+  const reviewCommand = inlineDraft.reviewCommand;
+  const reviewPickerVisible = Boolean(reviewerPickerOpen && reviewCommand);
+  const closeReviewerPicker = () => setReviewerPickerOpen(false);
+  const writerPickerVisible = writerPickerOpen && chatMode === "council" && !reviewPickerVisible;
+  const writerOptions = useMemo(() => writerPickerVisible ? councilWriterOptions(config, providerStatuses) : [], [writerPickerVisible, config, providerStatuses]);
+  const closeWriterPicker = () => { setWriterPickerOpen(false); composerTextareaRef.current?.focus({ preventScroll: true }); };
+  const openWriterPicker = () => { setActivePopover(null); setWriterPickerOpen(true); };
   const slashCommands: ComposerSlashCommand[] = [
     { action: "open-memory", command: "/memory", description: "Inspect or update this project's memory", icon: ScrollText, label: "Project memory", group: "workspace" },
     {
@@ -23003,18 +23210,17 @@ function Composer({
           icon: ListChecks,
           label: "Plan mode",
         },
-    // No `/council` while frozen: a slash command has no disabled state, so
-    // listing one that cannot start a run would just be a dead end.
-    ...(COUNCIL_COMING_SOON || chatMode === "council"
+    // One-shot: arms the next message only; the mode is consumed on send.
+    ...(chatMode === "council"
       ? []
       : [
           {
             action: "set-chat-mode-council" as const,
             command: "/council",
-            description: "Ask several models for one answer",
-            hint: "Asks several AI models the same question at the same time, then hands you one combined answer.",
+            description: "Ask several models, get one answer",
+            hint: "Your next message goes to every model on the council at once, then one model combines their answers. Back to normal after it sends.",
             icon: Users,
-            label: "Council mode",
+            label: "Ask the council",
           },
         ]),
     {
@@ -23075,6 +23281,13 @@ function Composer({
       icon: Sparkles,
       label: "Choose model",
       popover: "provider",
+    },
+    {
+      command: secondOpinionCommand,
+      label: "Second opinion",
+      description: "Choose another model to review this task’s changes",
+      icon: MessageSquare,
+      available: Boolean(supportsSecondOpinion && hasUserWorkspace && !reviewCommand),
     },
     {
       command: "/permissions",
@@ -23150,7 +23363,14 @@ function Composer({
   );
   const requestSend = () => {
     if (explorerAskSendHeld) return;
-    if (draft.trim().toLowerCase() === "/compact" && onComposerAction) {
+    if (reviewCommand && !reviewerOptions.some(
+      option => option.providerId === reviewCommand.reviewer?.providerId &&
+        option.modelId === reviewCommand.reviewer.modelId,
+    )) {
+      setReviewerPickerOpen(true);
+      return;
+    }
+    if (!inlineDraft.commands.length && draft.trim().toLowerCase() === "/compact" && onComposerAction) {
       onDraftChange("");
       onComposerAction("compact-context");
       return;
@@ -23194,9 +23414,12 @@ function Composer({
     );
     setMentionIndex(0);
   };
-  const slashMatch = isGoalComposerActive
+  const caret = Math.min(slashCaret ?? draft.length, draft.length);
+  const atCommandBoundary = caret === draft.length || /\s/.test(draft[caret]!);
+  const withinSelectedCommand = inlineDraft.commands.some(({ start, end }) => start < caret && caret <= end);
+  const slashMatch = isGoalComposerActive || !atCommandBoundary || withinSelectedCommand
     ? null
-    : draft.match(/(?:^|\s)\/([^\s/]*)$/);
+    : draft.slice(0, caret).match(/(?:^|\s)\/([^\s/]*)$/);
   const slashQuery = slashMatch?.[1]?.toLocaleLowerCase();
   const availableSlashCommands = slashCommands.filter(
     (command) => command.available !== false,
@@ -23299,12 +23522,28 @@ function Composer({
     }
   };
   const runSlashCommand = (command: ComposerSlashCommand) => {
+    const help = isSlashHelpOpen ? [...inlineDraft.commands].reverse().find(
+      (range) => draft.slice(range.start, range.end) === "/help",
+    ) : undefined;
+    if (!help && !slashMatch) return;
+    const start = help?.start ?? caret - (slashMatch?.[1]?.length ?? 0) - 1;
+    const end = help?.end ?? caret;
+    const suffix = draft.slice(end);
+    const separator = /^\s/.test(suffix) ? "" : " ";
+    const tokenEnd = start + command.command.length;
+    const completed = draft.slice(0, start) + command.command + separator + suffix;
+    if (maxDraftLength !== undefined && completed.length > maxDraftLength) return;
     setIsSlashMenuDismissed(true);
     setHistoryIndex(undefined);
-    // Remove just the active `/command`, keeping the thought the person was
-    // already writing. The retained space makes the command feel like a small
-    // inline action instead of a destructive mode switch.
-    onDraftChange(draft.replace(/(^|\s)\/[^\s/]*$/, "$1"));
+    completionCaret.current = tokenEnd + (separator.length || Number(suffix.startsWith(" ")));
+    setSlashCaret(completionCaret.current);
+    onDraftChange(completed, { start, end: tokenEnd });
+    if (command.command === secondOpinionCommand) {
+      setIsSlashHelpOpen(false);
+      setActivePopover(null);
+      setReviewerPickerOpen(true);
+      return;
+    }
     if (command.command === "/help") {
       setIsSlashHelpOpen(true);
       setIsSlashMenuDismissed(false);
@@ -23313,6 +23552,7 @@ function Composer({
     }
     setIsSlashHelpOpen(false);
     if (command.popover) {
+      if (command.popover === "branch") onComposerAction?.("select-branch");
       setModelPickerProviderId(undefined);
       if (command.popover === "provider") {
         modelMenuEntry.current = "model";
@@ -23326,6 +23566,8 @@ function Composer({
     setActivePopover(null);
     if (command.action) {
       onComposerAction?.(command.action);
+      // Council asks who writes the final answer straight away.
+      if (command.action === "set-chat-mode-council") setWriterPickerOpen(true);
     }
   };
   const menuProps = (popover: ComposerPopoverId) => ({
@@ -23512,44 +23754,6 @@ function Composer({
           workspacePath={workspacePath}
         />
       ) : null}
-      {chatMode === "council" && councilResolution ? (
-        <div
-          className={[
-            "gyro-council-preflight",
-            councilResolution.error || !councilEnabled ? "is-blocked" : "",
-          ]
-            .filter(Boolean)
-            .join(" ")}
-          role="status"
-        >
-          <Users size={13} />
-          <span>
-            {!councilEnabled
-              ? "Model Council is disabled in Settings → Providers."
-              : councilPreflightLabel(councilResolution)}
-          </span>
-          {councilResolution.seats.length > 0 ? (
-            <span className="gyro-council-preflight-seats">
-              {councilResolution.seats.map((seat) => (
-                <span
-                  className="gyro-council-preflight-chip"
-                  key={seat.providerId}
-                >
-                  {seat.providerLabel ?? seat.providerId}
-                </span>
-              ))}
-            </span>
-          ) : null}
-          {councilResolution.seats.length > 0 && !councilResolution.error ? (
-            <span
-              className="gyro-council-preflight-cost"
-              title={costPreviewTitle}
-            >
-              {turnCost.label}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
       {safetyNotice ? (
         <div
           className={`gyro-composer-safety-notice is-${safetyNotice.tone}`}
@@ -23571,7 +23775,7 @@ function Composer({
           ) : null}
         </div>
       ) : null}
-      {mentionOpen ? (
+      <SurfacePresence>{mentionOpen ? (
         <ComposerCompletionMenu
           className="gyro-composer-slash-menu"
           role="listbox"
@@ -23599,8 +23803,39 @@ function Composer({
             </button>
           ))}
         </ComposerCompletionMenu>
-      ) : null}
-      {isSlashMenuOpen || isSlashEmptyStateOpen ? (
+      ) : null}</SurfacePresence>
+      {reviewPickerVisible && (
+        <ComposerReviewerPicker
+          normalChat={Boolean(supportsSecondOpinion)}
+          options={reviewerOptions}
+          selected={reviewCommand?.reviewer}
+          textarea={composerTextareaRef}
+          onDismiss={closeReviewerPicker}
+          onChoose={option => {
+            inlineDraft.chooseReviewer(option);
+            closeReviewerPicker();
+            composerTextareaRef.current?.focus({ preventScroll: true });
+          }}
+          onRemove={() => {
+            inlineDraft.removeReviewer();
+            closeReviewerPicker();
+            composerTextareaRef.current?.focus({ preventScroll: true });
+          }}
+        />
+      )}
+      {writerPickerVisible && (
+        <ComposerReviewerPicker
+          copy={COUNCIL_WRITER_COPY}
+          normalChat
+          options={writerOptions}
+          selected={config.council?.synthesizer && councilResolution ? { providerId: councilResolution.synthesizerProviderId as ProviderId, modelId: councilResolution.synthesizerModelId ?? "", label: councilResolution.synthesizerModelLabel ?? "" } : undefined}
+          textarea={composerTextareaRef}
+          onDismiss={closeWriterPicker}
+          onChoose={option => { onComposerAction?.(councilSynthesizerAction({ providerId: option.providerId, modelId: option.modelId })); closeWriterPicker(); }}
+          onRemove={() => { onComposerAction?.(councilSynthesizerAction()); closeWriterPicker(); }}
+        />
+      )}
+      <SurfacePresence>{!reviewPickerVisible && !writerPickerVisible && (isSlashMenuOpen || isSlashEmptyStateOpen) ? (
         <ComposerCompletionMenu
           aria-label="Chat commands"
           className="gyro-composer-slash-menu is-commands"
@@ -23722,8 +23957,8 @@ function Composer({
             </footer>
           ) : null}
         </ComposerCompletionMenu>
-      ) : null}
-      {activePopover === "branch" ? (
+      ) : null}</SurfacePresence>
+      <SurfacePresence descendants>{activePopover === "branch" ? (
         <div
           className="gyro-composer-command-popover"
           ref={activePopover === "branch" ? popoverScopeRef : undefined}
@@ -23748,7 +23983,7 @@ function Composer({
             title="Branches"
           />
         </div>
-      ) : null}
+      ) : null}</SurfacePresence>
       {effectiveProviderId &&
       selectedProvider?.capabilities?.supportsUsage === true &&
       selectedProvider.capabilities.executionKind !== "openai-compatible-api" &&
@@ -23770,7 +24005,7 @@ function Composer({
         {queue}
         {/* A question or plan decision opens upward out of the text box and
             shares its surface; the box below it takes a typed answer. */}
-        {overlay}
+        {writerPickerOpen ? null : overlay}
         {attachments.length > 0 ? (
           <>
             <div className="gyro-composer-attachments" aria-label="Attachments">
@@ -23831,7 +24066,21 @@ function Composer({
             ) : null}
           </>
         ) : null}
+        <div className="gyro-composer-editor">
+        {inlineDraft.commands.length > 0 && (
+          <div aria-hidden={reviewCommand?.reviewer ? undefined : true} className="gyro-composer-draft-mirror" ref={mirrorRef}>
+            <InlineCommandText {...inlineDraft} renderReviewer={reviewer => (
+              <button type="button" className="gyro-inline-reviewer" aria-label={`Change reviewer: ${reviewer.label}`}
+                aria-haspopup="dialog" aria-expanded={reviewPickerVisible} onClick={() => setReviewerPickerOpen(true)}>
+                <ProviderLogo providerId={reviewer.providerId} /><span>{reviewer.label}</span><ChevronDown size={10} />
+              </button>
+            )}/>
+          </div>
+        )}
         <textarea
+          onScroll={(event) => {
+            if (mirrorRef.current) mirrorRef.current.scrollTop = event.currentTarget.scrollTop;
+          }}
           data-tour="composer.input"
           ref={composerTextareaRef}
           aria-label={
@@ -23878,11 +24127,13 @@ function Composer({
           }}
           maxLength={isGoalComposerActive ? 1000 : maxDraftLength}
           onSelect={(event) => {
+            setSlashCaret(event.currentTarget.selectionStart);
             if (dictationAnchorRef.current) return;
             dictationCaretChoiceRef.current = event.currentTarget.selectionStart;
           }}
           onChange={(event) => {
             const value = event.target.value;
+            setSlashCaret(event.target.selectionStart);
             if (
               dictationAnchorRef.current &&
               value !== dictationAppliedRef.current
@@ -24004,7 +24255,7 @@ function Composer({
               setActivePopover(null);
               if (dictationAnchorRef.current) releaseDictation(false);
               if (explorerAskSendHeld) return;
-              if (canSubmitComposer && draft.trim().length > 0) {
+              if (canSubmitComposer && plainDraft.trim().length > 0) {
                 setHistoryIndex(undefined);
                 requestSend();
               }
@@ -24031,6 +24282,7 @@ function Composer({
           }
           value={draft}
         />
+        </div>
         {showSetupNotice ? (
           <div className="gyro-composer-blocker" role="status">
             <span onClick={() => composerTextareaRef.current?.focus()}>
@@ -24076,7 +24328,7 @@ function Composer({
               >
                 <Plus size={17} />
               </button>
-              {activePopover === "context" ? (
+              <SurfacePresence>{activePopover === "context" ? (
                 <ComposerPopover
                   className="gyro-context-picker"
                   title="Add"
@@ -24086,7 +24338,7 @@ function Composer({
                   items={contextItems}
                   onAction={runPopoverAction}
                 />
-              ) : null}
+              ) : null}</SurfacePresence>
             </div>
             <div
               className="gyro-composer-control gyro-composer-control-approval gyro-composer-reveal"
@@ -24106,11 +24358,13 @@ function Composer({
                 </span>
                 <ChevronDown size={13} />
               </button>
-              {activePopover === "approval" ? (
+              <SurfacePresence>{activePopover === "approval" ? (
                 <ComposerPopover
                   className="gyro-approval-picker"
+                  description={`Commands: ${commandApproval ? "ask first" : "allow"} · File edits: ${fileEditApproval ? "ask first" : "allow"}`}
                   keepInBounds
                   id={`${popoverBaseId}-approval`}
+                  title="Current permissions"
                   items={[
                     {
                       action: "set-approval-gated",
@@ -24137,7 +24391,7 @@ function Composer({
                   ]}
                   onAction={runPopoverAction}
                 />
-              ) : null}
+              ) : null}</SurfacePresence>
             </div>
           </>
         ) : null}
@@ -24169,22 +24423,32 @@ function Composer({
             />
           </button>
         ) : chatMode === "council" ? (
-          <button
-            aria-label="Remove Council mode"
-            aria-pressed="true"
-            className="gyro-composer-chip is-council"
-            onClick={() => onComposerAction?.("set-chat-mode-normal")}
-            title="Remove Council mode — multi-model parallel answers with synthesis"
-            type="button"
-          >
-            <Users size={13} />
-            <span className="gyro-composer-label">Council</span>
-            <X
-              aria-hidden="true"
-              className="gyro-composer-chip-remove"
-              size={12}
-            />
-          </button>
+          <span className="gyro-council-chip-group">
+            <button
+              aria-label="Council settings for this chat"
+              aria-pressed="true"
+              className="gyro-composer-chip is-council"
+              onClick={() => onOpenCouncil?.()}
+              title={
+                councilResolution && !councilResolution.error
+                  ? `Council · ${councilResolution.presetName} · answered by ${councilResolution.synthesizerModelLabel ?? councilResolution.synthesizerProviderLabel ?? councilResolution.synthesizerProviderId} — open in Environment`
+                  : "Council — open in Environment"
+              }
+              type="button"
+            >
+              <Users size={13} />
+              <span className="gyro-composer-label">Council</span>
+            </button>
+            <button
+              aria-label="Remove Council mode"
+              className="gyro-composer-chip is-council gyro-council-chip-x"
+              onClick={() => onComposerAction?.("set-chat-mode-normal")}
+              title="Remove Council mode"
+              type="button"
+            >
+              <X aria-hidden="true" size={12} />
+            </button>
+          </span>
         ) : null}
         {chatMode !== "plan" && !hasGoalCaption && (isGoalModeActive || isGoalComposerActive) ? (
           <button
@@ -24405,7 +24669,7 @@ function Composer({
             <span className="gyro-composer-label">{modelChipLabel}</span>
             <ChevronDown aria-hidden="true" size={13} />
           </button>
-          {activePopover === "provider" && isModelRailPane ? (
+          <SurfacePresence>{activePopover === "provider" && isModelRailPane ? (
             <ComposerModelRail
               activeModelId={
                 effectiveModelId ?? displayProvider?.selectedModelId
@@ -24454,7 +24718,7 @@ function Composer({
               onAction={runModelMenuAction}
               placement={providerPopoverPlacement}
             />
-          ) : null}
+          ) : null}</SurfacePresence>
         </div>
         {hasEffortChoice && providerReasoningEffort ? (
           <div
@@ -24498,7 +24762,7 @@ function Composer({
                 size={14}
               />
             </button>
-            {activePopover === "provider" && modelMenuPane === "root" ? (
+            <SurfacePresence>{activePopover === "provider" && modelMenuPane === "root" ? (
               <ComposerEffortSelector
                 key={`${effectiveProviderId}:${effectiveModelId}`}
                 id={`${popoverBaseId}-provider`}
@@ -24519,7 +24783,7 @@ function Composer({
                   if (action) onComposerAction?.(action);
                 }}
               />
-            ) : null}
+            ) : null}</SurfacePresence>
           </div>
         ) : null}
         {dictation ? (
@@ -24533,108 +24797,55 @@ function Composer({
             }}
           />
         ) : null}
-        <button
-          aria-label={
-            isStopAction
-              ? "Stop response"
-              : isGoalComposerActive
-                ? startsGoalSession
-                  ? "Set goal and send"
-                  : "Save goal"
-                : isSending
-                  ? "Queue message"
-                  : "Send message"
-          }
-          aria-busy={false}
-          className={[
-            "gyro-send-button",
-            isStopAction ? "is-stop" : "",
-            isSending && !isStopAction ? "is-queue" : "",
-          ]
-            .filter(Boolean)
-            .join(" ")}
-          disabled={
-            !isStopAction && (!canSubmitComposer || draft.trim().length === 0)
-          }
-          onClick={(event) => {
-            setActivePopover(null);
-            if (isStopAction) {
-              // Only honor stop when the press began on this button. A click
-              // that migrated here after a layout shift (empty margin focus)
-              // must not cancel the run. Keyboard activation (Enter/Space)
-              // synthesizes a click with detail 0 and no pointerdown arm.
+        {canStop ? (
+          <button
+            aria-label={isStopping ? "Stopping response" : "Stop response"}
+            className="gyro-send-button is-stop"
+            disabled={isStopping}
+            onClick={(event) => {
               const armed = stopArmedRef.current || event.detail === 0;
               stopArmedRef.current = false;
-              if (!armed) {
-                return;
-              }
-              onStop?.();
-              return;
+              if (armed) onStop?.();
+            }}
+            onPointerDown={(event) => {
+              // Focus changes in a split pane can move the composer under the pointer.
+              event.stopPropagation();
+              stopArmedRef.current = true;
+            }}
+            onPointerCancel={() => { stopArmedRef.current = false; }}
+            onPointerLeave={() => { stopArmedRef.current = false; }}
+            title={isStopping ? "Stopping response" : "Stop response"}
+            type="button"
+          >
+            <Square aria-hidden="true" fill="currentColor" size={10} strokeWidth={0} />
+          </button>
+        ) : null}
+        {canStop && isStopping ? (
+          <span className="gyro-composer-stop-status" role="status">Stopping…</span>
+        ) : null}
+        {(!canStop || plainDraft.trim().length > 0 || isGoalComposerActive) ? (
+          <button
+            aria-label={
+              isGoalComposerActive
+                ? startsGoalSession ? "Set goal and send" : "Save goal"
+                : isSending ? "Queue message" : "Send message"
             }
-            stopArmedRef.current = false;
-            requestSend();
-          }}
-          // Grid slots focus their pane on pointerdown. Stopping that here
-          // keeps a stop click from also re-focusing / re-laying out the chat
-          // under the finger — which was reading as "click empty margin → stop".
-          onPointerDown={(event) => {
-            event.stopPropagation();
-            if (!isStopAction) {
-              stopArmedRef.current = false;
-              return;
+            className={isSending ? "gyro-send-button is-queue" : "gyro-send-button"}
+            disabled={!canSubmitComposer || plainDraft.trim().length === 0}
+            onClick={() => {
+              setActivePopover(null);
+              requestSend();
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+            title={
+              sendDisabledReason ??
+                (isGoalComposerActive
+                  ? startsGoalSession ? "Set goal and send" : "Save goal"
+                  : isSending ? "Queue message" : "Send")
             }
-            stopArmedRef.current = true;
-            const button = event.currentTarget;
-            const disarmIfReleasedAway = (up: PointerEvent) => {
-              document.removeEventListener(
-                "pointerup",
-                disarmIfReleasedAway,
-                true,
-              );
-              document.removeEventListener(
-                "pointercancel",
-                disarmIfReleasedAway,
-                true,
-              );
-              if (!up.composedPath().includes(button)) {
-                stopArmedRef.current = false;
-              }
-            };
-            document.addEventListener("pointerup", disarmIfReleasedAway, true);
-            document.addEventListener(
-              "pointercancel",
-              disarmIfReleasedAway,
-              true,
-            );
-          }}
-          title={
-            isStopAction
-              ? "Stop response"
-              : sendDisabledReason
-                ? sendDisabledReason
-                : isGoalComposerActive
-                  ? startsGoalSession
-                    ? "Set goal and send"
-                    : "Save goal"
-                  : isCliUpdating
-                    ? "Wait for the CLI update to finish"
-                    : !hasReadyProvider
-                      ? isWaitingForModelCapacity
-                        ? "Waiting for the model to resume"
-                        : "Connect a provider before sending"
-                      : chatMode === "council" && !hasUserWorkspace
-                        ? "Choose a folder for Council"
-                        : isBranchLoading
-                          ? "Wait for the branch switch to finish"
-                          : isSending
-                            ? "Queue message"
-                            : "Send"
-          }
-          type="button"
-        >
-          {isStopAction ? (
-            <Square fill="currentColor" size={10} strokeWidth={0} />
-          ) : isGoalComposerActive && !startsGoalSession ? (
+            type="button"
+          >
+            {isGoalComposerActive && !startsGoalSession ? (
             <Check size={17} />
           ) : (
             <svg
@@ -24652,7 +24863,8 @@ function Composer({
               />
             </svg>
           )}
-        </button>
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -24961,7 +25173,7 @@ const ChatEvent = memo(function ChatEvent({
             {isDetailOpen ? "Hide details" : "Inspect"}
           </button>
         ) : null}
-        {canInspect && isDetailOpen ? (
+        <SurfacePresence>{canInspect && isDetailOpen ? (
           <div
             aria-label={`${event.kind.replaceAll("-", " ")} details`}
             className="gyro-tool-detail-panel"
@@ -24989,7 +25201,7 @@ const ChatEvent = memo(function ChatEvent({
             </div>
             <pre>{formatEventPayload(event)}</pre>
           </div>
-        ) : null}
+        ) : null}</SurfacePresence>
       </div>
     </article>
   );
@@ -25012,6 +25224,7 @@ type ProviderToolApproval = {
   approvalType: "command" | "file-change" | "permissions" | "capability";
   providerLabel: string;
   capabilityId?: string;
+  allowProject?: boolean;
   editorPreview?: string;
   scope?: string;
   command?: string;
@@ -25119,9 +25332,11 @@ function ProviderToolApprovalCard({
       ? "Run this command?"
       : approval.approvalType === "file-change"
         ? "Apply these file changes?"
-        : approval.approvalType === "capability"
-          ? `Allow ${approval.capabilityId?.replaceAll("-", " ") ?? "this capability"}?`
-          : "Allow expanded permissions?";
+        : approval.capabilityId === "workspace-run-command"
+          ? "Run this workspace command?"
+          : approval.approvalType === "capability"
+            ? `Allow ${approval.capabilityId?.replaceAll("-", " ") ?? "this capability"}?`
+            : "Allow expanded permissions?";
   const icon =
     approval.approvalType === "command" ? (
       <Terminal size={18} />
@@ -25150,7 +25365,7 @@ function ProviderToolApprovalCard({
           >
             Reject
           </button>
-          {approval.approvalType === "capability" &&
+          {approval.approvalType === "capability" && approval.allowProject !== false &&
           approval.capabilityId !== "workspace-read-editor" ? (
             <button
               disabled={!onAction}
@@ -25345,6 +25560,8 @@ function deriveTranscriptState(
     return turn;
   };
   for (const originalEvent of events) {
+    // The source turn renders these receipts in its work timeline and final response.
+    if (turnReviewPayload(originalEvent)) continue;
     const originalCapabilityCall = capabilityCallFromEvent(originalEvent);
     if (
       originalCapabilityCall &&
@@ -25588,8 +25805,11 @@ const ChatTurn = memoWithStableCallbacks(ChatTurnView);
 function ChatTurnView({
   config,
   onReviewWithAgent,
+  opinion,
+  onOpenOpinion,
   artifactActions,
   subagents,
+  visibleSubagentId,
   fileReview,
   isActive,
   isOnline,
@@ -25599,9 +25819,8 @@ function ChatTurnView({
   onStopKeepAlive,
   liveChangesTarget,
   onOpenBrowserUrl,
-  onLoadChangeDiff,
   onOpenChanges,
-  onUndoChanges,
+  onUndoRecordedEdit,
   onCouncilAction,
   onMutationApprovalAction,
   onProviderApprovalAction,
@@ -25620,7 +25839,10 @@ function ChatTurnView({
   artifactActions?: ChatArtifactActions;
   config: GyroConfig;
   onReviewWithAgent?:()=>void;
+  opinion?: TurnReview;
+  onOpenOpinion?: () => void;
   subagents?: SubagentSurfaceState;
+  visibleSubagentId?: string;
   fileReview?: ChatTurnFileReview;
   isActive: boolean;
   keepAlives?: KeepAliveWatch[];
@@ -25629,12 +25851,11 @@ function ChatTurnView({
   onStopKeepAlive?: (paneId: string) => void;
   liveChangesTarget?: HTMLDivElement | null;
   onOpenBrowserUrl?: (url: string) => void;
-  onLoadChangeDiff?: (path: string) => Promise<string>;
   onOpenChanges?: (
     path?: string,
     files?: Array<{ path: string; additions?: number; deletions?: number }>,
   ) => void;
-  onUndoChanges?: () => void;
+  onUndoRecordedEdit?: (sessionId: string, turnId: string, undoId: string) => Promise<void>;
   onMutationApprovalAction?: (
     proposalId: string,
     decision: "approve" | "reject" | "preview",
@@ -25662,11 +25883,10 @@ function ChatTurnView({
   turn: ChatTranscriptTurn;
   isOnline: boolean;
 }) {
-  const agentApprovals = (subagents?.agents ?? [])
-    .filter((agent) => agent.parentTurnId === turn.id)
-    .flatMap((agent) =>
-      pendingSubagentApprovals(subagents?.eventsByAgentId[agent.agentId] ?? []),
-    );
+  const turnAgents = subagents?.agents.filter((agent) => agent.parentTurnId === turn.id) ?? [];
+  const agentApprovals = turnAgents.flatMap((agent) =>
+    currentSubagentApprovals(agent, subagents?.eventsByAgentId[agent.agentId] ?? []),
+  );
   const providerStatus = useMemo(
     () =>
       turn.statusEvent ? providerStatusFromEvent(turn.statusEvent) : undefined,
@@ -25770,17 +25990,46 @@ function ChatTurnView({
       fileReview.summaries.map((summary) => [summary.path, summary]),
     );
   }, [fileReview?.summaries]);
+  const undoRecordedEdits = useMemo(() => {
+    const recorded = new Map<string, { sessionId: string; label: string }>();
+    for (const event of turn.timelineEvents) {
+      const payload = eventPayloadRecord(event);
+      const undoId = stringFromEventPayload(payload, "undoId");
+      if (!undoId) continue;
+      if (payload?.kind === "recorded-edit-undone") {
+        recorded.delete(undoId);
+      } else if (payload?.status === "applied") {
+        const path = stringFromEventPayload(payload, "path");
+        const paths = Array.isArray(payload.fileChanges)
+          ? payload.fileChanges.map((file) => stringFromRecord(recordFromUnknown(file), "path")).filter(Boolean)
+          : [];
+        recorded.set(undoId, {
+          sessionId: event.sessionId,
+          label: path ?? paths.join(", "),
+        });
+      }
+    }
+    return [...recorded].reverse();
+  }, [turn.timelineEvents]);
   const responseEvent = runModel.response;
   const responsePayload = responseEvent
     ? eventPayloadRecord(responseEvent)
     : undefined;
+  const providers = providersForConfig(config);
+  const reviewer = opinion ? providers.find(provider => provider.id === opinion.providerId) : undefined;
+  const reviewerName = (reviewer && getProviderModel(reviewer, opinion?.modelId)?.displayName) ?? humanModelName(opinion?.modelId) ?? "the reviewer";
+  const waitingForOpinion = Boolean(opinion?.reviewId && !opinion.notice && (!opinion.status || reviewIsActive(opinion.status)));
+  const reviewReady = opinion?.status === "completed" || opinion?.status === "incomplete";
+  const reviewNotice = opinion?.notice ?? (opinion?.status === "failed" ? "The second opinion failed."
+    : opinion?.status === "cancelled" ? "The second opinion was cancelled."
+    : opinion?.status === "incomplete" ? "The reviewer could only check part of the change." : undefined);
   const showTokenCount = showTurnTokenCount(
     [
       ...turn.timelineEvents,
       ...(turn.statusEvent ? [turn.statusEvent] : []),
       ...(responseEvent ? [responseEvent] : []),
     ],
-    providersForConfig(config),
+    providers,
   );
   const responseTokenReading = showTokenCount && responseEvent
     ? turnTokenReadingForResponse(
@@ -25828,13 +26077,16 @@ function ChatTurnView({
     Boolean(onContinueChat) &&
     (hasResponse || runModel.steps.length > 0 || missingFinalResponse) &&
     runModel.phase.name === "done";
-  // A turn the provider never closed out can be resent; a cancelled one cannot
-  // be reconnected. Both decisions stay here because they need the status event
-  // the run model deliberately does not carry.
+  const recovery = recordFromUnknown(turn.statusEvent && eventPayloadRecord(turn.statusEvent)?.recovery);
+  const canResume = recovery?.continuationAvailable === true &&
+    providerStatus?.recoveryKind !== "continuation-unavailable";
+  const mayHaveSideEffects = changedFiles.length > 0 || runModel.steps.some((step) => step.kind === "work");
+  const recoveryUnavailable = !canResume && mayHaveSideEffects;
   const canRetry =
-    runModel.phase.name === "interrupted" ||
-    (providerStatus?.status === "failed" &&
-      !providerRetryCannotHelp(providerStatus.recoveryKind));
+    (canResume && providerStatus?.status === "cancelled") ||
+    (!recoveryUnavailable && (runModel.phase.name === "interrupted" ||
+      (providerStatus?.status === "failed" &&
+        !providerRetryCannotHelp(providerStatus.recoveryKind))));
   const canReconnect = Boolean(
     providerStatus &&
     providerStatus.status !== "cancelled" &&
@@ -25865,6 +26117,8 @@ function ChatTurnView({
       ) : null}
       <div className="gyro-chat-run">
         <ChatRun
+          review={opinion?.reviewId && !opinion.notice ? opinion : undefined}
+          reviewerName={reviewerName}
           agentApprovals={agentApprovals}
           aggregateFileStats={aggregateFileStats}
           headerActions={
@@ -25900,6 +26154,8 @@ function ChatTurnView({
               : undefined
           }
           onOpenChanges={openTurnChanges}
+          recoveryAction={canResume ? "Resume" : "Retry"}
+          recoveryUnavailable={recoveryUnavailable}
           onReconnect={
             canReconnect && turn.statusEvent
               ? () =>
@@ -25923,14 +26179,33 @@ function ChatTurnView({
               ? "Reconnect"
               : providerSignInLabel(providerStatus?.recoveryKind)
           }
-          renderAsk={(event) => (
-            <ChatEvent
-              event={event}
-              onMutationApprovalAction={onMutationApprovalAction}
-              onOpenBrowserUrl={onOpenBrowserUrl}
-              onProviderApprovalAction={onProviderApprovalAction}
-            />
-          )}
+          renderAsk={(event) => {
+            const agent = turnAgents.find(({ agentId }) => agentId === event.sessionId);
+            return (
+              <>
+                {agent && subagents ? (
+                  <button
+                    className="gyro-subagent-approval-source"
+                    type="button"
+                    onClick={() => subagents.onSelect(agent.agentId)}
+                    aria-label={`Open ${agent.name} · Needs approval`}
+                  >
+                    <SubagentMark agentId={agent.agentId} />
+                    {agent.name}
+                    <ChevronRight size={12} aria-hidden="true" />
+                  </button>
+                ) : null}
+                {!agent || agent.agentId !== visibleSubagentId ? (
+                  <ChatEvent
+                    event={event}
+                    onMutationApprovalAction={onMutationApprovalAction}
+                    onOpenBrowserUrl={onOpenBrowserUrl}
+                    onProviderApprovalAction={onProviderApprovalAction}
+                  />
+                ) : null}
+              </>
+            );
+          }}
           renderSay={(text) =>
             renderAssistantInlineContent(text, onOpenBrowserUrl)
           }
@@ -25953,7 +26228,7 @@ function ChatTurnView({
           }
           onContinueAfterToolBudget={canContinue ? onContinueChat : undefined}
         />
-        {responseEvent && shouldShowFinalResponse && !isPlanResponseTurn ? (
+        {responseEvent && shouldShowFinalResponse && !isPlanResponseTurn && !waitingForOpinion ? (
           <div
             className="gyro-chat-run-sequence is-response"
             aria-label="Final response"
@@ -25978,6 +26253,15 @@ function ChatTurnView({
             </div>
           </div>
         ) : null}
+        {reviewNotice && <p className="gyro-turn-review-notice" role="status">{reviewNotice}</p>}
+        {onOpenOpinion && opinion?.status && !reviewIsActive(opinion.status) && (
+          <button className="gyro-turn-second-opinion" type="button" onClick={onOpenOpinion}
+            title={`Open the second opinion from ${reviewerName}`}>
+            {opinion.providerId && <ProviderLogo providerId={isProviderId(opinion.providerId) ? opinion.providerId : `custom:${opinion.providerId}`} label={reviewer?.displayName ?? opinion.providerId}/>}
+            {reviewReady ? "Review Second Opinion" : "View review details"}
+            <ArrowRight aria-hidden="true" size={14}/>
+          </button>
+        )}
         {isPlanResponseTurn && plan?.content ? (
           <PlanCard
             isOpenInPanel={isPlanInPanel}
@@ -26020,7 +26304,7 @@ function ChatTurnView({
             onStop={onStopKeepAlive}
           />
         ))}
-        {!isRunning && runModel.phase.name === "done" ? (
+        {!isRunning ? (
           <ChatRunChangeSummary
             decisions={fileReviewRecords}
             files={changedFiles}
@@ -26028,21 +26312,17 @@ function ChatTurnView({
             isSummarizing={fileReview?.isSummarizing}
             onAsk={fileReview?.onAsk}
             onKeep={fileReview?.onKeep}
-            onLoadChangeDiff={async (path) => {
-              const patches = turnReviewPatches(turn.timelineEvents, path);
-              if (!patches.length)
-                throw new Error(
-                  "Historical diff unavailable. Open Review to compare the current file separately.",
-                );
-              return patches.join("\n");
-            }}
             onReviewWithAgent={onReviewWithAgent}
-            onReview={openTurnChanges}
-            onUndo={onUndoChanges}
+            onReview={onOpenChanges ? openTurnChanges : undefined}
             summaries={fileReviewSummaries}
+            recordedEdits={onUndoRecordedEdit ? undoRecordedEdits.map(([id, edit]) => ({
+              id,
+              label: edit.label,
+              undo: () => onUndoRecordedEdit(edit.sessionId, turn.id, id),
+            })) : []}
           />
         ) : null}
-        {canContinue && !missingFinalResponse ? (
+        {canContinue && !waitingForOpinion && !missingFinalResponse ? (
           <footer
             aria-label="Follow-up actions"
             className="gyro-chat-turn-actions"
@@ -26107,12 +26387,11 @@ function ChatRunChangeSummary({
   isSummarizing = false,
   onAsk,
   onKeep,
-  onLoadChangeDiff,
   onReview,
-  onUndo,
   summaries,
+  recordedEdits,
 }: {
-  onReviewWithAgent?:()=>void;
+  onReviewWithAgent?: () => void;
   decisions?: Map<string, FileReviewRecord>;
   files: Array<{
     path: string;
@@ -26124,27 +26403,42 @@ function ChatRunChangeSummary({
   isSummarizing?: boolean;
   onAsk?: (path: string) => void;
   onKeep?: (path: string, contentHash?: string) => void;
-  onLoadChangeDiff?: (path: string) => Promise<string>;
   onReview?: (path?: string) => void;
-  onUndo?: () => void;
   summaries?: Map<string, FileReviewSummary>;
+  recordedEdits: Array<{ id: string; label: string; undo: () => Promise<void> }>;
+
 }) {
   const [showAllFiles, setShowAllFiles] = useState(false);
-  const [openPath, setOpenPath] = useState<string>();
+  const [undoing, setUndoing] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useOutsidePointerDismiss<HTMLSpanElement>(
+    isMenuOpen,
+    () => setIsMenuOpen(false),
+    triggerRef,
+  );
   if (!files.length) return null;
   const visibleFiles = showAllFiles ? files : files.slice(0, 6);
   const hiddenCount = files.length - 6;
   const totals = totalFileChangeCounts(files);
   const fileLabel = files.length === 1 ? "file" : "files";
-  const canExpandDiff = Boolean(onLoadChangeDiff);
-  const reviewFiles = () => {
-    if (onReview) {
-      setOpenPath(undefined);
-      onReview();
-    } else if (canExpandDiff) {
-      setOpenPath(files[0]?.path);
-    }
-  };
+  const menuItems: ComposerPopoverItem[] = [
+    ...recordedEdits.map((edit) => ({
+      action: edit.id,
+      icon: RotateCcw,
+      label: "Undo recorded edit",
+      detail: edit.label || undefined,
+      disabled: undoing,
+    })),
+    ...(onReviewWithAgent
+      ? [{
+          action: "second-opinion",
+          icon: MessageSquare,
+          label: "Get a second opinion",
+        }]
+      : []),
+  ];
   const keptCount = isReviewable
     ? files.filter((file) =>
         isKeptCurrent(
@@ -26156,7 +26450,7 @@ function ChatRunChangeSummary({
 
   return (
     <section
-      aria-label={`${files.length} ${fileLabel} changed`}
+      aria-label="Changes from this turn"
       className="gyro-chat-run-change-summary is-complete"
     >
       <header>
@@ -26168,10 +26462,10 @@ function ChatRunChangeSummary({
             Edited {files.length} {fileLabel}
           </strong>
           {/* One file already shows its counts on its row. */}
-          {files.length > 1 || keptCount > 0 ? (
+          {(files.length > 1 && totals) || keptCount > 0 ? (
             <small>
               {files.length > 1 ? (
-                <FileChangeCountBadges counts={totals} />
+                <FileChangeCountBadges counts={totals} showUnknown={false} />
               ) : null}
               {keptCount > 0 ? (
                 <em className="is-kept">
@@ -26182,16 +26476,46 @@ function ChatRunChangeSummary({
           ) : null}
         </div>
         <span className="gyro-change-summary-actions">
-          {onUndo ? (
-            <button onClick={onUndo} type="button" className="is-undo">
-              <RotateCcw aria-hidden="true" size={13} /> Undo
+          {onReview ? (
+            <button onClick={() => onReview()} type="button">
+              Review changes
             </button>
           ) : null}
-          {onReviewWithAgent ? <button type="button" onClick={onReviewWithAgent}>Get a second opinion</button> : null}
-          {onReview || canExpandDiff ? (
-            <button onClick={reviewFiles} type="button">
-              Review
-            </button>
+          {menuItems.length ? (
+            <span className="gyro-change-summary-options" ref={menuRef}>
+              <button
+                aria-controls={isMenuOpen ? menuId : undefined}
+                aria-expanded={isMenuOpen}
+                aria-haspopup="menu"
+                aria-label="Change actions"
+                className="gyro-icon-button is-subtle"
+                onClick={() => setIsMenuOpen((open) => !open)}
+                ref={triggerRef}
+                title="Change actions"
+                type="button"
+              >
+                <MoreHorizontal aria-hidden="true" size={15} />
+              </button>
+              <SurfacePresence>{isMenuOpen ? (
+                <ComposerPopover
+                  align="end"
+                  id={menuId}
+                  items={menuItems}
+                  keepInBounds
+                  placement="down"
+                  onAction={(action) => {
+                    setIsMenuOpen(false);
+                    triggerRef.current?.focus();
+                    if (action === "second-opinion") onReviewWithAgent?.();
+                    const edit = recordedEdits.find((item) => item.id === action);
+                    if (edit && !undoing) {
+                      setUndoing(true);
+                      void edit.undo().finally(() => setUndoing(false));
+                    }
+                  }}
+                />
+              ) : null}</SurfacePresence>
+            </span>
           ) : null}
         </span>
       </header>
@@ -26224,7 +26548,6 @@ function ChatRunChangeSummary({
               </span>
             );
             const line = changeSummaryLine(file, summary);
-            const isOpen = openPath === file.path;
             const kept = isKeptCurrent(
               decisions?.get(file.path),
               summary?.contentHash,
@@ -26235,68 +26558,9 @@ function ChatRunChangeSummary({
               </small>
             );
 
-            if (!isReviewable) {
-              const contents = (
-                <>
-                  {pathLabel}
-                  {stats}
-                </>
-              );
-              return (
-                <div className="gyro-change-summary-file" key={file.path}>
-                  {canExpandDiff || onReview ? (
-                    <button
-                      aria-expanded={canExpandDiff ? isOpen : undefined}
-                      onClick={() => {
-                        if (canExpandDiff) {
-                          setOpenPath(isOpen ? undefined : file.path);
-                        } else {
-                          onReview?.(file.path);
-                        }
-                      }}
-                      title={`${isOpen ? "Hide" : "Show"} the change to ${file.path}`}
-                      type="button"
-                    >
-                      {contents}
-                    </button>
-                  ) : (
-                    <div className="gyro-change-summary-file-static">
-                      {contents}
-                    </div>
-                  )}
-                  {isOpen && onLoadChangeDiff ? (
-                    <ChangeSummaryDiff
-                      onLoad={onLoadChangeDiff}
-                      path={file.path}
-                    />
-                  ) : null}
-                </div>
-              );
-            }
-
-            return (
-              <div
-                className="gyro-change-summary-file is-reviewable"
-                key={file.path}
-              >
-                <button
-                  aria-expanded={canExpandDiff ? isOpen : undefined}
-                  onClick={() => {
-                    if (canExpandDiff) {
-                      setOpenPath(isOpen ? undefined : file.path);
-                      return;
-                    }
-                    onReview?.(file.path);
-                  }}
-                  title={
-                    canExpandDiff
-                      ? isOpen
-                        ? `Hide the change to ${file.path}`
-                        : `Show the change to ${file.path}`
-                      : `Review ${file.path}`
-                  }
-                  type="button"
-                >
+            const contents = (
+              <>
+                {isReviewable ? (
                   <span className="gyro-change-summary-file-text">
                     <span
                       className="gyro-change-summary-file-path"
@@ -26319,35 +26583,56 @@ function ChatRunChangeSummary({
                       </span>
                     ) : null}
                   </span>
+                ) : (
+                  pathLabel
+                )}
+                <span className="gyro-change-summary-file-review">
                   {stats}
-                </button>
-                <span className="gyro-change-summary-file-actions">
-                  {onAsk ? (
-                    <button onClick={() => onAsk(file.path)} type="button">
-                      <MessageSquare aria-hidden="true" size={13} /> Ask AI
-                    </button>
-                  ) : null}
-                  {onKeep ? (
-                    kept ? (
-                      <span className="gyro-change-summary-kept">
-                        <Check aria-hidden="true" size={13} /> Kept
-                      </span>
-                    ) : (
-                      <button
-                        className="is-keep"
-                        onClick={() => onKeep(file.path, summary?.contentHash)}
-                        type="button"
-                      >
-                        Keep
-                      </button>
-                    )
-                  ) : null}
+                  {onReview ? <ChevronRight aria-hidden="true" size={13} /> : null}
                 </span>
-                {isOpen && onLoadChangeDiff ? (
-                  <ChangeSummaryDiff
-                    onLoad={onLoadChangeDiff}
-                    path={file.path}
-                  />
+              </>
+            );
+            return (
+              <div
+                className={`gyro-change-summary-file${isReviewable ? " is-reviewable" : ""}`}
+                key={file.path}
+              >
+                {onReview ? (
+                  <button
+                    onClick={() => onReview(file.path)}
+                    title={`Review ${file.path}`}
+                    type="button"
+                  >
+                    {contents}
+                  </button>
+                ) : (
+                  <div className="gyro-change-summary-file-static">
+                    {contents}
+                  </div>
+                )}
+                {isReviewable ? (
+                  <span className="gyro-change-summary-file-actions">
+                    {onAsk ? (
+                      <button onClick={() => onAsk(file.path)} type="button">
+                        <MessageSquare aria-hidden="true" size={13} /> Ask AI
+                      </button>
+                    ) : null}
+                    {onKeep ? (
+                      kept ? (
+                        <span className="gyro-change-summary-kept">
+                          <Check aria-hidden="true" size={13} /> Kept
+                        </span>
+                      ) : (
+                        <button
+                          className="is-keep"
+                          onClick={() => onKeep(file.path, summary?.contentHash)}
+                          type="button"
+                        >
+                          Keep
+                        </button>
+                      )
+                    ) : null}
+                  </span>
                 ) : null}
               </div>
             );
@@ -26526,7 +26811,7 @@ function SessionGoalStrip({
             <MoreHorizontal aria-hidden="true" size={15} />
           </button>
         ) : null}
-        {isMenuOpen ? (
+        <SurfacePresence>{isMenuOpen ? (
           <ComposerPopover
             align="end"
             className="gyro-goal-options"
@@ -26542,101 +26827,10 @@ function SessionGoalStrip({
               if (action === "clear") onClear?.();
             }}
           />
-        ) : null}
+        ) : null}</SurfacePresence>
       </span>
     </section>
   );
-}
-
-/** The change itself, inline, so reading a file does not leave the thread. */
-function ChangeSummaryDiff({
-  onLoad,
-  path,
-}: {
-  onLoad: (path: string) => Promise<string>;
-  path: string;
-}) {
-  const [state, setState] = useState<{
-    status: "loading" | "ready" | "failed";
-    lines?: DiffPreviewLine[];
-    truncated?: boolean;
-    error?: string;
-  }>({ status: "loading" });
-
-  useEffect(() => {
-    let cancelled = false;
-    setState({ status: "loading" });
-    onLoad(path).then(
-      (diff) => {
-        if (cancelled) return;
-        const { lines, truncated } = diffPreviewLines(diff);
-        setState({ status: "ready", lines, truncated });
-      },
-      (error: unknown) => {
-        if (cancelled) return;
-        setState({
-          status: "failed",
-          error:
-            error instanceof Error
-              ? error.message
-              : "The change could not be loaded.",
-        });
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [onLoad, path]);
-
-  return (
-    <div className="gyro-change-summary-diff">
-      {state.status === "loading" ? (
-        <p className="gyro-change-summary-diff-note">Loading the change…</p>
-      ) : null}
-      {state.status === "failed" ? (
-        <p className="gyro-change-summary-diff-note">{state.error}</p>
-      ) : null}
-      {state.status === "ready" && state.lines?.length ? (
-        <div className="gyro-change-summary-diff-scroll">
-          <code>
-            {state.lines.map((line, index) => (
-              <span
-                className={diffPreviewLineClass(line.kind)}
-                key={`${index}-${line.text}`}
-              >
-                {line.text || " "}
-              </span>
-            ))}
-          </code>
-        </div>
-      ) : null}
-      {state.status === "ready" && !state.lines?.length ? (
-        <p className="gyro-change-summary-diff-note">
-          No text change to show here.
-        </p>
-      ) : null}
-      {state.truncated ? (
-        <p className="gyro-change-summary-diff-note">
-          Shortened. Open Changes for the whole file.
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-function diffPreviewLineClass(kind: DiffPreviewLine["kind"]) {
-  switch (kind) {
-    case "added":
-      return "is-added";
-    case "removed":
-      return "is-removed";
-    case "hunk":
-      return "is-hunk";
-    case "meta":
-      return "is-meta";
-    default:
-      return undefined;
-  }
 }
 
 function formatMessageTime(value: string) {
@@ -26678,7 +26872,7 @@ function chatImageHint(event: SessionEvent, message: string) {
   };
 }
 
-function AssistantResponse({
+export function AssistantResponse({
   actions,
   event,
   onCouncilAction,
@@ -26925,7 +27119,7 @@ function CouncilResponseCard({
             : ""}
           {payload.presetId ? ` · ${payload.presetId}` : ""}
         </p>
-        {payload.status === "partial" ? (
+        {payload.synthesis && failed > 0 ? (
           <p className="gyro-council-banner" role="status">
             Partial council — synthesis used available seats. Expand seats below
             for full answers.
@@ -26958,8 +27152,9 @@ function CouncilResponseCard({
                 type="button"
               >
                 <span className="gyro-council-seat-label">
+                  <ProviderLogo providerId={seat.providerId as ProviderId} label={seat.providerLabel} />
                   {seat.providerLabel}
-                  {seat.modelId ? ` · ${seat.modelId}` : ""}
+                  {seat.modelId ? ` · ${humanModelName(seat.modelId)}` : ""}
                 </span>
                 <span className="gyro-council-seat-status">{seat.status}</span>
                 {typeof seat.durationMs === "number" ? (
@@ -27102,17 +27297,20 @@ export function ReadOnlyChatMessage({
 function AssistantResponseBlockView({
   block,
   onOpenBrowserUrl,
+  renderLink,
 }: {
   block: AssistantResponseBlock;
+  renderLink?: InlineLinkRenderer;
   onOpenBrowserUrl?: (url: string) => void;
 }) {
   const imageHint = useContext(ChatImageHintContext);
+  const inline = (text: string) => renderAssistantInlineContent(text, onOpenBrowserUrl, renderLink);
   if (block.kind === "heading") {
     const Heading = `h${block.level}` as
       "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
     return (
       <Heading>
-        {renderAssistantInlineContent(block.content, onOpenBrowserUrl)}
+        {inline(block.content)}
       </Heading>
     );
   }
@@ -27126,7 +27324,7 @@ function AssistantResponseBlockView({
       <ul>
         {items.map((item, index) => (
           <li key={`${item}-${index}`}>
-            {renderAssistantInlineContent(item, onOpenBrowserUrl)}
+            {inline(item)}
           </li>
         ))}
       </ul>
@@ -27137,7 +27335,7 @@ function AssistantResponseBlockView({
       <ol start={block.start}>
         {block.items.map((item, index) => (
           <li key={`${item}-${index}`}>
-            {renderAssistantInlineContent(item, onOpenBrowserUrl)}
+            {inline(item)}
           </li>
         ))}
       </ol>
@@ -27179,7 +27377,7 @@ function AssistantResponseBlockView({
                   scope="col"
                   style={{ textAlign: block.align[index] ?? undefined }}
                 >
-                  {renderAssistantInlineContent(cell, onOpenBrowserUrl)}
+                  {inline(cell)}
                 </th>
               ))}
             </tr>
@@ -27192,10 +27390,7 @@ function AssistantResponseBlockView({
                     key={`cell-${rowIndex}-${cellIndex}`}
                     style={{ textAlign: block.align[cellIndex] ?? undefined }}
                   >
-                    {renderAssistantInlineContent(
-                      row[cellIndex] ?? "",
-                      onOpenBrowserUrl,
-                    )}
+                    {inline(row[cellIndex] ?? "")}
                   </td>
                 ))}
               </tr>
@@ -27223,7 +27418,7 @@ function AssistantResponseBlockView({
     );
   }
   if (imageHint?.imagesBelow && isOnlyReplyImages(block.content)) return null;
-  return <p>{renderAssistantInlineContent(block.content, onOpenBrowserUrl)}</p>;
+  return <p>{inline(block.content)}</p>;
 }
 
 /** Text a reply shows outside code, where markdown images can appear. */
@@ -27507,6 +27702,7 @@ function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
 function renderAssistantInlineContent(
   value: string,
   onOpenBrowserUrl?: (url: string) => void,
+  renderLink?: InlineLinkRenderer,
 ): ReactNode[] {
   return value
     .split(chatInlineTokenPattern)
@@ -27537,6 +27733,10 @@ function renderAssistantInlineContent(
         return <strong key={`${part}-${index}`}>{part.slice(2, -2)}</strong>;
       }
       const link = parseChatMarkdownLink(part);
+      if (link && !link.image && renderLink) {
+        const rendered = renderLink(link.label, link.target);
+        if (rendered !== undefined) return <span key={index}>{rendered}</span>;
+      }
       if (link?.image && isReplyRowImage(link.label, link.target)) {
         const file = linkedChatFile(link.label, link.target, true);
         return (
@@ -27998,7 +28198,10 @@ function providerApprovalFromEvent(
         stringFromEventPayload(payload, "providerId") ?? "Model capability",
       capabilityId,
       editorPreview: previewContent,
-      scope: [scopeKind, scopeValue].filter(Boolean).join(" · "),
+      command: stringFromEventPayload(payload, "command"),
+      cwd: stringFromEventPayload(payload, "cwd"),
+      allowProject: Array.isArray(payload?.choices) ? payload.choices.includes("allow-project") : undefined,
+      scope: payload?.command ? undefined : [scopeKind, scopeValue].filter(Boolean).join(" · "),
       reason:
         stringFromEventPayload(payload, "reason") ??
         (capabilityId === "workspace-read-editor"
@@ -28499,7 +28702,7 @@ function TerminalPaneView({
           >
             <X size={15} />
           </button>
-          {closeMenuOpen ? (
+          <SurfacePresence>{closeMenuOpen ? (
             <div
               className="gyro-terminal-corner-menu"
               role="menu"
@@ -28545,7 +28748,7 @@ function TerminalPaneView({
                 </span>
               </button>
             </div>
-          ) : null}
+          ) : null}</SurfacePresence>
         </div>
       ) : null}
       <div className="gyro-terminal-live-body">

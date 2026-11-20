@@ -11,6 +11,7 @@ import {
   type DiffReview,
 } from "@gyro-dev/ui";
 import "@gyro-dev/ui/styles.css";
+import { LocalCheckHost } from "./local-check";
 const files: DiffReview["files"] = [
   {
     path: "src/chat.ts",
@@ -207,6 +208,16 @@ function Fixture() {
         message: "Updated the image support check.",
       },
     ];
+    const transcript = params.has("running") ? events.slice(0, -1) : events;
+    if (params.has("historical")) {
+      transcript.push({
+        ...base,
+        id: "later-user",
+        turnId: "later-turn",
+        kind: "user-message",
+        message: "Explain how the provider tools are registered.",
+      });
+    }
     return (
       <div
         style={{
@@ -241,24 +252,33 @@ function Fixture() {
             {chatPanel ? "Hide review" : "Open review"}
           </button>
         </nav>
-        <ChatSurface
-          config={{
-            commandProfiles: [],
-            modelProviders: [],
-            requireCommandApproval: true,
-            requireFileEditApproval: true,
-            telemetryEnabled: false,
-          }}
-          onSend={() => {}}
-          shellReady
-          isTiled={params.has("tiled")}
-          isComposerSending={params.has("running")}
-          events={params.has("running") ? events.slice(0, -1) : events}
-          activeChatPanel={chatPanel}
-          onSelectChatPanel={setChatPanel}
-          onLoadComparisonDiff={loadDiff}
-          onLoadChangeDiff={async (path) => (await loadDiff({ path })).unified}
-        />
+        <LocalCheckHost
+          sessions={[{
+            id: base.sessionId,
+            title: "Update the image support check",
+            workspacePath: "/fixture/gyro",
+          }]}
+          events={{ [base.sessionId]: transcript }}
+          available={false}
+        >
+          <ChatSurface
+            config={{
+              commandProfiles: [],
+              modelProviders: [],
+              requireCommandApproval: true,
+              requireFileEditApproval: true,
+              telemetryEnabled: false,
+            }}
+            onSend={() => {}}
+            shellReady
+            isTiled={params.has("tiled")}
+            isComposerSending={params.has("running")}
+            events={transcript}
+            activeChatPanel={chatPanel}
+            onSelectChatPanel={setChatPanel}
+            onLoadComparisonDiff={loadDiff}
+          />
+        </LocalCheckHost>
       </div>
     );
   }

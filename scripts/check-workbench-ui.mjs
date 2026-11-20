@@ -1192,13 +1192,13 @@ expect(
     desktopRustSource.includes(
       "wait_timeout(state, WORKSPACE_PREPARATION_WAIT_TIMEOUT)",
     ) &&
-    appSource.includes('workspaceWatchMode === "polling"') &&
+    appSource.includes('workspaceWatchMode === "event" ? 20_000 : 3_000') &&
     appSource.includes("workspacePreparationPathRef.current ===") &&
     appSource.includes("normalizeProjectPath(activeSession.workspacePath)") &&
     appSource.includes(
       "settleWorkspacePreparation(snapshot);\n        refreshIdeSourceControl(root)",
     ),
-  "Workspace preparation should expose honest native stages, bound Git inspect, and disable steady polling when the event watcher is healthy.",
+  "Workspace preparation should expose native stages, bound Git inspection, and slow reconciliation for watched roots.",
 );
 expect(
   desktopRustSource.includes("untracked_lines_before(&path, deadline)") &&
@@ -1206,7 +1206,7 @@ expect(
     desktopRustSource.includes("fn git_status_stamp") &&
     desktopRustSource.includes("--untracked-files=normal") &&
     desktopRustSource.includes("--untracked-files=all") &&
-    appSource.includes("workspaceChangeGeneration === 0") &&
+    appSource.includes("if (eventRoot === workspaceActionRoot) void refreshIdeSourceControl(eventRoot)") &&
     appSource.includes(
       'if (workspaceWatchMode === "event") {\n      return;',
     ) &&
@@ -4673,7 +4673,7 @@ expect(
     sourceIncludes(surfaceSource, "event.detail === 0") &&
     sourceIncludes(
       surfaceSource,
-      "!isStopAction && (!canSubmitComposer || draft.trim().length === 0)",
+      "!isStopAction && (!canSubmitComposer || plainDraft.trim().length === 0)",
     ) &&
     sourceIncludes(surfaceSource, '"gyro-send-button"') &&
     sourceIncludes(surfaceSource, 'isStopAction ? "is-stop"') &&
@@ -6849,11 +6849,11 @@ expect(
     ) &&
     sourceIncludes(
       surfaceSource,
-      "if (canSubmitComposer && draft.trim().length > 0)",
+      "if (canSubmitComposer && plainDraft.trim().length > 0)",
     ) &&
     sourceIncludes(
       surfaceSource,
-      "!isStopAction && (!canSubmitComposer || draft.trim().length === 0)",
+      "!isStopAction && (!canSubmitComposer || plainDraft.trim().length === 0)",
     ) &&
     sourceIncludes(surfaceSource, 'action: "select-no-folder"') &&
     sourceIncludes(surfaceSource, 'label: "No folder"') &&
@@ -8398,15 +8398,15 @@ expect(
     styleSource.includes(
       "--gyro-premium-motion: calc(130ms * var(--gyro-motion-factor, 1))",
     ) &&
-    styleSource.includes("--gyro-app: #141415") &&
-    styleSource.includes("--gyro-pane: #141415") &&
+    styleSource.includes("--gyro-app: #1e1e1d") &&
+    styleSource.includes("--gyro-pane: var(--gyro-app)") &&
     styleSource.includes("--gyro-hero-composer: var(--gyro-surface)") &&
     styleSource.includes("--gyro-user-main: #ffffff") &&
     styleSource.includes("--gyro-user-secondary: #ffffff") &&
     styleSource.includes("var(--gyro-user-main) 86%") &&
     styleSource.includes(':root[data-theme="light"]') &&
-    styleSource.includes("--gyro-app: #fbfbfb") &&
-    styleSource.includes("--gyro-sidebar: #f3f3f4") &&
+    styleSource.includes("--gyro-app: #f9f8f7") &&
+    styleSource.includes("--gyro-sidebar: #f5f4f2") &&
     styleSource.includes("--gyro-premium-hairline: rgba(32, 32, 32, 0.1)") &&
     styleSource.includes("var(--gyro-user-main) 82%") &&
     styleSource.includes("--gyro-secondary-accent") &&

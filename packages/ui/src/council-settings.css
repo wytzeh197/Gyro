@@ -1,0 +1,444 @@
+/* Settings → Model Council: compact preset list and inline editor. */
+.gyro-council-presets {
+  display: grid;
+  gap: 6px;
+  padding: 10px 0 2px;
+}
+.gyro-council-presets-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.gyro-council-presets-heading strong {
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-support);
+  font-weight: 600;
+}
+.gyro-council-preset-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  overflow: hidden;
+}
+.gyro-council-preset-list > li + li {
+  border-top: 1px solid var(--gyro-border-soft);
+}
+.gyro-council-preset-row {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  padding-right: 6px;
+}
+.gyro-council-preset-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 0;
+  color: var(--gyro-text);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.gyro-council-preset-main:disabled {
+  cursor: default;
+}
+.gyro-council-preset-main:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring, var(--gyro-accent));
+  outline-offset: -2px;
+}
+.gyro-council-preset-main strong {
+  flex: none;
+  font-size: var(--gyro-font-support);
+  font-weight: 500;
+}
+.gyro-council-preset-summary {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-council-radio {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--gyro-border-strong);
+  border-radius: 50%;
+}
+.gyro-council-preset-row.is-default .gyro-council-radio {
+  border-color: var(--gyro-accent);
+  box-shadow: inset 0 0 0 2.5px var(--gyro-pane, transparent);
+  background: var(--gyro-accent);
+}
+.gyro-council-preset-actions {
+  display: flex;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.gyro-council-preset-row:hover .gyro-council-preset-actions,
+.gyro-council-preset-row:focus-within .gyro-council-preset-actions {
+  opacity: 1;
+}
+.gyro-council-preset-actions button,
+.gyro-council-icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+  background: transparent;
+  cursor: pointer;
+}
+.gyro-council-preset-actions button:hover:not(:disabled),
+.gyro-council-icon-button:hover:not(:disabled) {
+  color: var(--gyro-text);
+  background: var(--gyro-control-hover);
+}
+.gyro-council-preset-actions button.is-danger:hover:not(:disabled) {
+  color: var(--gyro-danger);
+}
+.gyro-council-preset-actions button:disabled,
+.gyro-council-icon-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.gyro-council-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+  background: transparent;
+  font: inherit;
+  font-size: var(--gyro-font-caption);
+  cursor: pointer;
+  justify-self: start;
+}
+.gyro-council-link:hover:not(:disabled) {
+  color: var(--gyro-text);
+}
+.gyro-council-link:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.gyro-council-editor {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  background: var(--gyro-control-bg);
+}
+.gyro-council-name {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 4px 2px;
+  border: 0;
+  border-bottom: 1px solid var(--gyro-border-soft);
+  color: var(--gyro-text);
+  background: transparent;
+  font: inherit;
+  font-size: var(--gyro-font-support);
+  font-weight: 500;
+}
+.gyro-council-name:focus-visible {
+  outline: none;
+  border-bottom-color: var(--gyro-accent);
+}
+.gyro-council-editor .gyro-council-seats {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: start;
+  gap: 6px 10px;
+}
+.gyro-council-label {
+  padding-top: 7px;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+}
+.gyro-council-seat-list {
+  display: grid;
+  gap: 4px;
+}
+.gyro-council-seat-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 4px;
+}
+.gyro-council-seat-row select {
+  width: 100%;
+  min-width: 0;
+}
+.gyro-council-editor-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gyro-council-problem {
+  flex: 1;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+}
+.gyro-council-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--gyro-border-strong);
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-text);
+  background: var(--gyro-control-bg);
+  font: inherit;
+  font-size: var(--gyro-font-caption);
+  cursor: pointer;
+}
+.gyro-council-button.is-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--gyro-muted);
+}
+.gyro-council-button.is-quiet:hover {
+  color: var(--gyro-text);
+}
+.gyro-council-button.is-primary {
+  border-color: transparent;
+  color: var(--gyro-ink-text, #111);
+  background: var(--gyro-ink-bg, var(--gyro-text));
+}
+.gyro-council-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+@media (hover: none) {
+  .gyro-council-preset-actions {
+    opacity: 1;
+  }
+}
+
+/* Composer: Council presets loaded for this send. */
+.gyro-council-preflight-presets {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.gyro-council-preflight-preset {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-pill);
+  color: var(--gyro-muted);
+  background: transparent;
+  font: inherit;
+  font-size: var(--gyro-font-tiny);
+  cursor: pointer;
+}
+.gyro-council-preflight-preset:hover:not(:disabled) {
+  color: var(--gyro-text);
+  border-color: var(--gyro-border-strong);
+}
+.gyro-council-preflight-preset.is-loaded {
+  border-color: transparent;
+  color: var(--gyro-text);
+  background: color-mix(in srgb, var(--gyro-accent) 16%, transparent);
+}
+.gyro-council-preflight-preset:disabled {
+  cursor: default;
+}
+.gyro-council-preflight-summary {
+  flex-basis: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Settings → Model Council: one tab per role preset. */
+.gyro-council-roles {
+  display: grid;
+  gap: 0;
+  margin: 2px 0 6px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  overflow: hidden;
+}
+.gyro-council-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px;
+  border-bottom: 1px solid var(--gyro-border-soft);
+}
+.gyro-council-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-muted);
+  background: transparent;
+  font: inherit;
+  font-size: var(--gyro-font-caption);
+  cursor: pointer;
+}
+.gyro-council-tab:hover {
+  color: var(--gyro-text);
+  background: var(--gyro-control-hover);
+}
+.gyro-council-tab[aria-selected="true"] {
+  color: var(--gyro-text);
+  background: var(--gyro-control-bg);
+  box-shadow: inset 0 0 0 1px var(--gyro-border-strong);
+}
+.gyro-council-tab:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring, var(--gyro-accent));
+  outline-offset: -2px;
+}
+.gyro-council-tab.is-add {
+  padding: 0 7px;
+}
+.gyro-council-tab-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--gyro-accent);
+}
+.gyro-council-roles .gyro-council-editor {
+  padding: 10px 12px 12px;
+  background: transparent;
+}
+.gyro-council-description {
+  margin: 0;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+}
+.gyro-council-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-caption);
+  cursor: pointer;
+}
+.gyro-council-check input {
+  margin: 0;
+  accent-color: var(--gyro-accent);
+}
+.gyro-council-check:has(input:disabled) {
+  cursor: default;
+}
+.gyro-council-button {
+  gap: 5px;
+}
+
+/* Chat: the Council answer's text buttons. The shared footer rule sizes
+   buttons as square icons, so give these their natural width. */
+.gyro-response-actions.gyro-council-actions button:not([aria-label]) {
+  width: auto;
+  height: auto;
+  white-space: nowrap;
+  color: var(--gyro-text);
+}
+
+/* Provider marks next to every Council model. */
+.gyro-council-seat-pick {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.gyro-council-seat-pick > :last-child {
+  flex: 1;
+  min-width: 0;
+}
+:is(.gyro-council-seat-pick, .gyro-council-preflight-model, .gyro-council-seat-label) .gyro-provider-logo {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.gyro-council-preflight-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: middle;
+}
+.gyro-council-preflight-model .gyro-provider-logo {
+  width: 12px;
+  height: 12px;
+}
+.gyro-council-seat-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+/* Composer: "answered by" opens the final-answer model picker. */
+.gyro-council-writer {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 5px;
+  border: 1px dashed var(--gyro-border-strong);
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-text);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.gyro-council-writer:hover {
+  border-style: solid;
+  background: var(--gyro-control-hover);
+}
+.gyro-council-writer em {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-tiny);
+  font-style: normal;
+}
+.gyro-council-chip-writer {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.gyro-council-chip-writer .gyro-provider-logo {
+  width: 12px;
+  height: 12px;
+}
+
+/* Composer: "Use Council for the entire chat?" pop-up question. */
+.gyro-council-scope-dock .gyro-question-dock-head > svg {
+  flex: none;
+  color: var(--gyro-muted);
+}
+.gyro-council-scope-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0 var(--gyro-chat-space-2, 8px);
+}
+.gyro-council-scope-actions .gyro-council-button {
+  min-height: 28px;
+  padding: 0 12px;
+  font-size: var(--gyro-font-support);
+}
+.gyro-council-scope-actions .gyro-council-button.is-quiet {
+  border-color: var(--gyro-border-soft);
+}
+.gyro-council-scope-actions .gyro-council-button.is-primary {
+  font-weight: 600;
+}

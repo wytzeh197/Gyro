@@ -658,7 +658,7 @@ async fn run(app: &tauri::AppHandle, directory: &Path) -> anyhow::Result<Value> 
     super::commands::remote_host_watch(app.clone(), host_id.clone(), None, "late-cleanup".into())
         .await
         .map_err(anyhow::Error::msg)?;
-    super::commands::remote_host_request(
+    super::commands::request_from_host(
         app.clone(),
         host_id.clone(),
         Request {

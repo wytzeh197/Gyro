@@ -37,7 +37,8 @@ use crate::{
     git::{
         branches as git_branch_service,
         commands::{git_diff_blocking, git_push_blocking},
-        history_capability as git_history_capability, status_cache as git_status_cache,
+        commit_capability as git_commit_capability, history_capability as git_history_capability,
+        status_cache as git_status_cache,
         status_cache::git_status_impl,
         types::{GitPathRequest, GitSyncRequest},
     },
@@ -294,6 +295,10 @@ pub(crate) fn execute_provider_capability(
         CapabilityId::WorkspaceGitLog
         | CapabilityId::WorkspaceGitShow
         | CapabilityId::WorkspaceGitBlame => git_history_capability::execute(app, bound, request)?,
+        CapabilityId::WorkspaceGitCommit => {
+            let (summary, data) = git_commit_capability::execute(&workspace, arguments)?;
+            (summary, data, None)
+        }
         CapabilityId::WebFetch => web_fetch_capability::execute(app, bound, request)?,
         CapabilityId::MemoryRead | CapabilityId::MemoryWrite => {
             memory_capability::execute(app, bound, request)?
@@ -303,6 +308,49 @@ pub(crate) fn execute_provider_capability(
         | CapabilityId::AgentWait
         | CapabilityId::AgentSend
         | CapabilityId::AgentStop => delegated_agents::execute(app, bound, request)?,
+        CapabilityId::WorkspaceRunCommand => {
+            let program = capability_argument_string(arguments, "program")?;
+            let args = super::access::capability_argument_strings(arguments, "args")?;
+            let cwd = arguments.get("cwd").and_then(serde_json::Value::as_str).unwrap_or(".");
+            let cwd = gyro_core::security::assert_path_inside_workspace(&bound.workspace, Path::new(cwd))?;
+            anyhow::ensure!(cwd.is_dir(), "Working directory is not a directory");
+            let hosts = crate::command_network::destinations(arguments)?;
+            let proxy = if hosts.is_empty() { None } else { Some(crate::command_network::CommandNetwork::open(hosts)?) };
+            let mut command = command_with_gui_path(program);
+            command.args(args).current_dir(cwd);
+            let boundary = crate::command_execution::confined_command_boundary(&bound.workspace)?;
+            let cancellation = app.state::<ProviderCancellationManager>().flags.lock()
+                .map_err(|_| anyhow::anyhow!("run state unavailable"))?
+                .get(&bound.session_id)
+                .map(|control| control.cancellation.clone())
+                .ok_or_else(|| anyhow::anyhow!("provider run is no longer active"))?;
+            let _admission = IdeCommandAdmission::acquire().map_err(anyhow::Error::msg)?;
+            let output = crate::command_execution::run_model_command(
+                command, cancellation, &boundary, proxy.as_ref().map(|proxy| proxy.port()),
+            )?;
+            let blocked = proxy.as_ref().map_or_else(Vec::new, |proxy| proxy.blocked_destinations());
+            let summary = if blocked.is_empty() {
+                format!("Command {}", output.status)
+            } else {
+                format!("Command {}. HTTPS access rejected for {}.", output.status, blocked.join(", "))
+            };
+            let resource = CapabilityResourceRef {
+                id: format!("output:{}:{}", bound.session_id, request.context.call_id),
+                kind: "output".into(),
+                label: format!("Command · {program}"),
+            };
+            let output_data = serde_json::json!({
+                "id": resource.id, "label": resource.label, "kind": "command",
+                "status": output.status, "exitCode": output.exit_code, "blockedDestinations": blocked,
+                "stdout": output.stdout, "stderr": output.stderr, "sourceTruncated": output.source_truncated,
+                "executionPolicy": boundary.policy_name(),
+            });
+            app.state::<CapabilityIdeEvidenceManager>()
+                .task_outputs
+                .remember(&bound.workspace_key, &bound.session_id, output_data.clone());
+            let data = terminal_capability::bound_command_result(output_data, arguments)?;
+            (summary, data, Some(resource))
+        }
         CapabilityId::WorkspaceRunTask | CapabilityId::WorkspaceRunTest => {
             workspace_result_byte_limit(arguments)?;
             capability_output_budget::offset(arguments, "stdoutOffset")?;
@@ -577,9 +625,10 @@ pub(crate) fn execute_provider_capability(
                 Some(resource),
             )
         }
-        CapabilityId::TerminalRead | CapabilityId::TerminalWait | CapabilityId::TerminalStop => {
-            terminal_capability::execute(app, bound, request)?
-        }
+        CapabilityId::TerminalRead
+        | CapabilityId::TerminalWait
+        | CapabilityId::TerminalInput
+        | CapabilityId::TerminalStop => terminal_capability::execute(app, bound, request)?,
         CapabilityId::BrowserOpen | CapabilityId::BrowserNavigate => {
             let url =
                 session_browser::parse_navigable_url(capability_argument_string(arguments, "url")?)
@@ -1631,9 +1680,17 @@ pub(crate) fn handle_desktop_provider_capability_request_inner(
             Err(error) => return fail("policy-unavailable", error.to_string()),
         };
         let config = match load_config_blocking() {
-            Ok(config) => config,
+            Ok(config) => crate::chat_permissions::for_active_turn(app, &bound.session_id, config),
             Err(error) => return fail("policy-unavailable", error),
         };
+        if !capability_full_access_enabled(&config)
+            && (class == CapabilityClass::TerminalExecute
+                || matches!(request.capability_id, CapabilityId::WorkspaceEdit | CapabilityId::WorkspaceProposeEdit))
+            && (bound.policy.access_for(CapabilityClass::WorkspaceWrite) == CapabilityAccess::Deny
+                || current_policy.access_for(CapabilityClass::WorkspaceWrite) == CapabilityAccess::Deny)
+        {
+            return fail("policy-denied", "This project denies workspace writes.".into());
+        }
         let mut access = capability_access_with_full_access(
             &bound,
             &current_policy,
@@ -1664,6 +1721,38 @@ pub(crate) fn handle_desktop_provider_capability_request_inner(
         }
         access =
             delegated_agents::permission_access(access, admission_id, bound.policy.mode, &config);
+        if capability_uses_language_server(request.capability_id)
+            && class == CapabilityClass::TerminalExecute
+            && matches!(bound.provider_id.as_str(), "openai" | "anthropic")
+            && !capability_full_access_enabled(&config)
+        {
+            return fail("policy-denied",
+                "Workspace language servers can execute project code outside the sandbox. Use a bounded Workspace command for this task.".into());
+        }
+        if class == CapabilityClass::TerminalExecute
+            && matches!(request.capability_id, CapabilityId::TerminalOpen | CapabilityId::WorkspaceRunTask | CapabilityId::WorkspaceRunTest)
+            && matches!(bound.provider_id.as_str(), "openai" | "anthropic")
+            && access != CapabilityAccess::Deny
+        {
+            access = if config.require_command_approval { CapabilityAccess::Ask } else { CapabilityAccess::Allow };
+        }
+        if request.capability_id == CapabilityId::WorkspaceRunCommand {
+            let network = match crate::command_network::destinations(&request.arguments) {
+                Ok(hosts) => !hosts.is_empty(),
+                Err(error) => return fail("invalid-arguments", error.to_string()),
+            };
+            if network && code_mode::in_group() {
+                return fail("approval-required", "Request HTTPS access with a standalone Workspace command.".into());
+            }
+            // A project grant and Full access cannot skip an explicitly requested one-call network decision.
+            if access != CapabilityAccess::Deny {
+                access = if network || config.require_command_approval {
+                    CapabilityAccess::Ask
+                } else {
+                    CapabilityAccess::Allow
+                };
+            }
+        }
         // Live editor text is not part of ordinary Workspace reads. Even Full
         // Access requires a fresh decision before disclosing an unsaved buffer.
         if request.capability_id == CapabilityId::WorkspaceReadEditor
@@ -1734,6 +1823,9 @@ pub(crate) fn handle_desktop_provider_capability_request_inner(
                     return fail("user-denied", "The user denied this capability.".into());
                 }
                 Ok(CapabilityApprovalDecision::AllowProject) => {
+                    if request.capability_id == CapabilityId::WorkspaceRunCommand {
+                        return fail("approval-required", "This command requires Allow once.".into());
+                    }
                     if let Err(error) = persist_capability_grant(
                         &bound,
                         class,
@@ -1790,7 +1882,7 @@ pub(crate) fn handle_desktop_provider_capability_request_inner(
             Err(error) => return fail("policy-unavailable", error.to_string()),
         };
         let config = match load_config_blocking() {
-            Ok(config) => config,
+            Ok(config) => crate::chat_permissions::for_active_turn(app, &bound.session_id, config),
             Err(error) => return fail("policy-unavailable", error),
         };
         if capability_denied_permission(
@@ -1940,16 +2032,7 @@ pub(crate) async fn resolve_capability_approval(
     let approval_id = parse_uuid(&request.approval_id)?;
     let session_id = parse_uuid(&request.session_id)?;
     let turn_id = request.turn_id.as_deref().map(parse_uuid).transpose()?;
-    let pending = manager
-        .pending
-        .lock()
-        .map_err(|_| "capability approval state is unavailable".to_string())?
-        .remove(&approval_id.to_string())
-        .ok_or_else(|| "capability approval is no longer pending".to_string())?;
-    if pending.session_id != session_id || pending.turn_id != turn_id {
-        return Err("capability approval did not belong to this chat turn".into());
-    }
-    pending
+    super::approval::take_capability_approval(&manager, approval_id, session_id, turn_id)?
         .sender
         .send(request.decision)
         .map_err(|_| "capability request is no longer waiting".to_string())

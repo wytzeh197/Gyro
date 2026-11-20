@@ -675,11 +675,11 @@ try {
     await evaluate(
       `document.querySelector('.gyro-run-problem-actions').textContent.trim()`,
     ),
-    "Retry",
-    "exhausted recovery offers manual retry",
+    "Resume",
+    "exhausted recovery offers a saved continuation",
   );
   await inspectLayout("native-exhausted-light");
-  await click("Retry");
+  await click("Resume");
   await until(
     () => evaluate(`${state}.state==='native-resumed'`),
     "manual native continuation after exhausted attempts",
@@ -767,6 +767,19 @@ try {
     "exhausted rate-limit recovery has no second retry timer",
   );
   await inspectLayout("rate-limit-exhausted-light");
+  await load({ theme: "light", state: "native-wait", composerStop: "true", draft: "Keep this follow-up" });
+  const stopButton = 'button[aria-label="Stop response"]';
+  const queueButton = 'button[aria-label="Queue message"]';
+  assert.equal(await evaluate(`!!document.querySelector('${queueButton}')`), true);
+  await evaluate(`document.querySelector('${stopButton}').focus()`);
+  await key("Enter", 13);
+  assert.equal(
+    await evaluate(`document.querySelector('button[aria-label="Stopping response"]').disabled`),
+    true,
+  );
+  assert.match(await evaluate("document.querySelector('.gyro-composer-stop-status').textContent"), /Stopping/);
+  assert.equal(await evaluate(`!!document.querySelector('${queueButton}')`), true);
+  await screenshot("composer-stopping-with-draft.png");
   await writeFile(
     join(artifactDirectory, "browser-qa.json"),
     JSON.stringify({ snapshots, errors }, null, 2),

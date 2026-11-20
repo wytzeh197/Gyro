@@ -1,3 +1,4 @@
+import { humanModelName } from "./model-name.ts";
 import type { ProviderId, ProviderUsageWindow, SessionEvent } from "./types";
 import { providerCatalog } from "./provider-catalog.ts";
 import { remainingUsage } from "./usage-remaining.ts";
@@ -307,7 +308,7 @@ export function estimateComposerContextUsage(
           reportedTotalTokens ?? 0,
         );
   const isReported = reportedInputTokens !== undefined;
-  const modelLabel = model.modelLabel ?? model.modelId ?? "Selected model";
+  const modelLabel = model.modelLabel ?? humanModelName(model.modelId) ?? "Selected model";
   // The count is the conversation's, whichever model or provider measured it.
   // The selected model only chooses the window shown beside it.
   const detail = isReported
@@ -347,7 +348,7 @@ export function composerContextUsageForModel(
       matchesModel ? usage.reportedContextWindowTokens : undefined,
       model,
     ) ?? 0;
-  const modelLabel = model.modelLabel ?? model.modelId ?? usage.modelLabel;
+  const modelLabel = model.modelLabel ?? humanModelName(model.modelId) ?? usage.modelLabel;
   if (
     model.providerId === usage.providerId &&
     model.modelId === usage.modelId &&

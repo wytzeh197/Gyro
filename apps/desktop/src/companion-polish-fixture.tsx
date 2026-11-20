@@ -48,6 +48,7 @@ import {
   type WorkspaceFile,
 } from "@gyro-dev/ui";
 import "@gyro-dev/ui/styles.css";
+import "./remote-access/remote-access.css";
 
 const query = new URLSearchParams(location.search);
 const theme = query.get("theme") === "light" ? "light" : "dark";
@@ -754,7 +755,6 @@ function Pane({
           : fixtureRepo(query.get("repo"))
       }
       diffReview={query.get("review") === "proposed" ? diff : undefined}
-      onLoadChangeDiff={async () => unified}
       onLoadComparisonDiff={async () => {
         if (sampleState === "loading") return new Promise(() => {});
         if (sampleState === "failed")

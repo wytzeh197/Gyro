@@ -236,6 +236,29 @@ pub(super) fn execute(
     } else if request.capability_id == CapabilityId::TerminalRead {
         app.state::<TerminalProcessManager>()
             .read(&owned.pane_id, known_revision)?
+    } else if request.capability_id == CapabilityId::TerminalInput {
+        let manager = app.state::<TerminalProcessManager>();
+        let pane = manager.read(&owned.pane_id, None)?;
+        let config = crate::chat_permissions::for_active_turn(
+            app,
+            &bound.session_id,
+            crate::app::config::load_config_blocking().map_err(anyhow::Error::msg)?,
+        );
+        anyhow::ensure!(
+            pane.execution_policy != "unrestricted"
+                || (bound.policy.mode == gyro_core::CapabilityRunMode::Normal && config.full_access),
+            "This terminal has Full access. Open a bounded terminal for this turn."
+        );
+        let input = terminal_input_bytes(arguments)?;
+        let wait = terminal_wait::initial_timeout(arguments)?;
+        let written = app
+            .state::<TerminalProcessManager>()
+            .write(&owned.pane_id, &input)?;
+        if wait.is_zero() {
+            written
+        } else {
+            wait_for_command(app, bound, &owned.resource_id, wait)?
+        }
     } else {
         let snapshot = app.state::<TerminalProcessManager>().stop(&owned.pane_id)?;
         resources
@@ -267,6 +290,17 @@ pub(super) fn execute(
             }
         } else if request.capability_id == CapabilityId::TerminalRead {
             "Read model terminal output".into()
+        } else if request.capability_id == CapabilityId::TerminalInput {
+            if snapshot.status == "running" {
+                "Sent input to model terminal".into()
+            } else {
+                format!(
+                    "Sent input; command finished (exit code {})",
+                    snapshot
+                        .exit_code
+                        .map_or("unknown".into(), |code| code.to_string())
+                )
+            }
         } else {
             "Stopped model terminal".into()
         },
@@ -291,6 +325,62 @@ pub(super) fn execute(
         )?,
         Some(resource),
     ))
+}
+
+/// Control keys a model may send. Named keys keep escape sequences out of the
+/// model's text, where they are easy to get wrong and hard to review.
+pub(crate) const INPUT_KEYS: &[&str] = &[
+    "enter", "tab", "escape", "backspace", "up", "down", "left", "right", "ctrl-c", "ctrl-d",
+    "ctrl-z",
+];
+const MAX_TERMINAL_INPUT_BYTES: usize = 16 * 1024;
+
+fn input_key_sequence(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "enter" => "\r",
+        "tab" => "\t",
+        "escape" => "\x1b",
+        "backspace" => "\x7f",
+        "up" => "\x1b[A",
+        "down" => "\x1b[B",
+        "right" => "\x1b[C",
+        "left" => "\x1b[D",
+        "ctrl-c" => "\x03",
+        "ctrl-d" => "\x04",
+        "ctrl-z" => "\x1a",
+        _ => return None,
+    })
+}
+
+/// The bytes one terminal.input call types: verbatim text, then one key.
+fn terminal_input_bytes(arguments: &serde_json::Value) -> anyhow::Result<String> {
+    let text = match arguments.get("text") {
+        None | Some(serde_json::Value::Null) => "",
+        Some(value) => value
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("capability argument `text` must be a string"))?,
+    };
+    let key = match arguments.get("key") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(value) => {
+            let name = value
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("capability argument `key` must be a string"))?;
+            Some(input_key_sequence(name).ok_or_else(|| {
+                anyhow::anyhow!("unknown key {name:?}; use one of {}", INPUT_KEYS.join(", "))
+            })?)
+        }
+    };
+    if text.is_empty() && key.is_none() {
+        anyhow::bail!("pass text, key, or both");
+    }
+    if text.contains('\0') {
+        anyhow::bail!("terminal input cannot contain NUL");
+    }
+    if text.len() > MAX_TERMINAL_INPUT_BYTES {
+        anyhow::bail!("terminal input is limited to {MAX_TERMINAL_INPUT_BYTES} bytes per call");
+    }
+    Ok(format!("{text}{}", key.unwrap_or("")))
 }
 
 pub(super) fn bound_terminal_result(
@@ -381,6 +471,7 @@ mod tests {
             CapabilityId::TerminalOpen,
             CapabilityId::TerminalRead,
             CapabilityId::TerminalWait,
+            CapabilityId::TerminalInput,
             CapabilityId::TerminalStop,
         ] {
             let data = bound_terminal_result(json!({
@@ -416,6 +507,29 @@ mod tests {
                 assert_eq!(actual["pane"]["outputRevision"], 17);
                 assert!(actual["outputWindow"].is_object());
             }
+        }
+    }
+
+    #[test]
+    fn terminal_input_types_text_then_one_named_key() {
+        assert_eq!(terminal_input_bytes(&json!({"text": "y\n"})).unwrap(), "y\n");
+        assert_eq!(terminal_input_bytes(&json!({"key": "ctrl-c"})).unwrap(), "\x03");
+        assert_eq!(
+            terminal_input_bytes(&json!({"text": "print(1)", "key": "enter"})).unwrap(),
+            "print(1)\r"
+        );
+        for key in INPUT_KEYS {
+            assert!(input_key_sequence(key).is_some(), "{key} has no sequence");
+        }
+        for bad in [
+            json!({}),
+            json!({"text": ""}),
+            json!({"key": "f13"}),
+            json!({"text": 3}),
+            json!({"text": "a\u{0}b"}),
+            json!({"text": "x".repeat(MAX_TERMINAL_INPUT_BYTES + 1)}),
+        ] {
+            assert!(terminal_input_bytes(&bad).is_err(), "{bad} was accepted");
         }
     }
 

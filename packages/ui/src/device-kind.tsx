@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
-import { Laptop, Monitor, type LucideProps } from "lucide-react";
+import { Laptop, Monitor, Smartphone, type LucideProps } from "lucide-react";
 
-export type DeviceKind = "laptop" | "desktop";
+export type DeviceKind = "laptop" | "desktop" | "phone";
 
 export const DEVICE_KIND_OPTIONS: Array<{ label: string; value: DeviceKind }> =
   [
@@ -24,8 +24,12 @@ function read(): Record<string, DeviceKind> {
   return cache!;
 }
 
-/** Names like "MacBook Pro" read as laptops; Mac mini, iMac and Studio as desktops. */
+/**
+ * Names like "iPhone" read as phones and "MacBook Pro" as laptops; Mac mini,
+ * iMac and Studio as desktops. The Mac picker only offers laptop and desktop.
+ */
 export function inferDeviceKind(name?: string): DeviceKind {
+  if (name && /iphone|phone|android|pixel/i.test(name)) return "phone";
   return name && /macbook|laptop|notebook/i.test(name) ? "laptop" : "desktop";
 }
 
@@ -72,6 +76,7 @@ export function DeviceIcon({
   kind,
   ...props
 }: { kind: DeviceKind } & LucideProps) {
-  const Icon = kind === "laptop" ? Laptop : Monitor;
+  const Icon =
+    kind === "phone" ? Smartphone : kind === "laptop" ? Laptop : Monitor;
   return <Icon data-device-kind={kind} {...props} />;
 }

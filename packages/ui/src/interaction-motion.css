@@ -1,4 +1,11 @@
 /* Specific interactions opt into movement; the shell responsiveness guard stays. */
+:root {
+  --gyro-exit-motion-factor: 0.8;
+}
+[data-surface-exit] {
+  pointer-events: none;
+}
+
 :root .gyro-selection-track {
   position: relative;
   isolation: isolate;

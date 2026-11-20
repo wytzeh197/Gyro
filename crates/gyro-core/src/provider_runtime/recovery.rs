@@ -113,7 +113,9 @@ pub fn manual_retry_request(
                 && compatible_provider_session_binding((*binding).clone(), request).is_some()
         })
         .and_then(provider_resume_cursor_from_binding);
-    if previous_status == Some("failed") && durable_native_cursor(request, cursor.as_ref()) {
+    if matches!(previous_status, Some("failed" | "cancelled" | "interrupted"))
+        && durable_native_cursor(request, cursor.as_ref())
+    {
         continuation_request(request)
     } else {
         request.clone()
@@ -330,30 +332,20 @@ where
         .ok()
         .and_then(|session| store.read_events(session).ok())
         .unwrap_or_default();
-    let saved_failure = saved_events.iter().any(|event| {
+    let same_turn = |event: &crate::SessionEvent| {
         event.turn_id.map(|id| id.to_string()).as_deref() == request.turn_id.as_deref()
-            && event
-                .payload
-                .get("kind")
-                .and_then(serde_json::Value::as_str)
-                == Some("provider-status")
-            && event
-                .payload
-                .get("status")
-                .and_then(serde_json::Value::as_str)
-                == Some("failed")
+    };
+    let saved_failure = saved_events.iter().filter(|event| same_turn(event)).any(|event| {
+        event.payload["kind"].as_str() == Some("provider-status")
+            && matches!(event.payload["status"].as_str(), Some("failed" | "cancelled" | "interrupted"))
     });
-    let saved_work = saved_failure
-        && saved_events.iter().any(|event| {
-            event.turn_id.map(|id| id.to_string()).as_deref() == request.turn_id.as_deref()
-                && event
-                    .payload
-                    .get("schema")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|schema| {
-                        matches!(schema, "gyro.capability.v1" | "gyro.mutation.v1")
-                    })
-        });
+    let saved_work = saved_failure && saved_events.iter().filter(|event| same_turn(event)).any(|event| {
+        matches!(event.payload["schema"].as_str(), Some("gyro.capability.v1" | "gyro.mutation.v1"))
+            || (event.payload["kind"].as_str() == Some("provider-activity")
+                && matches!(event.payload["activityKind"].as_str(), Some("command" | "file" | "tool")))
+            || (event.payload["kind"].as_str() == Some("provider-approval")
+                && event.payload["status"].as_str() == Some("applied"))
+    });
     if (saved_work || is_continuation(request))
         && !durable_native_cursor(request, binding_cursor.as_ref())
     {

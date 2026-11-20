@@ -45,7 +45,7 @@ const MAX_SESSION_EVENT_BATCH_BYTES: usize = 8 * 1024 * 1024;
 const TRUNCATED_SESSION_EVENT_MARKER: &str = "… [truncated]";
 const MAX_MUTATION_PROPOSAL_CONTENT_BYTES: usize = 2 * 1024 * 1024;
 /// Bump when additive schema migrations change so reopen skips table_info scans.
-pub(crate) const SESSION_STORE_SCHEMA_VERSION: i32 = 17;
+pub(crate) const SESSION_STORE_SCHEMA_VERSION: i32 = 18;
 /// Ceiling for one delete's sub-agent cleanup, so a cycle in the data — which
 /// the write path cannot create — cannot spin forever.
 const MAX_SUBAGENT_SESSION_TREE: usize = 256;
@@ -1057,6 +1057,39 @@ impl SessionStore {
         )?;
         self.get_mutation_proposal(proposal.id)?
             .ok_or_else(|| anyhow!("mutation proposal was not persisted"))
+    }
+
+    pub(crate) fn save_recorded_edit(&self, edit: &crate::mutations::RecordedEdit) -> Result<()> {
+        self.conn.execute(
+            "insert into recorded_edits(id,session_id,turn_id,workspace_path,entries_json)
+             values (?1,?2,?3,?4,?5)",
+            params![
+                edit.id.to_string(), edit.session_id.to_string(), edit.turn_id.to_string(),
+                edit.workspace.to_str().context("workspace path is not Unicode")?,
+                serde_json::to_vec(&edit.entries)?,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn recorded_edit(
+        &self, session_id: Uuid, turn_id: Uuid, id: Uuid,
+    ) -> Result<Option<crate::mutations::RecordedEdit>> {
+        self.conn.query_row(
+            "select workspace_path,entries_json from recorded_edits where session_id=?1 and turn_id=?2 and id=?3",
+            params![session_id.to_string(), turn_id.to_string(), id.to_string()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?)),
+        ).optional()?.map(|(workspace, entries)| {
+            Ok(crate::mutations::RecordedEdit {
+                id, session_id, turn_id, workspace: PathBuf::from(workspace),
+                entries: serde_json::from_slice(&entries)?,
+            })
+        }).transpose()
+    }
+
+    pub(crate) fn remove_recorded_edit(&self, id: Uuid) -> Result<()> {
+        self.conn.execute("delete from recorded_edits where id=?1", [id.to_string()])?;
+        Ok(())
     }
 
     pub fn get_mutation_proposal(&self, proposal_id: Uuid) -> Result<Option<MutationProposal>> {
@@ -2338,6 +2371,18 @@ impl SessionStore {
 
              create index if not exists idx_provider_session_bindings_updated_at
              on provider_session_bindings(updated_at desc);
+
+             create table if not exists recorded_edits (
+               id text primary key not null,
+               session_id text not null,
+               turn_id text not null,
+               workspace_path text not null,
+               entries_json blob not null,
+               foreign key (session_id) references sessions(id) on delete cascade
+             );
+
+             create index if not exists idx_recorded_edits_session_turn
+             on recorded_edits(session_id, turn_id);
 
              create table if not exists mutation_proposals (
                id text primary key not null,

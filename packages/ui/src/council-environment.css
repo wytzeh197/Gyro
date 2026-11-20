@@ -1,0 +1,228 @@
+/* Environment card → Council section. */
+.gyro-council-env {
+  border-top: 1px solid var(--gyro-border-soft);
+}
+.gyro-council-env-row {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.gyro-council-env-row:hover {
+  color: var(--gyro-text);
+}
+.gyro-council-env-row > svg:first-child {
+  flex: none;
+}
+.gyro-council-env-row .gyro-env-card-mono {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+}
+.gyro-council-env-row .gyro-env-card-mono .gyro-provider-logo {
+  width: 12px;
+  height: 12px;
+}
+.gyro-council-env.is-live .gyro-council-env-row {
+  color: var(--gyro-text);
+}
+.gyro-council-env-body {
+  display: grid;
+  gap: 6px;
+  padding: 2px 10px 10px;
+  font-size: var(--gyro-font-caption);
+}
+.gyro-council-env-body[hidden] {
+  display: none;
+}
+.gyro-council-env-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.gyro-council-env-label {
+  margin-top: 4px;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-tiny);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.gyro-council-env-seats,
+.gyro-council-env-options {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.gyro-council-env-seats li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  color: var(--gyro-text);
+}
+.gyro-council-env-model {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.gyro-council-env-model .gyro-provider-logo {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.gyro-council-env-status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-tiny);
+}
+.gyro-council-env-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gyro-border-strong);
+}
+.is-running .gyro-council-env-dot {
+  background: var(--gyro-accent);
+  animation: gyro-council-env-pulse 1.1s ease-in-out infinite;
+}
+.is-running .gyro-council-env-status {
+  color: var(--gyro-text);
+}
+.is-done .gyro-council-env-dot {
+  background: var(--gyro-success, #3fb950);
+}
+.is-failed .gyro-council-env-dot {
+  background: var(--gyro-danger, #f85149);
+}
+.is-failed .gyro-council-env-status {
+  color: var(--gyro-danger, #f85149);
+}
+.is-queued {
+  opacity: 0.7;
+}
+@keyframes gyro-council-env-pulse {
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-running .gyro-council-env-dot { animation: none; }
+}
+.gyro-council-env-writer,
+.gyro-council-env-options button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  color: var(--gyro-text);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.gyro-council-env-writer:hover:not(:disabled),
+.gyro-council-env-options button:hover {
+  background: var(--gyro-control-hover);
+}
+.gyro-council-env-writer em {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-tiny);
+  font-style: normal;
+}
+.gyro-council-env-writer > svg {
+  flex: none;
+  color: var(--gyro-muted);
+}
+.gyro-council-env-options {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 3px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  background: var(--gyro-control-bg);
+}
+.gyro-council-env-options button {
+  border-color: transparent;
+}
+.gyro-council-env-options button[aria-selected="true"] {
+  background: color-mix(in srgb, var(--gyro-accent) 14%, transparent);
+}
+.gyro-council-env-options button.is-reset {
+  color: var(--gyro-muted);
+}
+.gyro-council-env-note {
+  margin: 0;
+  color: var(--gyro-muted);
+}
+.gyro-council-env-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 4px;
+}
+.gyro-council-env-scope {
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+}
+.gyro-council-env-scope button {
+  min-height: 22px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: calc(var(--gyro-radius-sm) - 1px);
+  color: var(--gyro-muted);
+  background: transparent;
+  font: inherit;
+  font-size: var(--gyro-font-tiny);
+  cursor: pointer;
+}
+.gyro-council-env-scope button.is-selected {
+  color: var(--gyro-ink-text, #111);
+  background: var(--gyro-ink-bg, var(--gyro-text));
+}
+.gyro-council-env-cost {
+  flex: 1 1 100%;
+  min-width: 0;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-tiny);
+}
+.gyro-council-env-writer {
+  min-width: 0;
+}
+.gyro-council-env-writer .gyro-council-env-model {
+  min-width: 0;
+}
+.gyro-council-env-model > .gyro-env-card-ellipsis {
+  min-width: 0;
+}
+/* Composer: the Council chip opens the Environment card; × removes it. */
+.gyro-council-chip-group {
+  display: inline-flex;
+  align-items: center;
+}
+.gyro-council-chip-group .gyro-composer-chip.is-council {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-right: 6px;
+}
+.gyro-council-chip-group .gyro-council-chip-x {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding: 0 6px;
+  margin-left: -1px;
+}

@@ -1,4 +1,6 @@
+import { SurfacePresence } from "./surface-presence";
 import { gitSetupMessage } from "./workspace-preparation";
+import { githubSetupStep, type GithubSetupAction } from "./github-setup";
 import {
   RemoteProjectIndicator,
   RemoteProjectNavigation,
@@ -806,8 +808,11 @@ export function WorkspaceSidebarContent({
   branchCatalog,
   isBranchLoading = false,
   onSelectWorkspaceBranch,
+  onOpenBranchPicker,
   onCreateWorkspaceBranch,
   onRefreshGithub,
+  onGithubSetup,
+  githubSetupRunning,
   onSelectGithubRun,
   onViewGithubRunLogs,
   onRerunGithubRun,
@@ -926,8 +931,11 @@ export function WorkspaceSidebarContent({
   branchCatalog?: GitBranchCatalog;
   isBranchLoading?: boolean;
   onSelectWorkspaceBranch?: (branch: string) => void;
+  onOpenBranchPicker?: () => void;
   onCreateWorkspaceBranch?: (startPoint?: string) => void;
   onRefreshGithub?: () => void | Promise<void>;
+  onGithubSetup?: (action: GithubSetupAction, hasCommits?: boolean) => void | Promise<void>;
+  githubSetupRunning?: GithubSetupAction;
   onSelectGithubRun?: (runId: number) => void | Promise<void>;
   onViewGithubRunLogs?: (runId: number) => void | Promise<void>;
   onRerunGithubRun?: (
@@ -2397,7 +2405,7 @@ export function WorkspaceSidebarContent({
                   Open a folder to browse and edit its files.
                 </div>
               )}
-              {explorerContextMenu ? (
+              <SurfacePresence>{explorerContextMenu ? (
                 <div
                   className="gyro-explorer-context-menu"
                   ref={explorerContextMenuRef}
@@ -2578,7 +2586,7 @@ export function WorkspaceSidebarContent({
                       : "Delete"}
                   </button>
                 </div>
-              ) : null}
+              ) : null}</SurfacePresence>
             </SidebarSection>
           ) : null}
 
@@ -2888,6 +2896,7 @@ export function WorkspaceSidebarContent({
                             : undefined)
                         }
                         isLoading={isBranchLoading}
+                        onOpenBranchPicker={onOpenBranchPicker}
                         onCreateBranch={() =>
                           onCreateWorkspaceBranch?.(
                             ide?.sourceControl.branch ?? branchCatalog?.current,
@@ -3421,8 +3430,11 @@ export function WorkspaceSidebarContent({
                   <GithubSidebarPanel
                     github={ide?.github}
                     branch={ide?.sourceControl.branch}
+                    sourceControl={ide?.sourceControl}
                     onOpenUrl={onOpenGithubUrl}
                     onRefresh={onRefreshGithub}
+                    onSetup={onGithubSetup}
+                    setupRunning={githubSetupRunning}
                     onRerunRun={onRerunGithubRun}
                     onSelectRun={onSelectGithubRun}
                     onViewLogs={onViewGithubRunLogs}
@@ -3833,7 +3845,7 @@ export function WorkspaceSidebarContent({
                 <Plus size={15} />
                 New session
               </button>
-              {newSessionMenuView !== "closed" ? (
+              <SurfacePresence>{newSessionMenuView !== "closed" ? (
                 <div
                   aria-label="Create Chat or CLI session"
                   className="gyro-sidebar-new-session-menu is-root"
@@ -3983,7 +3995,7 @@ export function WorkspaceSidebarContent({
                     </div>
                   ) : null}
                 </div>
-              ) : null}
+              ) : null}</SurfacePresence>
             </div>
             <button
               aria-label="Search"
@@ -4767,7 +4779,7 @@ export function SessionSidebarRow({
           ) : null}
         </div>
       ) : null}
-      {isMenuOpen ? (
+      <SurfacePresence>{isMenuOpen ? (
         <div className="gyro-session-menu" ref={menuRef} role="menu">
           <CheckWorkMenuItem
             sessionId={session.id}
@@ -4799,7 +4811,7 @@ export function SessionSidebarRow({
             Delete
           </button>
         </div>
-      ) : null}
+      ) : null}</SurfacePresence>
     </div>
   );
 }
@@ -5905,6 +5917,7 @@ export function ScmBranchPicker({
   isLoading = false,
   onCreateBranch,
   onSelectBranch,
+  onOpenBranchPicker,
 }: {
   branchCatalog?: GitBranchCatalog;
   currentBranch?: string;
@@ -5913,6 +5926,7 @@ export function ScmBranchPicker({
   isLoading?: boolean;
   onCreateBranch?: () => void;
   onSelectBranch?: (branch: string) => void;
+  onOpenBranchPicker?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -5970,6 +5984,7 @@ export function ScmBranchPicker({
           }
           setQuery("");
           setOpen(true);
+          onOpenBranchPicker?.();
         }}
         ref={triggerRef}
         title={error ?? label}
@@ -5979,126 +5994,123 @@ export function ScmBranchPicker({
         <span>{isLoading ? "Loading…" : label}</span>
         <ChevronDown size={12} aria-hidden="true" />
       </button>
-      {open
-        ? createPortal(
-            // The repository section clips overflow, so this menu has to live
-            // on document.body or the current branch is cut off over the form.
-            <div
-              className="gyro-scm-branch-menu"
-              ref={menuRef}
-              role="menu"
-              aria-label="Local branches"
-              style={menuStyle}
+      <SurfacePresence portal="body">
+        {open ? (
+          <div
+            className="gyro-scm-branch-menu"
+            ref={menuRef}
+            role="menu"
+            aria-label="Local branches"
+            style={menuStyle}
+          >
+            {branches.length >= 6 ? (
+              <label className="gyro-composer-menu-search">
+                <Search size={12} aria-hidden="true" />
+                <input
+                  aria-label="Find branch"
+                  autoFocus
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "ArrowDown" && event.key !== "ArrowUp")
+                      return;
+                    const rows =
+                      menuRef.current?.querySelectorAll<HTMLButtonElement>(
+                        '[role="menuitem"]:not(.is-action):not(:disabled)',
+                      );
+                    const row =
+                      event.key === "ArrowDown"
+                        ? rows?.[0]
+                        : rows?.[rows.length - 1];
+                    if (row) {
+                      event.preventDefault();
+                      row.focus();
+                    }
+                  }}
+                  placeholder="Find branch…"
+                  spellCheck={false}
+                  type="search"
+                  value={query}
+                />
+              </label>
+            ) : null}
+            <button
+              className="gyro-scm-branch-item is-action"
+              disabled={disabled || isLoading}
+              onClick={() => {
+                setOpen(false);
+                onCreateBranch?.();
+              }}
+              role="menuitem"
+              type="button"
             >
-              {branches.length >= 6 ? (
-                <label className="gyro-composer-menu-search">
-                  <Search size={12} aria-hidden="true" />
-                  <input
-                    aria-label="Find branch"
-                    autoFocus
-                    onChange={(event) => setQuery(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key !== "ArrowDown" && event.key !== "ArrowUp")
-                        return;
-                      const rows =
-                        menuRef.current?.querySelectorAll<HTMLButtonElement>(
-                          '[role="menuitem"]:not(.is-action):not(:disabled)',
-                        );
-                      const row =
-                        event.key === "ArrowDown"
-                          ? rows?.[0]
-                          : rows?.[rows.length - 1];
-                      if (row) {
-                        event.preventDefault();
-                        row.focus();
-                      }
-                    }}
-                    placeholder="Find branch…"
-                    spellCheck={false}
-                    type="search"
-                    value={query}
-                  />
-                </label>
-              ) : null}
-              <button
-                className="gyro-scm-branch-item is-action"
-                disabled={disabled || isLoading}
-                onClick={() => {
-                  setOpen(false);
-                  onCreateBranch?.();
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <GitBranchPlus size={12} aria-hidden="true" />
-                Create new branch…
-              </button>
-              {branches.length === 0 ? (
-                <div className="gyro-scm-branch-empty">
-                  {branchCatalog?.error ?? error ?? "No local branches found."}
-                </div>
-              ) : visibleBranches.length === 0 ? (
-                <div className="gyro-scm-branch-empty" role="status">
-                  No matching branches
-                </div>
-              ) : (
-                visibleBranches.map(
-                  ({
-                    name: branch,
-                    current: isCurrent,
-                    latest,
-                    committedAt,
-                  }) => {
-                    const detail = branchCommitDetail(committedAt);
-                    return (
-                      <button
-                        aria-current={isCurrent ? "true" : undefined}
-                        disabled={disabled || isLoading}
-                        className={[
-                          "gyro-scm-branch-item",
-                          isCurrent ? "is-current" : "",
-                        ]
-                          .filter(Boolean)
-                          .join(" ")}
-                        key={branch}
-                        onClick={() => {
-                          setOpen(false);
-                          if (!isCurrent) {
-                            onSelectBranch?.(branch);
-                          }
-                        }}
-                        role="menuitem"
-                        title={[
-                          branch,
-                          detail,
-                          latest ? "Latest local commit" : undefined,
-                        ]
-                          .filter(Boolean)
-                          .join(" — ")}
-                        type="button"
-                      >
-                        <GitBranch size={12} aria-hidden="true" />
-                        <span className="gyro-scm-branch-copy">
-                          <span className="gyro-scm-branch-name">{branch}</span>
-                          {latest ? (
-                            <em className="gyro-scm-branch-badge">
-                              Latest commit
-                            </em>
-                          ) : null}
-                          {detail ? <small>{detail}</small> : null}
-                        </span>
-                        {isCurrent ? (
-                          <Check size={12} aria-hidden="true" />
+              <GitBranchPlus size={12} aria-hidden="true" />
+              Create new branch…
+            </button>
+            {branches.length === 0 ? (
+              <div className="gyro-scm-branch-empty">
+                {branchCatalog?.error ?? error ?? "No local branches found."}
+              </div>
+            ) : visibleBranches.length === 0 ? (
+              <div className="gyro-scm-branch-empty" role="status">
+                No matching branches
+              </div>
+            ) : (
+              visibleBranches.map(
+                ({
+                  name: branch,
+                  current: isCurrent,
+                  latest,
+                  committedAt,
+                }) => {
+                  const detail = branchCommitDetail(committedAt);
+                  return (
+                    <button
+                      aria-current={isCurrent ? "true" : undefined}
+                      disabled={disabled || isLoading}
+                      className={[
+                        "gyro-scm-branch-item",
+                        isCurrent ? "is-current" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                      key={branch}
+                      onClick={() => {
+                        setOpen(false);
+                        if (!isCurrent) {
+                          onSelectBranch?.(branch);
+                        }
+                      }}
+                      role="menuitem"
+                      title={[
+                        branch,
+                        detail,
+                        latest ? "Latest local commit" : undefined,
+                      ]
+                        .filter(Boolean)
+                        .join(" — ")}
+                      type="button"
+                    >
+                      <GitBranch size={12} aria-hidden="true" />
+                      <span className="gyro-scm-branch-copy">
+                        <span className="gyro-scm-branch-name">{branch}</span>
+                        {latest ? (
+                          <em className="gyro-scm-branch-badge">
+                            Latest commit
+                          </em>
                         ) : null}
-                      </button>
-                    );
-                  },
-                )
-              )}
-            </div>,
-            document.body,
-          )
-        : null}
+                        {detail ? <small>{detail}</small> : null}
+                      </span>
+                      {isCurrent ? (
+                        <Check size={12} aria-hidden="true" />
+                      ) : null}
+                    </button>
+                  );
+                },
+              )
+            )}
+          </div>
+        ) : null}
+      </SurfacePresence>
     </div>
   );
 }
@@ -6110,7 +6122,10 @@ export function GithubSidebarPanel({
   onRefresh,
   onRerunRun,
   onSelectRun,
+  onSetup,
   onViewLogs,
+  setupRunning,
+  sourceControl,
 }: {
   github?: GithubState;
   branch?: string;
@@ -6118,10 +6133,32 @@ export function GithubSidebarPanel({
   onRefresh?: () => void | Promise<void>;
   onRerunRun?: (runId: number, failedOnly: boolean) => void | Promise<void>;
   onSelectRun?: (runId: number) => void | Promise<void>;
+  onSetup?: (action: GithubSetupAction, hasCommits?: boolean) => void | Promise<void>;
   onViewLogs?: (runId: number) => void | Promise<void>;
+  setupRunning?: GithubSetupAction;
+  sourceControl?: SourceControlState;
 }) {
-  const [expanded, setExpanded] = useState(false);
   const availability = github?.availability;
+  const setupStep = onSetup ? githubSetupStep(availability, sourceControl) : undefined;
+  // A step to take opens the panel, so "connect GitHub" is never hidden
+  // behind a chevron. Once the person toggles it, their choice wins.
+  const [expandedChoice, setExpanded] = useState<boolean>();
+  const expanded = expandedChoice ?? Boolean(setupStep);
+  const publishAccount = expanded && setupStep?.action === "publish"
+    ? availability?.account
+    : undefined;
+  const switchAccountButton =
+    onSetup && availability?.authenticated ? (
+      <button
+        className="gyro-sidebar-github-account-switch"
+        disabled={Boolean(setupRunning)}
+        onClick={() => void onSetup("switch")}
+        title="Runs gh auth switch in a terminal"
+        type="button"
+      >
+        {setupRunning === "switch" ? "Switching…" : "Switch account"}
+      </button>
+    ) : null;
   const header = (
     <div className="gyro-sidebar-scm-group-label is-github">
       <button
@@ -6130,13 +6167,20 @@ export function GithubSidebarPanel({
           expanded ? "Collapse GitHub details" : "Expand GitHub details"
         }
         className="gyro-sidebar-scm-group-toggle"
-        onClick={() => setExpanded((current) => !current)}
+        onClick={() => setExpanded(!expanded)}
         type="button"
       >
         {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
       </button>
       <span className="gyro-scm-label-text">GitHub</span>
-      {github?.loading ? <small>…</small> : null}
+      {!expanded && setupStep ? (
+        <small className="gyro-sidebar-github-setup-badge">Set up</small>
+      ) : null}
+      {publishAccount ? (
+        <small className="gyro-sidebar-github-publish-account" title={`@${publishAccount}`}>
+          @{publishAccount}
+        </small>
+      ) : github?.loading ? <small>…</small> : null}
       <button
         aria-label="Refresh GitHub"
         disabled={github?.loading}
@@ -6151,6 +6195,45 @@ export function GithubSidebarPanel({
 
   if (!expanded) {
     return header;
+  }
+
+  if (setupStep && onSetup) {
+    const isPublish = setupStep.action === "publish";
+    const running = setupRunning === setupStep.action;
+    const primaryAction = (
+      <button
+        className="gyro-sidebar-github-setup-primary"
+        disabled={Boolean(setupRunning)}
+        onClick={() => void onSetup(setupStep.action, setupStep.hasCommits)}
+        title={isPublish ? setupStep.command ?? "Opens in Terminal" : undefined}
+        type="button"
+      >
+        {running ? "Finish in terminal…" : setupStep.label}
+      </button>
+    );
+    return (
+      <>
+        {header}
+        <div className={`gyro-sidebar-github-setup is-${setupStep.action}`}>
+          {setupStep.title ? <strong>{setupStep.title}</strong> : null}
+          <p>{setupStep.detail}</p>
+          {isPublish ? (
+            <div className="gyro-sidebar-github-publish-actions">
+              {primaryAction}
+              {switchAccountButton}
+            </div>
+          ) : (
+            <>
+              {primaryAction}
+              <small>
+                Runs <code>{setupStep.command}</code> in a terminal. Gyro refreshes
+                when it finishes.
+              </small>
+            </>
+          )}
+        </div>
+      </>
+    );
   }
 
   if (!github || !availability?.available) {
@@ -6170,6 +6253,7 @@ export function GithubSidebarPanel({
             ? ` ${availability.hint}`
             : null}
         </div>
+        {switchAccountButton}
       </>
     );
   }
@@ -6191,6 +6275,16 @@ export function GithubSidebarPanel({
   return (
     <>
       {header}
+      {availability.account || availability.repository ? (
+        <div className="gyro-sidebar-github-account">
+          <span>
+            {availability.account ? `@${availability.account}` : null}
+            {availability.account && availability.repository ? " · " : null}
+            {availability.repository}
+          </span>
+          {switchAccountButton}
+        </div>
+      ) : null}
       {github.error ? (
         <div className="gyro-sidebar-mini-copy">{github.error}</div>
       ) : null}

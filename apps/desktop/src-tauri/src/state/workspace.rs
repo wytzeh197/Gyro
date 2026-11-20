@@ -20,6 +20,43 @@ pub(crate) struct WorkspaceWatchManager {
 pub(crate) struct WorkspaceRescanState {
     pub(crate) serials: HashMap<PathBuf, u64>,
     pub(crate) active_roots: HashSet<PathBuf>,
+    pub(crate) changes: HashMap<PathBuf, WorkspaceChanges>,
+}
+
+pub(crate) struct WorkspaceChanges {
+    // None indicates a dropped event or a batch too large to address by path.
+    pub(crate) paths: Option<HashSet<PathBuf>>,
+    pub(crate) branches: bool,
+    pub(crate) directory_entries: bool,
+    pub(crate) root_entries: bool,
+}
+
+impl Default for WorkspaceChanges {
+    fn default() -> Self {
+        Self {
+            paths: Some(HashSet::new()),
+            branches: false,
+            directory_entries: false,
+            root_entries: false,
+        }
+    }
+}
+
+impl WorkspaceChanges {
+    pub(crate) fn merge(&mut self, other: Self) {
+        self.branches |= other.branches;
+        self.directory_entries |= other.directory_entries;
+        self.root_entries |= other.root_entries;
+        match (&mut self.paths, other.paths) {
+            (Some(paths), Some(other)) => {
+                paths.extend(other);
+                if paths.len() > 256 {
+                    self.paths = None;
+                }
+            }
+            _ => self.paths = None,
+        }
+    }
 }
 
 impl WorkspaceRescanState {
@@ -50,6 +87,7 @@ impl WorkspaceRescanState {
     pub(crate) fn remove(&mut self, root: &Path) {
         self.serials.remove(root);
         self.active_roots.remove(root);
+        self.changes.remove(root);
     }
 }
 

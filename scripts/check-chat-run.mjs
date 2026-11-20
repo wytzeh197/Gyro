@@ -1295,10 +1295,17 @@ for (const [status, label] of [
 ]) {
   const item = workItemFromEvent({
     ...launch,
-    payload: { ...launch.payload, status },
+    payload: { ...launch.payload, status, summary: "Delegation was denied" },
   });
   assert.equal(runRowText({ kind: "work", item }).label, label);
+  if (status !== "running") {
+    assert.equal(runRowText({ kind: "work", item }).description, "Delegation was denied");
+  }
 }
+assert.deepEqual(
+  buildRunModel([], { status: { status: "interrupted", error: "Tool limit reached" } }).phase,
+  { name: "interrupted", detail: "Tool limit reached" },
+);
 
 // Commentary is prose, never a work row or a generic system-event card.
 assert.equal(

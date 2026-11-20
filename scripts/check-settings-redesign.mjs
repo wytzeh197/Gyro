@@ -259,6 +259,30 @@ try {
         before,
       );
     });
+    await test("automatic updates require opt-in and respect automatic checks", async () => {
+      await navigate("updates", "dark", "state=ready");
+      const autoUpdates = `document.querySelector('[role="switch"][aria-label="Automatic updates"]')`;
+      const autoChecks = `document.querySelector('[role="switch"][aria-label="Automatic update checks"]')`;
+      assert.equal(await evaluate(`${autoUpdates}.getAttribute("aria-checked")`), "false");
+      assert.equal(await evaluate(`${autoChecks}.getAttribute("aria-checked")`), "true");
+      await evaluate(`${autoChecks}.click()`);
+      await until(() => evaluate(`${autoChecks}.getAttribute("aria-checked") === "false"`));
+      await evaluate(`${autoUpdates}.focus()`);
+      for (const type of ["keyDown", "keyUp"]) {
+        await call("Input.dispatchKeyEvent", {
+          type,
+          key: " ",
+          code: "Space",
+          windowsVirtualKeyCode: 32,
+        });
+      }
+      await until(() => evaluate(`${autoUpdates}.getAttribute("aria-checked") === "true"`));
+      assert.equal(await evaluate(`${autoChecks}.getAttribute("aria-checked")`), "true");
+      assert.ok(await evaluate(`document.querySelector(".gyro-update-summary").textContent.includes("the next time you quit")`));
+      await evaluate(`${autoChecks}.click()`);
+      await until(() => evaluate(`${autoUpdates}.getAttribute("aria-checked") === "false"`));
+      assert.ok(await evaluate(`document.querySelector(".gyro-update-summary").textContent.includes("Restart Gyro")`));
+    });
     await test("appearance theme changes and save failures remain visible", async () => {
       await navigate("appearance", "dark", "failSave");
       await evaluate(

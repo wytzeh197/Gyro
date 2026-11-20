@@ -71,9 +71,12 @@ pub(super) fn execute(
     assert_no_unsaved_editor_changes(app, bound, &path)?;
     let candidate =
         gyro_core::security::assert_path_inside_workspace(&bound.workspace, Path::new(&path))?;
-    let config = load_config_blocking().map_err(anyhow::Error::msg)?;
+    let config = crate::chat_permissions::for_active_turn(
+        app, &bound.session_id, load_config_blocking().map_err(anyhow::Error::msg)?,
+    );
     let apply_immediately = bound.policy.mode == CapabilityRunMode::Normal
-        && capability_full_access_enabled(&config)
+        && (capability_full_access_enabled(&config)
+            || (matches!(bound.provider_id.as_str(), "openai" | "anthropic") && !config.require_file_edit_approval))
         && delegated_agents::file_edit_ceiling(app, &bound.session_id);
 
     let store = open_store().map_err(anyhow::Error::msg)?;
@@ -233,40 +236,35 @@ fn string_replacement(
     }
     let text =
         String::from_utf8(bytes).map_err(|_| anyhow::anyhow!("{path} is not valid UTF-8 text"))?;
-    // Read both strings verbatim: leading indentation and a trailing newline
-    // are part of what the model is matching, so neither may be trimmed.
-    let old = arguments
-        .get("oldString")
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("capability argument `oldString` is required"))?;
-    let new = arguments
-        .get("newString")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            anyhow::anyhow!("capability argument `newString` is required; pass an empty string to delete the match")
-        })?;
-    if old == new {
-        anyhow::bail!("oldString and newString are identical; this edit would change nothing");
+    // The first replacement comes from the top-level arguments; `edits` adds
+    // more, applied in order to the result of the previous one. Any failure
+    // rejects the whole call, so a partial batch never becomes a proposal.
+    let mut steps = vec![(arguments, String::new())];
+    if let Some(extra) = arguments.get("edits").filter(|value| !value.is_null()) {
+        let extra = extra
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("capability argument `edits` must be an array"))?;
+        if extra.len() > MAX_BATCHED_EDITS {
+            anyhow::bail!("edits is limited to {MAX_BATCHED_EDITS} replacements per call");
+        }
+        for (index, step) in extra.iter().enumerate() {
+            if !step.is_object() {
+                anyhow::bail!("edits[{index}] must be an object");
+            }
+            steps.push((step, format!("edits[{index}].")));
+        }
     }
-    let replace_all = arguments
-        .get("replaceAll")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let count = text.matches(old).count();
-    if count == 0 {
-        anyhow::bail!(
-            "oldString was not found in {path}; re-read the file and match it exactly, including indentation"
-        );
+    let mut content = text;
+    let mut count = 0;
+    let mut line = 0;
+    for (step, label) in steps {
+        let (next, matched, matched_line) = replace_exactly(&content, step, &label, path)?;
+        if line == 0 {
+            line = matched_line;
+        }
+        content = next;
+        count += matched;
     }
-    if count > 1 && !replace_all {
-        anyhow::bail!(
-            "oldString matches {count} places in {path}; include more surrounding context or pass replaceAll: true"
-        );
-    }
-    let offset = text.find(old).unwrap_or(0);
-    let line = text[..offset].matches('\n').count() as u64 + 1;
-    let content = text.replace(old, new);
     if content.len() > MAX_WORKSPACE_FILE_EDIT_BYTES {
         anyhow::bail!("the edited file would exceed the Gyro edit size limit");
     }
@@ -279,6 +277,47 @@ fn string_replacement(
         count,
         line,
     })
+}
+
+const MAX_BATCHED_EDITS: usize = 50;
+
+/// Apply one oldString/newString pair. Read both strings verbatim: leading
+/// indentation and a trailing newline are part of what the model matches.
+fn replace_exactly(
+    text: &str,
+    step: &Value,
+    label: &str,
+    path: &str,
+) -> anyhow::Result<(String, usize, u64)> {
+    let old = step
+        .get("oldString")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("capability argument `{label}oldString` is required"))?;
+    let new = step.get("newString").and_then(Value::as_str).ok_or_else(|| {
+        anyhow::anyhow!("capability argument `{label}newString` is required; pass an empty string to delete the match")
+    })?;
+    if old == new {
+        anyhow::bail!("{label}oldString and {label}newString are identical; this edit would change nothing");
+    }
+    let replace_all = step
+        .get("replaceAll")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let count = text.matches(old).count();
+    if count == 0 {
+        anyhow::bail!(
+            "{label}oldString was not found in {path}; re-read the file and match it exactly, including indentation. No edits in this call were applied"
+        );
+    }
+    if count > 1 && !replace_all {
+        anyhow::bail!(
+            "{label}oldString matches {count} places in {path}; include more surrounding context or pass replaceAll: true. No edits in this call were applied"
+        );
+    }
+    let offset = text.find(old).unwrap_or(0);
+    let line = text[..offset].matches('\n').count() as u64 + 1;
+    Ok((text.replace(old, new), count, line))
 }
 
 #[derive(Debug)]
@@ -438,6 +477,21 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
                     "type": "boolean",
                     "description": "Replace every occurrence instead of failing when oldString is ambiguous."
                 },
+                "edits": {
+                    "type": "array",
+                    "maxItems": MAX_BATCHED_EDITS,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "oldString": { "type": "string" },
+                            "newString": { "type": "string" },
+                            "replaceAll": { "type": "boolean" }
+                        },
+                        "required": ["oldString", "newString"],
+                        "additionalProperties": false
+                    },
+                    "description": "More replacements in this file, applied in order after the first one. Use this instead of separate calls for several changes to one file. If any fails, none apply."
+                },
                 "expectedHash": {
                     "type": "string",
                     "description": "Optional guard from a prior read. An immediate edit still applies when this hash is stale but oldString matches the current file. A reviewed edit fails until the file is read again."
@@ -550,6 +604,49 @@ mod tests {
         assert_eq!(replacement.count, 1);
         assert_eq!(replacement.line, 2);
         assert_eq!(replacement.base_hash, content_hash(b"one\ntwo\nthree\n"));
+    }
+
+    #[test]
+    fn batched_edits_apply_in_order_or_not_at_all() {
+        let (_temp, target) = workspace_with_file("one\ntwo\nthree\n");
+        let root = target.parent().unwrap();
+        let replacement = string_replacement(
+            root,
+            &target,
+            "sample.ts",
+            &json!({
+                "oldString": "two", "newString": "TWO",
+                "edits": [
+                    { "oldString": "three", "newString": "3" },
+                    { "oldString": "TWO\n3", "newString": "2\n3" }
+                ]
+            }),
+        )
+        .unwrap();
+        assert_eq!(replacement.content, "one\n2\n3\n");
+        assert_eq!(replacement.count, 3);
+        assert_eq!(replacement.line, 2);
+
+        let error = string_replacement(
+            root,
+            &target,
+            "sample.ts",
+            &json!({
+                "oldString": "one", "newString": "ONE",
+                "edits": [{ "oldString": "missing", "newString": "x" }]
+            }),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("edits[0].oldString was not found"), "{error}");
+        assert!(error.contains("No edits in this call were applied"));
+        assert_eq!(fs::read_to_string(&target).unwrap(), "one\ntwo\nthree\n");
+
+        for bad in [json!("x"), json!(["x"]), json!(vec![json!({"oldString":"o","newString":"O"}); MAX_BATCHED_EDITS + 1])] {
+            let mut args = arguments("one", "ONE", false);
+            args["edits"] = bad;
+            assert!(string_replacement(root, &target, "sample.ts", &args).is_err());
+        }
     }
 
     #[test]

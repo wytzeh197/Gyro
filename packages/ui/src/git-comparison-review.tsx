@@ -1,4 +1,4 @@
-import { FileDiff, Files, GitPullRequest } from "lucide-react";
+import { FileDiff, Files, GitPullRequest, ShieldCheck } from "lucide-react";
 import "./review-design.css";
 import {
   useEffect,
@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { ReviewFileNavigator } from "./review-file-navigator";
 import { PlainDiffView } from "./plain-diff-view.tsx";
@@ -32,13 +33,16 @@ export type ComparisonDiffResult = {
 
 export function GitComparisonReview({
   scope,
+  initialFilePath,
   sourceControl,
   turnFiles,
   workspacePath,
+  onCheckWork,
   onLoadDiff,
   onOpenFile,
 }: {
   scope: ReviewScope;
+  initialFilePath?: string;
   sourceControl?: SourceControlState;
   turnFiles?: Array<{
     path: string;
@@ -47,6 +51,7 @@ export function GitComparisonReview({
     patches?: string[];
   }>;
   workspacePath?: string;
+  onCheckWork?: () => void;
   onLoadDiff?: (
     file: ReviewFile,
     comparison: "working-tree" | "index" | "branch",
@@ -57,7 +62,7 @@ export function GitComparisonReview({
     () => filesForReviewScope(scope, { sourceControl, turnFiles }),
     [scope, sourceControl, turnFiles],
   );
-  const [selectedPath, setSelectedPath] = useState<string>();
+  const [selectedPath, setSelectedPath] = useState(initialFilePath);
   const rootRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(true);
   const [filesChoice, setFilesChoice] = useState<boolean | undefined>(() => {
@@ -109,7 +114,10 @@ export function GitComparisonReview({
         .filter(Boolean)
         .join(" ")}
     >
-      <header className="gyro-review-scope" aria-label="Comparison scope">
+      <header
+        className={`gyro-review-scope${onCheckWork ? " has-check-action" : ""}`}
+        aria-label="Comparison scope"
+      >
         <div className="gyro-review-identity">
           <strong title={selected?.path}>
             {selected
@@ -117,35 +125,48 @@ export function GitComparisonReview({
               : reviewScopeTitle(scope)}
           </strong>
           {hasFiles ? (
-            <span>
+            <span className="gyro-review-scope-meta">
               <span>{reviewScopeTitle(scope)}</span>
-              <FileChangeCountBadges counts={totals} />
-              {" · "}
-              {listing.files.length}{" "}
-              {listing.files.length === 1 ? "file" : "files"}
+              <span>
+                · {listing.files.length}{" "}
+                {listing.files.length === 1 ? "file" : "files"}
+              </span>
+              <FileChangeCountBadges counts={totals} showUnknown={false} />
             </span>
           ) : null}
         </div>
         {hasFiles ? (
-          <button
-            className="gyro-review-files-toggle"
-            type="button"
-            aria-controls={fileListId}
-            aria-expanded={showFiles}
-            onClick={() => {
-              const next = !showFiles;
-              setFilesChoice(next);
-              try {
-                localStorage.setItem("gyro.review.show-files", String(next));
-              } catch {
-                // Keep the in-memory choice when storage is unavailable.
-              }
-            }}
-            title={showFiles ? "Hide changed files" : "Show changed files"}
-          >
-            <Files size={14} aria-hidden="true" />
-            Files
-          </button>
+          <span className="gyro-review-scope-actions">
+            {onCheckWork ? (
+              <button
+                className="gyro-review-scope-button"
+                type="button"
+                onClick={onCheckWork}
+              >
+                <ShieldCheck size={14} aria-hidden="true" />
+                Check this work
+              </button>
+            ) : null}
+            <button
+              className="gyro-review-scope-button gyro-review-files-toggle"
+              type="button"
+              aria-controls={fileListId}
+              aria-expanded={showFiles}
+              onClick={() => {
+                const next = !showFiles;
+                setFilesChoice(next);
+                try {
+                  localStorage.setItem("gyro.review.show-files", String(next));
+                } catch {
+                  // Keep the in-memory choice when storage is unavailable.
+                }
+              }}
+              title={showFiles ? "Hide changed files" : "Show changed files"}
+            >
+              <Files size={14} aria-hidden="true" />
+              Files
+            </button>
+          </span>
         ) : null}
       </header>
       <div className="gyro-review-workspace">
@@ -221,62 +242,58 @@ function ScopedDiffPane({
         ))}
       </select>
     ) : null;
-  const compareButton = (
+  const compareButton = props.onLoadDiff ? (
     <button
-      title={
-        showCurrent
-          ? "Show the diff this turn recorded"
-          : "Compare against the file as it is now"
-      }
       type="button"
-      onClick={() => setShowCurrent(!showCurrent)}
+      onClick={() => setShowCurrent((current) => !current)}
     >
-      {showCurrent ? "Recorded turn" : "Current file"}
+      {showCurrent ? "Back to recorded turn" : "Compare working tree"}
     </button>
+  ) : null;
+  const controls = (editPicker || compareButton) && (
+    <span className="gyro-recorded-diff-controls">
+      {editPicker}
+      {compareButton}
+    </span>
   );
-  // A recorded patch folds its controls into the diff's own toolbar: one row
-  // instead of a "Recorded turn" row stacked above a sections row.
-  const foldsToolbar = !showCurrent && patches.length > 0;
+  if (showCurrent) {
+    return (
+      <ComparisonDiffPane
+        {...props}
+        toolbarAction={
+          <span className="gyro-recorded-diff-controls">{compareButton}</span>
+        }
+      />
+    );
+  }
   return (
-    <div className="gyro-comparison-diff-pane gyro-recorded-diff-pane">
-      {foldsToolbar ? null : (
-        <div className="gyro-diff-review-toolbar">
-          <strong>
-            {showCurrent ? "Current working tree" : "Recorded turn"}
-          </strong>
-          <div className="gyro-recorded-diff-controls">{compareButton}</div>
-        </div>
-      )}
-      {showCurrent ? (
-        <ComparisonDiffPane {...props} />
-      ) : patches.length ? (
+    <div className="gyro-comparison-diff-pane">
+      {patches.length ? (
         <PlainDiffView
           key={selectedEdit}
-          actions={
-            <span className="gyro-recorded-diff-controls">
-              {editPicker}
-              {compareButton}
-            </span>
-          }
+          actions={controls}
           diff={patches[selectedEdit]!}
           lead="Recorded turn"
         />
       ) : (
-        <div className="gyro-diff-empty-state">
-          <strong>Historical diff unavailable</strong>
+        <div className="gyro-diff-empty-state" role="status">
+          <FileDiff size={18} aria-hidden="true" />
+          <strong>No patch was saved for this turn</strong>
           <span>
-            This turn recorded the file and its counts, but no patch was saved.
             The current working tree may have changed since then.
           </span>
-          {props.onOpenFile ? (
-            <button
-              className="gyro-secondary-button"
-              type="button"
-              onClick={() => props.onOpenFile?.(props.file.path)}
-            >
-              Open current file
-            </button>
-          ) : null}
+          <div className="gyro-plain-diff-actions gyro-review-recovery-actions">
+            {props.onOpenFile ? (
+              <button
+                className="gyro-secondary-button"
+                type="button"
+                onClick={() => props.onOpenFile?.(props.file.path)}
+              >
+                Open current file
+              </button>
+            ) : null}
+            {compareButton}
+          </div>
         </div>
       )}
     </div>
@@ -288,6 +305,7 @@ function ComparisonDiffPane({
   file,
   onLoadDiff,
   onOpenFile,
+  toolbarAction,
   workspacePath,
 }: {
   comparison: "working-tree" | "index" | "branch";
@@ -297,6 +315,7 @@ function ComparisonDiffPane({
     comparison: "working-tree" | "index" | "branch",
   ) => Promise<ComparisonDiffResult>;
   onOpenFile?: (path: string) => void;
+  toolbarAction?: ReactNode;
   workspacePath?: string;
 }) {
   const [state, setState] = useState<
@@ -347,19 +366,17 @@ function ComparisonDiffPane({
       : comparison === "index"
         ? "HEAD ↔ Index"
         : "Index ↔ Working Tree";
+  const previewUnavailable =
+    state.kind === "ready" && state.result.notice && !state.result.unified;
 
   return (
     <div className="gyro-comparison-diff-pane">
-      <div className="gyro-diff-review-toolbar">
-        <div>
-          <strong title={file.path}>{relative.split("/").at(-1)}</strong>
-          <span title={file.path}>{relative}</span>
+      {state.kind !== "ready" || previewUnavailable ? (
+        <div className="gyro-diff-review-toolbar">
+          <strong>{scopeLabel}</strong>
+          {toolbarAction}
         </div>
-        <div className="gyro-review-file-meta">
-          <FileChangeCountBadges counts={file} />
-          <span>{scopeLabel}</span>
-        </div>
-      </div>
+      ) : null}
       {state.kind === "loading" ? (
         <div className="gyro-diff-empty-state" role="status">
           <FileDiff size={18} />
@@ -392,7 +409,7 @@ function ComparisonDiffPane({
             ) : null}
           </div>
         </div>
-      ) : state.result.notice && !state.result.unified ? (
+      ) : previewUnavailable ? (
         <div className="gyro-diff-empty-state" role="status">
           <FileDiff size={18} />
           <strong>Preview unavailable</strong>
@@ -418,6 +435,8 @@ function ComparisonDiffPane({
         </div>
       ) : (
         <PlainDiffView
+          actions={toolbarAction}
+          lead={scopeLabel}
           diff={
             state.result.unified?.trim() ||
             syntheticUnified(

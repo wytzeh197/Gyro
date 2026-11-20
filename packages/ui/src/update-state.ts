@@ -73,6 +73,8 @@ export function updateSizeLabel(state: UpdateState) {
 /** Short, human status phrase shared by the Settings hero and its badge. */
 export function updateStatusLabel(state?: UpdateState) {
   switch (state?.status) {
+    case "idle":
+      return "Ready to check";
     case "downloading":
       return state.progressPercent === undefined
         ? "Downloading…"
@@ -123,14 +125,17 @@ export function updateStatusLevel(state?: UpdateState): UpdateStatusLevel {
     "available", where a sentence would only restate the button. */
 export function updateStatusSummary(
   state?: UpdateState,
+  automaticUpdates = false,
 ): string | undefined {
   switch (state?.status) {
+    case "idle":
+      return undefined;
     case "development":
       return "The updater is off in development builds. Nothing is contacted and no release is installed.";
     case "checking":
       return "Asking GitHub Releases for the newest signed Beta build.";
     case "current":
-      return "You are on the newest signed Beta. Gyro keeps checking in the background.";
+      return "You are on the newest signed Beta.";
     case "available":
       // The dot reads "Update available" and the primary button already names
       // the build to fetch, so there is nothing left for a sentence to add.
@@ -139,9 +144,11 @@ export function updateStatusSummary(
     case "downloading":
       return "Downloading the signed archive. Gyro keeps working while it finishes.";
     case "ready":
-      return "Downloaded and signature-verified. Restart Gyro to finish installing.";
+      return automaticUpdates
+        ? "Gyro will install this update the next time you quit."
+        : "Downloaded and signature-verified. Restart Gyro to finish installing.";
     case "installing":
-      return "Installing the verified build. Gyro restarts as soon as it is done.";
+      return "Installing the verified build.";
     case "failed":
       return (
         state.error ??
@@ -228,7 +235,10 @@ export function updateFacts(state?: UpdateState): UpdateFact[] {
 
 /** One line for the status live region: the outcome a screen reader should hear
     after a check, a download, or a failure. Empty when nothing has changed. */
-export function updateAnnouncement(state?: UpdateState): string {
+export function updateAnnouncement(
+  state?: UpdateState,
+  automaticUpdates = false,
+): string {
   switch (state?.status) {
     case "available":
       return state.nextVersion
@@ -239,9 +249,11 @@ export function updateAnnouncement(state?: UpdateState): string {
         ? "Downloading the update"
         : `Downloading the update, ${state.progressPercent}%`;
     case "ready":
-      return "Update downloaded. Restart Gyro to install it.";
+      return automaticUpdates
+        ? "Update downloaded. Gyro will install it when you quit."
+        : "Update downloaded. Restart Gyro to install it.";
     case "installing":
-      return "Installing the update. Gyro restarts when it finishes.";
+      return "Installing the update.";
     case "failed":
       return "The update did not finish. Try it again from Settings.";
     case "current":

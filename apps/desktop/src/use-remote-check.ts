@@ -36,7 +36,7 @@ export function useRemoteCheck({
   currentRoot: React.RefObject<string | undefined>;
   dispatch: React.Dispatch<WorkbenchAction>;
   notify: (kind: "command-failed", title: string, detail: string) => void;
-  onBranchesChanged?: (root: string) => void;
+  onBranchesChanged?: (root: string, quiet: boolean) => void;
 }) {
   const [remoteCheck, setRemoteCheck] = useState<RemoteCheck>();
   const inFlight = useRef(new Set<string>());
@@ -77,7 +77,7 @@ export function useRemoteCheck({
             type: "ide-set-source-control",
             sourceControl: result.status,
           });
-          onBranchesChanged?.(root);
+          onBranchesChanged?.(root, quiet);
         }
         setRemoteCheck({ root, branch, status: "checked" });
       } catch (error) {
@@ -101,13 +101,32 @@ export function useRemoteCheck({
   );
 
   useEffect(() => {
-    if (!visible || !upstream || !branch) return;
-    void checkRemoteChanges(true);
-    const timer = window.setInterval(() => {
+    if (!visible || !upstream || !branch || !trusted) return;
+    let lastCheck: number | undefined;
+    const refresh = () => {
+      if (
+        document.visibilityState !== "visible" ||
+        !document.hasFocus() ||
+        navigator.onLine === false
+      )
+        return;
+      const now = Date.now();
+      if (lastCheck !== undefined && now - lastCheck < 55_000) return;
+      lastCheck = now;
       void checkRemoteChanges(true);
-    }, 60_000);
-    return () => window.clearInterval(timer);
-  }, [branch, checkRemoteChanges, upstream, visible]);
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 60_000);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("online", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("online", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [branch, checkRemoteChanges, trusted, upstream, visible]);
 
   const current =
     remoteCheck?.root === root && remoteCheck?.branch === branch

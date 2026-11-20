@@ -1,15 +1,15 @@
-/* Codex-style effort control: the whole track is a pill, with native range
-   keyboard/pointer behavior. Insets align the stops with the thumb's travel. */
-/* The level reads on the left; Fast mode is a named toggle on the right, so
-   neither floats alone above a centred label. */
+.gyro-effort-slider-popover {
+  --effort-color: var(--gyro-accent);
+}
+.gyro-effort-slider-popover[data-max-effort="true"] {
+  --effort-color: var(--gyro-effort-max);
+}
 .gyro-effort-slider-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  min-height: calc(24px * var(--gyro-ui-scale, 1));
-  margin-bottom: calc(10px * var(--gyro-ui-scale, 1));
-  padding-inline-start: 2px;
+  gap: var(--gyro-space-standard);
+  min-height: var(--gyro-control-compact);
 }
 .gyro-effort-slider-header button {
   appearance: none;
@@ -19,20 +19,12 @@
   cursor: pointer;
   padding: 0;
 }
-.gyro-effort-slider-heading {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-}
 .gyro-effort-slider-header .gyro-effort-value {
-  display: flex;
-  align-items: center;
-  gap: 2.85px;
+  min-width: 0;
   overflow: hidden;
-  color: var(--gyro-accent);
+  color: var(--effort-color);
   font-size: var(--gyro-font-body);
   font-weight: 600;
-  line-height: calc(20.9px * var(--gyro-ui-scale, 1));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -69,90 +61,72 @@
   outline: 1.9px solid var(--gyro-accent);
   outline-offset: 2px;
 }
+/* The hit area determines pointer travel. The rail and thumb share its centerline. */
 .gyro-effort-slider {
+  --effort-hit-size: var(--gyro-effort-thumb-size);
+  --effort-rail-size: calc(
+    var(--gyro-space-standard) * var(--gyro-ui-scale, 1)
+  );
+  --effort-knob-size: var(--gyro-space-panel);
+  --effort-rail-color: color-mix(
+    in srgb,
+    var(--gyro-text) 15%,
+    var(--gyro-surface)
+  );
   position: relative;
-  height: var(--gyro-effort-thumb-size);
-  --effort-thumb-size: var(--gyro-effort-thumb-size);
+  height: var(--effort-hit-size);
 }
 .gyro-effort-slider-track {
   position: absolute;
-  inset: 1.9px 0;
-  border-radius: var(--gyro-radius-pill);
-  background: color-mix(in srgb, var(--gyro-text) 10%, var(--gyro-surface));
-  box-shadow: inset 0 0 0 1px
-    color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  inset-block: calc((var(--effort-hit-size) - var(--effort-rail-size)) / 2);
+  inset-inline: calc((var(--effort-hit-size) - var(--effort-rail-size)) / 2);
   overflow: hidden;
+  border-radius: var(--gyro-radius-pill);
+  background: var(--effort-rail-color);
 }
 .gyro-effort-slider-fill {
   height: 100%;
   width: calc(
-    var(--effort-thumb-size) / 2 + (100% - var(--effort-thumb-size)) *
+    var(--effort-rail-size) / 2 + (100% - var(--effort-rail-size)) *
       var(--effort-progress)
   );
   border-radius: inherit;
-  background: linear-gradient(
-    100deg,
-    color-mix(in srgb, var(--gyro-accent) 88%, var(--gyro-surface)) 0%,
-    var(--gyro-accent) 58%,
-    color-mix(in srgb, var(--gyro-accent) 82%, var(--gyro-effort-thumb-ink))
-      100%
-  );
-  box-shadow:
-    inset 0 1px 0
-      color-mix(in srgb, var(--gyro-effort-thumb-ink) 22%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, var(--gyro-surface) 14%, transparent);
+  background: var(--effort-color);
+  transition: width var(--gyro-premium-motion) var(--gyro-premium-ease);
 }
 .gyro-effort-slider-stops {
   position: absolute;
-  inset: 0 calc(var(--effort-thumb-size) / 2);
+  inset: 0 calc(var(--effort-hit-size) / 2);
   display: flex;
   align-items: center;
   justify-content: space-between;
   pointer-events: none;
 }
 .gyro-effort-slider-stops span {
-  width: 3.8px;
-  height: 3.8px;
-  margin: 0 -1.9px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--gyro-text) 28%, transparent);
+  width: var(--gyro-space-compact);
+  height: var(--gyro-space-compact);
+  margin-inline: calc(var(--gyro-space-compact) / -2);
+  border-radius: var(--gyro-radius-pill);
+  background: color-mix(
+    in srgb,
+    var(--gyro-muted) 64%,
+    var(--effort-rail-color)
+  );
 }
 .gyro-effort-slider-stops .is-filled {
-  background: color-mix(in srgb, var(--gyro-effort-thumb-ink) 62%, transparent);
+  background: var(--gyro-effort-thumb-ink);
 }
-.gyro-effort-slider-popover[data-max-effort="true"] .gyro-effort-value {
-  color: var(--gyro-effort-max);
+.gyro-effort-slider-endpoints {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--gyro-space-standard);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
 }
-.gyro-effort-slider-popover[data-max-effort="true"] .gyro-effort-slider-fill {
-  background:
-    radial-gradient(ellipse at 48% 105%, #e2b4ff 0%, transparent 57%),
-    linear-gradient(100deg, #443ee8 0%, #9451ff 47%, #783cf3 100%);
-  box-shadow: inset 0 0 9px rgb(218 166 255 / 45%);
-}
-.gyro-effort-slider-popover[data-max-effort="true"]
-  .gyro-effort-slider-track::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 6% 62%, #fff 0 0.7px, transparent 1.3px),
-    radial-gradient(circle at 11% 39%, #ead7ff 0 0.6px, transparent 1.2px),
-    radial-gradient(circle at 17% 77%, #fff 0 0.7px, transparent 1.3px),
-    radial-gradient(circle at 27% 32%, #fff 0 0.6px, transparent 1.2px),
-    radial-gradient(circle at 43% 67%, #fff 0 0.8px, transparent 1.4px),
-    radial-gradient(circle at 47% 27%, #fff 0 0.8px, transparent 1.4px),
-    radial-gradient(circle at 51% 49%, #f7eaff 0 0.6px, transparent 1.2px),
-    radial-gradient(circle at 57% 70%, #fff 0 0.6px, transparent 1.2px),
-    radial-gradient(circle at 68% 25%, #fff 0 0.7px, transparent 1.3px),
-    radial-gradient(circle at 78% 43%, #ead7ff 0 0.6px, transparent 1.2px),
-    radial-gradient(circle at 86% 75%, #fff 0 0.7px, transparent 1.3px);
-  opacity: 0.8;
-}
-.gyro-effort-slider-popover[data-max-effort="true"]
-  .gyro-effort-slider-stops
-  .is-filled {
-  background: #ddbcff;
+.gyro-effort-slider-endpoints span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .gyro-effort-slider input {
   position: absolute;
@@ -160,7 +134,7 @@
   appearance: none;
   -webkit-appearance: none;
   width: 100%;
-  height: var(--gyro-effort-thumb-size);
+  height: var(--effort-hit-size);
   margin: 0;
   padding: 0;
   border: 0;
@@ -170,18 +144,18 @@
   touch-action: none;
 }
 .gyro-effort-slider input::-webkit-slider-runnable-track {
-  height: var(--gyro-effort-thumb-size);
+  height: var(--effort-hit-size);
   background: transparent;
 }
 .gyro-effort-slider input::-moz-range-track {
-  height: var(--gyro-effort-thumb-size);
+  height: var(--effort-hit-size);
   background: transparent;
 }
 .gyro-effort-slider input::-webkit-slider-thumb {
   appearance: none;
   -webkit-appearance: none;
-  width: var(--gyro-effort-thumb-size);
-  height: var(--gyro-effort-thumb-size);
+  width: var(--effort-hit-size);
+  height: var(--effort-hit-size);
   margin: 0;
   border: 0;
   border-radius: 0;
@@ -191,8 +165,8 @@
   transition: none;
 }
 .gyro-effort-slider input::-moz-range-thumb {
-  width: var(--gyro-effort-thumb-size);
-  height: var(--gyro-effort-thumb-size);
+  width: var(--effort-hit-size);
+  height: var(--effort-hit-size);
   margin: 0;
   border: 0;
   border-radius: 0;
@@ -202,8 +176,8 @@
   transition: none;
 }
 .gyro-effort-slider input:focus-visible {
-  outline: 1.9px solid var(--gyro-accent);
-  outline-offset: 3.8px;
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 1px;
 }
 .gyro-effort-slider input:disabled {
   cursor: default;
@@ -216,38 +190,34 @@
   height: 16.15px;
 }
 
-/* Position and fill share one progress value and timing. Pointer motion is immediate. */
 .gyro-effort-slider-thumb {
   position: absolute;
-  inset-block-start: 1.9px;
-  inset-inline-start: calc(
-    (100% - var(--effort-thumb-size)) * var(--effort-progress) + 1.9px
+  inset-block-start: calc(
+    (var(--effort-hit-size) - var(--effort-knob-size)) / 2
   );
-  width: calc(var(--effort-thumb-size) - 3.8px);
-  height: calc(var(--effort-thumb-size) - 3.8px);
+  inset-inline-start: calc(
+    (100% - var(--effort-hit-size)) * var(--effort-progress) +
+      (var(--effort-hit-size) - var(--effort-knob-size)) / 2
+  );
+  width: var(--effort-knob-size);
+  height: var(--effort-knob-size);
   box-sizing: border-box;
-  border: 1px solid color-mix(in srgb, var(--gyro-text) 18%, transparent);
-  border-radius: var(--gyro-radius-sm);
+  border: 2px solid var(--effort-color);
+  border-radius: var(--gyro-radius-pill);
   background: var(--gyro-effort-thumb-ink);
-  box-shadow:
-    0 1px 3px var(--gyro-premium-shadow-soft),
-    0 0 0 0.5px color-mix(in srgb, var(--gyro-surface) 12%, transparent);
+  box-shadow: 0 1px 3px var(--gyro-premium-shadow-soft);
   pointer-events: none;
   transition: inset-inline-start var(--gyro-premium-motion)
     var(--gyro-premium-ease);
 }
-.gyro-effort-slider-fill {
-  transition:
-    width var(--gyro-premium-motion) var(--gyro-premium-ease),
-    background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
-}
-.gyro-effort-slider-stops span,
-.gyro-effort-value {
-  transition:
-    background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
-    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
-}
 .gyro-effort-slider-popover[data-dragging="true"]
   :is(.gyro-effort-slider-thumb, .gyro-effort-slider-fill) {
   transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-effort-slider-thumb,
+  .gyro-effort-slider-fill {
+    transition: none;
+  }
 }

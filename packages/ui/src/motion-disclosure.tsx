@@ -1,4 +1,5 @@
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import { surfaceExitRate } from "./surface-motion";
 
 /** Retain detail content only for its short exit; reverse from the current frame. */
 export function MotionDisclosure({ open, children }: { open: boolean; children: ReactNode }) {
@@ -36,10 +37,12 @@ export function MotionDisclosure({ open, children }: { open: boolean; children: 
     root.getAnimations().forEach((animation) => animation.cancel());
     const factor = parseFloat(getComputedStyle(root).getPropertyValue("--gyro-motion-factor")) || 1;
     const easing = getComputedStyle(root).getPropertyValue("--gyro-premium-ease").trim() || "ease-out";
+    const fraction = entering ? 1 : open ? 1 - Number(opacity) : Number(opacity);
+    const duration = 130 * factor * fraction / (open ? 1 : surfaceExitRate(root));
     const animation = root.animate([
       { height: `${entering ? 0 : from}px`, opacity: entering ? 0 : opacity },
       { height: `${open ? root.scrollHeight : 0}px`, opacity: open ? 1 : 0 },
-    ], { duration: 130 * factor, easing, fill: "forwards" });
+    ], { duration, easing, fill: "forwards" });
     const settle = () => {
       finish();
       animation.cancel();

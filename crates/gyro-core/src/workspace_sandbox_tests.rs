@@ -409,6 +409,50 @@ mod native {
     }
 
     #[test]
+    fn bounded_network_reaches_only_the_selected_proxy_port() {
+        let fixture = Fixture::new();
+        let approved = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let other = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let approved_port = approved.local_addr().unwrap().port();
+        let other_port = other.local_addr().unwrap().port();
+        let prepare = |port| {
+            PreparedWorkspaceSandbox::prepare_with_network_boundary(
+                &fixture.workspace,
+                &fixture.workspace,
+                &fixture.home,
+                None,
+                port,
+            )
+            .unwrap()
+        };
+        let connect = |sandbox: &PreparedWorkspaceSandbox, port: u16| {
+            fixture
+                .command(
+                    sandbox,
+                    OsStr::new("/usr/bin/nc"),
+                    &[
+                        "-z".into(),
+                        "-G".into(),
+                        "1".into(),
+                        "127.0.0.1".into(),
+                        port.to_string().into(),
+                    ],
+                )
+                .output()
+                .unwrap()
+        };
+        denied(&connect(&prepare(None), approved_port));
+        let sandbox = prepare(Some(approved_port));
+        succeeds(&connect(&sandbox, approved_port));
+        denied(&connect(&sandbox, other_port));
+        denied(&fixture.shell(
+            &sandbox,
+            "echo denied > \"$1/blocked\"",
+            &[&fixture.outside],
+        ));
+    }
+
+    #[test]
     fn socket_child() {
         let Some(socket) = std::env::var_os("GYRO_SANDBOX_SOCKET_TEST") else {
             return;

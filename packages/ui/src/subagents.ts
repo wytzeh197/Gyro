@@ -51,12 +51,16 @@ export type SubagentSurfaceState = {
   onSelect: (agentId: string) => void;
   /** Closes the process tab without stopping the agent. */
   onClose?: (agentId: string) => void;
-  onStop: (agentId: string) => void;
+  onStop?: (agentId: string) => void;
+  stopRequest?: { pending?: boolean; error?: string };
   error?: string;
   errorDetail?: string;
   isRefreshing?: boolean;
   onRefresh?: () => void;
   history?: {
+    isLoading?: boolean;
+    error?: string;
+    onRetry?: () => void;
     hasMoreBefore: boolean;
     isLoadingEarlier: boolean;
     onLoadEarlier: () => void;
@@ -191,25 +195,50 @@ export function subagentStatusLabel(status: SubagentSnapshot["status"]) {
   }[status];
 }
 
-export function subagentActivitySummary(agents: SubagentSnapshot[]) {
-  const count = (statuses: SubagentSnapshot["status"][]) =>
-    agents.filter((agent) => statuses.includes(agent.status)).length;
-  const waiting = count(["waiting"]);
-  const failed = count(["failed", "interrupted"]);
-  const parts = [
-    waiting ? `${waiting} ${waiting === 1 ? "needs" : "need"} approval` : "",
-    failed ? `${failed} ${failed === 1 ? "needs" : "need"} attention` : "",
-    count(["running"]) ? `${count(["running"])} working` : "",
-    count(["stopping"]) ? `${count(["stopping"])} stopping` : "",
-  ].filter(Boolean);
-  if (!parts.length) {
-    if (count(["completed"])) parts.push(`${count(["completed"])} done`);
-    if (count(["cancelled"])) parts.push(`${count(["cancelled"])} cancelled`);
-  }
-  return {
-    label: parts.join(" · "),
-    needsAttention: waiting > 0 || failed > 0,
-  };
+export function subagentStatusCounts(agents: SubagentSnapshot[]) {
+  const counts = new Map<SubagentSnapshot["status"], number>();
+  for (const { status } of agents)
+    counts.set(status, (counts.get(status) ?? 0) + 1);
+  const order = [
+    "waiting",
+    "failed",
+    "interrupted",
+    "running",
+    "stopping",
+    "completed",
+    "cancelled",
+  ] as const;
+  return order.flatMap((status) => {
+    const count = counts.get(status);
+    if (!count) return [];
+    const label =
+      status === "waiting"
+        ? count === 1
+          ? "needs approval"
+          : "need approval"
+        : subagentStatusLabel(status).toLowerCase();
+    return [{ status, count, label }];
+  });
+}
+
+/** Live approval controls are scoped to the agent's current invocation. */
+export function currentSubagentApprovals(
+  agent: SubagentSnapshot,
+  events: SessionEvent[],
+) {
+  if (agent.status !== "running" && agent.status !== "waiting") return [];
+  return pendingSubagentApprovals(
+    events.filter((event) => event.turnId === agent.runId),
+  );
+}
+
+function approvalKey(event: SessionEvent) {
+  const { kind, proposalId, approvalId } = (event.payload ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const id = proposalId ?? approvalId;
+  return id ? `${event.turnId ?? ""}:${kind ?? ""}:${id}` : undefined;
 }
 
 export function pendingSubagentApprovals(events: SessionEvent[]) {
@@ -233,25 +262,26 @@ export function mergeSubagentSnapshot(
   const delta = Date.parse(incoming.updatedAt) - Date.parse(current.updatedAt);
   if (
     delta < 0 ||
-    (delta === 0 && !isSubagentLive(current) && isSubagentLive(incoming))
+    (delta === 0 && !isSubagentLive(current) && isSubagentLive(incoming)) ||
+    (current.runId === incoming.runId &&
+      current.status === "stopping" &&
+      (incoming.status === "running" || incoming.status === "waiting"))
   )
     return current;
   return incoming;
 }
 
 /** Reconcile durable tool/approval updates before rendering a child transcript. */
-export function subagentProcessEvents(events: SessionEvent[]) {
+export function subagentProcessEvents(
+  events: SessionEvent[],
+  allowApprovals = true,
+) {
   const decisions = new Map<string, Record<string, unknown>>();
   const calls = new Map<string, SessionEvent>();
   const anchors = new Map<string, string>();
+  const renderedApprovals = new Set<string>();
   const payloadOf = (event: SessionEvent) =>
     (event.payload ?? {}) as Record<string, unknown>;
-  const approvalKey = (payload: Record<string, unknown>) =>
-    payload.proposalId
-      ? `proposal:${payload.proposalId}`
-      : payload.approvalId
-        ? `approval:${payload.approvalId}`
-        : undefined;
   for (const event of events) {
     const payload = payloadOf(event);
     if (
@@ -260,10 +290,11 @@ export function subagentProcessEvents(events: SessionEvent[]) {
         "provider-tool-approval",
         "capability-approval",
       ].includes(String(payload.kind)) &&
+      payload.historical !== true &&
       payload.status &&
       !["pending", "waiting", "requested"].includes(String(payload.status))
     ) {
-      const key = approvalKey(payload);
+      const key = approvalKey(event);
       if (key) decisions.set(key, payload);
     }
     if (payload.kind === "capability-call" && payload.callId) {
@@ -294,8 +325,26 @@ export function subagentProcessEvents(events: SessionEvent[]) {
         ? [{ ...event, payload: calls.get(key)!.payload }]
         : [];
     }
-    const key = approvalKey(payload);
+    const key = approvalKey(event);
     const decision = key ? decisions.get(key) : undefined;
+    if (
+      event.kind === "approval-requested" &&
+      !decision &&
+      (!allowApprovals || payload.historical === true) &&
+      ["pending", "waiting", "requested"].includes(
+        String(payload.status ?? "pending"),
+      )
+    ) {
+      return [];
+    }
+    if (
+      event.kind === "approval-requested" &&
+      key &&
+      payload.historical !== true
+    ) {
+      if (renderedApprovals.has(key)) return [];
+      renderedApprovals.add(key);
+    }
     return [
       {
         ...event,

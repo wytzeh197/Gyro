@@ -1,6 +1,7 @@
 export { problemAttachmentText, problemAttachmentName, type ProblemDragPayload } from "./problem-drag";
 export { reconcileGitPreparation, hasOnlyGitWarnings } from "./workspace-preparation";
 export { applyGoogleModelDiscovery } from "./google-models";
+export { githubSetupStep, type GithubSetupAction, type GithubSetupStep } from "./github-setup";
 export { ProjectMemoryPanel } from "./project-memory/panel";
 export type { ProjectMemoryRuntime, MemorySnapshot, MemoryEntry, MemoryDraft, MemorySettings, MemoryReceipt, MemoryCandidate } from "./project-memory/types";
 export type { GoogleModelDiscovery } from "./google-models";
@@ -155,6 +156,7 @@ export type {
   CouncilActionRequest,
   CouncilAttachmentRef,
   CouncilConfig,
+  CouncilSynthesizerChoice,
   CouncilContextSnapshot,
   CouncilDisagreement,
   CouncilDisagreementPosition,
@@ -554,7 +556,9 @@ export {
   COUNCIL_COMING_SOON,
   COUNCIL_COMING_SOON_LABEL,
   defaultCouncilConfig,
+  activeCouncilPresets,
   defaultCouncilPreset,
+  toggleCouncilActivePreset,
   DEFAULT_COUNCIL_PRESETS,
   normalizedCouncilConfig,
   readyCouncilProviders,
@@ -889,6 +893,7 @@ export {
   subagentTokensLabel,
   sortedSubagents,
   pendingSubagentApprovals,
+  currentSubagentApprovals,
   mergeSubagentSnapshot,
   openSubagentTab,
   closeSubagentTab,
@@ -923,3 +928,7 @@ export {CodeReviewPanel} from "./code-reviews/panel";
 export type {CodeReviewRuntime,CodeReviewRun,CodeReviewFinding,CodeReviewSnapshot,CodeReviewDetail,ReviewerSetup} from "./code-reviews/types";
 export {WorkflowDestination} from "./workflows/destination";
 export type {WorkflowRuntime,WorkflowDefinition,WorkflowBinding,WorkflowRun,WorkflowJob,WorkflowDraft,WorkflowProject,WorkflowLibrary,WorkflowSetup,WorkflowExtractionRequest} from "./workflows/types";
+
+export type { ComposerReviewer } from "./composer-inline-draft";
+
+export { parseCouncilSynthesizerAction } from "./council-composer";

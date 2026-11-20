@@ -76,8 +76,7 @@ export function ReviewSetupForm({
       </label>
       {!setup.reviewers.some((item) => item.available) ? (
         <p className="gyro-review-hint">
-          Enable an API provider or local Ollama in Settings → Providers to get
-          a second opinion.
+          Set up Claude Code, an API provider, or Ollama in Settings → Models &amp; accounts.
         </p>
       ) : null}
       {provider ? (
@@ -99,7 +98,7 @@ export function ReviewSetupForm({
           <p className="gyro-review-hint">
             {provider.transport === "local"
               ? "Runs locally on your machine."
-              : "Uses this provider’s API credentials and billing."}
+              : provider.transport === "cli" ? "Uses your connected Claude Code account." : "Uses this provider’s API credentials and billing."}
           </p>
         </>
       ) : null}

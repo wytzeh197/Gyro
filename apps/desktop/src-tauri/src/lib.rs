@@ -46,6 +46,8 @@ mod code_mode;
 mod code_mode_smoke;
 mod codex_images;
 mod command_execution;
+mod command_network;
+mod chat_permissions;
 mod commit_suggestion;
 mod context_compaction;
 mod conversation_history;

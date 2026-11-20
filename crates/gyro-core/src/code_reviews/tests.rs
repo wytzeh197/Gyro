@@ -174,7 +174,7 @@ fn review_transitions_are_revision_guarded_and_model_output_cannot_approve_edits
 }
 
 #[test]
-fn internal_advisory_ceiling_refuses_native_adapters_resume_and_permission_upgrades() {
+fn internal_advisory_ceiling_enforces_adapter_purpose_resume_and_permissions() {
     use crate::provider_runtime::{
         advisory::validate_advisory_request,
         types::{
@@ -204,6 +204,13 @@ fn internal_advisory_ceiling_refuses_native_adapters_resume_and_permission_upgra
         })
     )
     .is_err());
+    assert!(
+        validate_advisory_request(ProviderAdapterKind::AnthropicClaude, &request, None).is_ok()
+    );
+    request.internal_purpose = Some(InternalRequestPurpose::WorkflowExtraction);
+    assert!(
+        validate_advisory_request(ProviderAdapterKind::AnthropicClaude, &request, None).is_err()
+    );
     request.full_access = true;
     assert!(validate_advisory_request(ProviderAdapterKind::Ollama, &request, None).is_err());
 }

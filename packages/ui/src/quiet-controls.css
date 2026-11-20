@@ -120,7 +120,7 @@ html:root[data-theme]
     [data-settings-page="keyboard"] .gyro-settings-row,
     .gyro-workspace-keybindings label,
     .gyro-help-topic details,
-    .gyro-cli-profiles-table td,
+    .gyro-cli-profiles-table tbody :is(th, td),
     .gyro-provider-row,
     .gyro-usage-toolbar
   ) {

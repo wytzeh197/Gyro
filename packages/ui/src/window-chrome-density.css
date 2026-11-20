@@ -1,8 +1,9 @@
 /* One compact window row. The inset chat canvas and window navigation end at
    the same baseline; controls keep their existing sizes and drag regions. */
 :root {
-  --gyro-window-header-height: 40px;
+  --gyro-window-header-height: 44px;
   --gyro-window-header-control-inset: 6px;
+  --gyro-window-header-bottom-inset: 4px;
 }
 
 /* Override the older hidden-sidebar minimum as well as the grid row. */
@@ -15,10 +16,10 @@
   height: var(--gyro-window-header-height);
   min-height: var(--gyro-window-header-height);
   align-items: center;
-  /* +1px balances the bar's 1px bottom hairline (border-box), so controls
-     centre on y 23 — the native traffic lights' visual centre — not 22.5. */
+  /* Balance the bottom hairline and place the extra height below the controls
+     to keep their center at y 23, level with the native traffic lights. */
   padding-top: calc(var(--gyro-window-header-control-inset) + 1px);
-  padding-bottom: 0;
+  padding-bottom: var(--gyro-window-header-bottom-inset);
 }
 
 /* Match the inset title's center, without changing the protected left inset. */
@@ -28,7 +29,7 @@
   top: 0;
   align-items: center;
   padding-top: var(--gyro-window-header-control-inset);
-  padding-bottom: 0;
+  padding-bottom: var(--gyro-window-header-bottom-inset);
 }
 
 :root[data-theme]
@@ -77,6 +78,13 @@
   .gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
   .gyro-workspace-route.is-code {
   --gyro-ide-tab-height: var(--gyro-window-header-height);
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
+  .gyro-workspace-route.is-code
+  .gyro-editor-tabs {
+  padding-bottom: var(--gyro-window-header-bottom-inset);
 }
 
 /* The 24px visual tile sits inside the existing 28px click target. Content-box

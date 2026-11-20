@@ -5,6 +5,15 @@ use super::types::{
 };
 use anyhow::{ensure, Result};
 
+pub fn supports_code_review(kind: ProviderAdapterKind) -> bool {
+    matches!(
+        kind,
+        ProviderAdapterKind::AnthropicClaude
+            | ProviderAdapterKind::Ollama
+            | ProviderAdapterKind::OpenAiCompatible
+    )
+}
+
 pub fn is_advisory(request: &ProviderChatRequest) -> bool {
     matches!(
         request.internal_purpose,
@@ -19,7 +28,17 @@ pub fn validate_advisory_request(
     if !is_advisory(request) {
         return Ok(());
     }
-    ensure!(matches!(kind,ProviderAdapterKind::Ollama|ProviderAdapterKind::OpenAiCompatible),"this provider has no verified no-tool review/extraction execution path; choose an API or local Ollama model explicitly");
+    let supported = match request.internal_purpose {
+        Some(InternalRequestPurpose::CodeReview) => supports_code_review(kind),
+        _ => matches!(
+            kind,
+            ProviderAdapterKind::Ollama | ProviderAdapterKind::OpenAiCompatible
+        ),
+    };
+    ensure!(
+        supported,
+        "this provider has no verified no-tool review/extraction execution path"
+    );
     ensure!(
         request.mode == ChatMode::Council
             && !request.full_access

@@ -5,7 +5,8 @@ import {
   subagentTokensLabel,
   sortedSubagents,
   subagentStatusLabel,
-  subagentActivitySummary,
+  subagentStatusCounts,
+  currentSubagentApprovals,
   mergeSubagentSnapshot,
   pendingSubagentApprovals,
   subagentProcessEvents,
@@ -163,6 +164,12 @@ assert.equal(
   mergeSubagentSnapshot(settled, { ...agent, updatedAt: settled.updatedAt }),
   settled,
 );
+const stopping = { ...agent, status: "stopping", runId: "one" };
+assert.equal(
+  mergeSubagentSnapshot(stopping, { ...agent, runId: "one" }),
+  stopping,
+  "a delayed running snapshot cannot undo stop for the same run",
+);
 assert.deepEqual(
   sortedSubagents([settled, { ...agent, agentId: "live" }]).map(
     (item) => item.agentId,
@@ -295,27 +302,24 @@ assert.deepEqual(openSubagentTab(lastClosed, "parser"), firstTab);
 assert.equal(closeSubagentTab(firstTab, "missing"), firstTab);
 
 assert.deepEqual(
-  subagentActivitySummary([
+  subagentStatusCounts([
     { status: "waiting" },
     { status: "failed" },
     { status: "running" },
+    { status: "completed" },
+    { status: "cancelled" },
+    { status: "interrupted" },
+    { status: "stopping" },
   ]),
-  {
-    label: "1 needs approval · 1 needs attention · 1 working",
-    needsAttention: true,
-  },
-);
-assert.equal(
-  subagentActivitySummary([{ status: "stopping" }]).label,
-  "1 stopping",
-);
-assert.equal(
-  subagentActivitySummary([{ status: "cancelled" }]).label,
-  "1 cancelled",
-);
-assert.equal(
-  subagentActivitySummary([{ status: "completed" }]).needsAttention,
-  false,
+  [
+    { status: "waiting", count: 1, label: "needs approval" },
+    { status: "failed", count: 1, label: "failed" },
+    { status: "interrupted", count: 1, label: "interrupted" },
+    { status: "running", count: 1, label: "working" },
+    { status: "stopping", count: 1, label: "stopping" },
+    { status: "completed", count: 1, label: "done" },
+    { status: "cancelled", count: 1, label: "cancelled" },
+  ],
 );
 
 // Sidebar approval state uses the same reconciliation as worker transcripts.
@@ -357,6 +361,23 @@ const attentionEvents = [
   attentionMutation,
   attentionCapability,
 ];
+const currentAgent = { ...agent, runId: "attention-turn" };
+assert.deepEqual(
+  currentSubagentApprovals(currentAgent, [
+    { ...attentionCapability, turnId: "previous-turn" },
+    attentionProvider,
+    { ...attentionProvider, id: "persisted-approval" },
+  ]).map(({ id }) => id),
+  ["provider"],
+);
+assert.deepEqual(
+  currentSubagentApprovals(
+    { ...currentAgent, status: "stopping" },
+    attentionEvents,
+  ),
+  [],
+);
+assert.equal(subagentProcessEvents([attentionMutation], false).length, 0);
 assert.deepEqual(
   sessionApprovalCounts(attentionSessions, {
     first: attentionEvents,

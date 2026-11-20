@@ -19,6 +19,8 @@ import { useRemoteWorkspaceSlots } from "../../../packages/ui/src/remote-access-
 import { CloudV3Settings, cloudV3Enabled } from "./cloud-v3-settings";
 import { CloudV3Navigation } from "./cloud-v3-navigation";
 import type { BrowserViewportMode } from "@gyro-dev/ui";
+import { useChatCouncilPresets } from "./chat-council-presets";
+import type { GithubSetupAction } from "@gyro-dev/ui";
 import {
   askTextValue,
   reconcileGitPreparation,
@@ -71,7 +73,6 @@ import {
   ACTIVE_TURN_IDLE_MS,
   applyProviderChatStreamEvent,
   AppNotification,
-  approvalNotificationCopy,
   areWorkbenchTurnsEqual,
   AUTOMATION_SCHEDULER_COMMANDS,
   base64Utf8,
@@ -256,7 +257,12 @@ import {
   MonacoEditorPane,
   type WorkspaceNavigationSource,
 } from "./editor/workspace-code-editor";
-import { createGithubRefreshController } from "./github-refresh";
+import {
+  createGithubRefreshController,
+  GITHUB_ACTIVE_RUN_INTERVAL_MS,
+  GITHUB_IDLE_INTERVAL_MS,
+  type GithubRefreshOptions,
+} from "./github-refresh";
 import {
   createIdeEvidenceScheduler,
   type IdeEvidenceScheduler,
@@ -306,6 +312,7 @@ import {
   providerLoginProfile,
   type CliInstallPlanReport,
 } from "./provider-login-profile";
+import { githubSetupProfile } from "./github-setup-profile";
 import { parseProviderLoginProgress } from "./provider-login-progress";
 import { QuitConfirmDialog } from "./quit-confirm-dialog";
 import {
@@ -435,7 +442,6 @@ import {
   CLI_LAUNCH_PRESET_MAX_PANES,
   cliUpdateDismissKey,
   CommandPaletteOverlay,
-  COUNCIL_COMING_SOON,
   createChatProjectLayout,
   createInitialChatCompanionState,
   createNotification,
@@ -476,6 +482,7 @@ import {
   resolveChatRailPanel,
   resolveCleanMachinePath,
   resolveCouncilSeatRequests,
+  parseCouncilSynthesizerAction,
   resolvedWorkspaceSettings,
   selectedReasoningEffort,
   selectQueuedMessageDelivery,
@@ -545,6 +552,7 @@ import {
   type ProviderChatStreamEvent,
   type ProviderHealthDetails,
   type ProviderId,
+  type ComposerReviewer,
   type ProviderLedgerSummary,
   type ReasoningEffort,
   type Session,
@@ -623,6 +631,11 @@ import { useGyroUpdater } from "./update-controller";
 import { useWorkspaceExplorerFiles } from "./workspace-explorer";
 import { runWorkspaceSearchRoots } from "./workspace-search-run";
 
+// GitHub setup polls its terminal for up to 15 minutes: long enough for a
+// browser sign-in or a Homebrew install, short enough not to leak forever.
+const GITHUB_SETUP_POLL_MS = 1000;
+const GITHUB_SETUP_POLL_ATTEMPTS = 900;
+
 const SourceControlDiffEditor = lazy(
   () => import("./source-control-diff-editor"),
 );
@@ -634,15 +647,6 @@ export function App() {
   const [workbench, dispatchWorkbench] = useMeasuredWorkbenchReducer(
     loadInitialWorkbenchState,
   );
-  const quitConfirmation = useQuitConfirmation(async () => {
-    let saved;
-    do {
-      saved = editorBuffersRef.current;
-      await persistDurableEditRecovery(saved);
-    } while (saved !== editorBuffersRef.current);
-    pendingWorkbenchPersistRef.current = persistableWorkbenchState(workbench);
-    flushPersistedWorkbenchState(pendingWorkbenchPersistRef, onAppearancePersisted);
-  });
   const continueCloudChatRef = useRef<(context: string) => Promise<boolean>>();
   const cloudConnection = useCloudConnection(
     workbench.preferences,
@@ -778,7 +782,25 @@ export function App() {
   const [workspacePath, setWorkspacePath] = useState<string | undefined>(
     loadInitialWorkspacePath,
   );
-  const [branchCatalog, setBranchCatalog] = useState<GitBranchCatalog>();
+  const [branchCatalogs, setBranchCatalogs] = useState<ReadonlyMap<string, GitBranchCatalog>>(
+    () => new Map(),
+  );
+  const setBranchCatalog = useCallback((root: string, catalog: GitBranchCatalog) => {
+    setBranchCatalogs((current) => {
+      const key = normalizeProjectPath(root);
+      const previous = current.get(key);
+      if (previous?.checkedAt && catalog.checkedAt &&
+          Date.parse(previous.checkedAt) > Date.parse(catalog.checkedAt)) return current;
+      const next = new Map(current);
+      next.delete(key);
+      next.set(key, catalog);
+      if (next.size > 24) {
+        const oldest = next.keys().next().value;
+        if (oldest !== undefined) next.delete(oldest);
+      }
+      return next;
+    });
+  }, []);
   const [isBranchLoading, setIsBranchLoading] = useState(false);
   /** A push or pull is in flight, so the sync control stays a single press. */
   const [sourceControlSyncing, setSourceControlSyncing] = useState(false);
@@ -817,13 +839,31 @@ export function App() {
   const [workspaceReviewEntry,setWorkspaceReviewEntry]=useState<{sessionId:string;token:number;rootId?:string;scope:{kind:"uncommitted"};paths?:string[]}>();
   const [automationCreateRequestToken, setAutomationCreateRequestToken] =
     useState(0);
-  const [chatDrafts, setChatDrafts] = useState<Record<string, string>>(() =>
-    loadChatDrafts(),
-  );
+  const [composerDrafts, setComposerDrafts] = useState(loadChatDrafts);
+  const { drafts: chatDrafts, reviewers: draftReviewers } = composerDrafts;
+  const setChatDrafts = useCallback((update: React.SetStateAction<Record<string, string>>) => {
+    setComposerDrafts(current => {
+      const drafts = typeof update === "function" ? update(current.drafts) : update;
+      if (drafts === current.drafts) return current;
+      const reviewers = Object.fromEntries(Object.entries(current.reviewers).filter(
+        ([key]) => key in drafts && drafts[key] === current.drafts[key],
+      ));
+      return { drafts, reviewers };
+    });
+  }, []);
+  const updateComposerDraft = useCallback((key: string, text: string, reviewer?: ComposerReviewer) => {
+    setComposerDrafts(current => {
+      const reviewers = { ...current.reviewers };
+      if (reviewer) reviewers[key] = reviewer;
+      else delete reviewers[key];
+      return { drafts: { ...current.drafts, [key]: text }, reviewers };
+    });
+  }, []);
   const [chatDraftModes, setChatDraftModes] = useState<
     Record<string, ChatMode>
   >(() => loadChatDraftModes());
   const chatDraftModesRef = useRef(chatDraftModes);
+  const chatCouncilPresets = useChatCouncilPresets();
   const chatDraftModeRevisionsRef = useRef<Record<string, number>>({});
   /**
    * Goal mode is a selection, not a one-shot editor: it outlives the message
@@ -869,6 +909,24 @@ export function App() {
   const [configError, setConfigError] = useState(false);
   const configRefreshGenerationRef = useRef(0);
   const configRef = useRef(config);
+  const automaticUpdateChecks =
+    configLoaded && config.automaticUpdateChecks !== false;
+  const automaticUpdates =
+    automaticUpdateChecks && config.automaticUpdates === true;
+  const updater = useGyroUpdater({
+    automaticChecks: automaticUpdateChecks,
+    automaticUpdates,
+  });
+  const quitConfirmation = useQuitConfirmation(async () => {
+    let saved;
+    do {
+      saved = editorBuffersRef.current;
+      await persistDurableEditRecovery(saved);
+    } while (saved !== editorBuffersRef.current);
+    pendingWorkbenchPersistRef.current = persistableWorkbenchState(workbench);
+    flushPersistedWorkbenchState(pendingWorkbenchPersistRef, onAppearancePersisted);
+    await updater.installUpdateOnQuit();
+  });
   const [notificationPermission, setNotificationPermission] =
     useState<NotificationPermissionState>("prompt");
   const [isTestingNotification, setIsTestingNotification] = useState(false);
@@ -910,7 +968,8 @@ export function App() {
   const terminalOutputRevisionRef = useRef<Record<string, number>>({});
   const terminalReadInFlightRef = useRef(new Set<string>());
   const terminalSourceControlRequestRef = useRef<Record<string, number>>({});
-  const branchCatalogRequestRef = useRef(0);
+  const branchCatalogRequestsRef = useRef(new Map<string, symbol>());
+  const branchLoadingRequestRef = useRef<symbol>();
   // Source Control shows the status of the root the workspace surface asked for
   // last. A read that finishes after the user moved on must not publish, while a
   // read for the root still on screen always must: a dropped result used to
@@ -935,6 +994,21 @@ export function App() {
   const [projectRemoveCandidate, setProjectRemoveCandidate] =
     useState<SavedProject>();
   const [sendingSessionIds, setSendingSessionIds] = useState<string[]>([]);
+  const [stoppingSessionIds, setStoppingSessionIds] = useState<string[]>([]);
+  const [chatFullAccess, setChatFullAccess] = useState<Record<string, Session>>({});
+  const hasChatFullAccess = useCallback((session?: Session) => {
+    const grant = session && chatFullAccess[session.id];
+    return Boolean(grant && session &&
+      grant.providerId === session.providerId &&
+      grant.workspacePath === session.workspacePath &&
+      grant.workspaceIdentity?.revision === session.workspaceIdentity?.revision);
+  }, [chatFullAccess]);
+  const configForChat = (session?: Session, chatKey = session?.id ?? activeDraftKey): GyroConfig => {
+    const chatConfig = chatCouncilPresets.configWithChatCouncilPresets(config, chatKey);
+    return hasChatFullAccess(session)
+      ? { ...chatConfig, fullAccess: true, requireCommandApproval: false, requireFileEditApproval: false }
+      : chatConfig;
+  };
   const automaticBackup = useAutomaticChatBackup(
     cloudConnection.snapshot,
     cloudConnection.actions,
@@ -1092,10 +1166,11 @@ export function App() {
   >("global");
   const [workspacePreparation, setWorkspacePreparation] =
     useState<WorkspacePreparationProgress>();
-  const [workspaceWatchMode, setWorkspaceWatchMode] = useState<
-    "event" | "polling"
-  >("polling");
-  const [workspaceChangeGeneration, setWorkspaceChangeGeneration] = useState(0);
+  const [watchedWorkspaceRoots, setWatchedWorkspaceRoots] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const workspaceRevisionsRef = useRef(new Map<string, number>());
+  const refreshEditorFilesRef = useRef<((root: string, paths?: readonly string[]) => void) | undefined>();
   const workspacePreparationRunRef = useRef("");
   const workspacePreparationPathRef = useRef("");
   const openGlobalSearch = useCallback(
@@ -1357,10 +1432,15 @@ export function App() {
     dispatchWorkbench,
   );
   const workspaceRoots = workspaceRootHealth.roots;
+  const workspaceWatchMode = workspaceRoots.every((root) => watchedWorkspaceRoots.has(root))
+    ? "event" : "polling";
   const workspaceActionRoot =
     workspaceRootForPath(workspaceRoots, selectedWorkspaceRoot) ??
     workspaceRootForPath(workspaceRoots, selectedFile) ??
     activeWorkspaceRoot;
+  const composerBranchRoot = activeSession?.workspacePath ?? workspacePath;
+  const branchCatalog = branchCatalogs.get(normalizeProjectPath(composerBranchRoot));
+  const workspaceBranchCatalog = branchCatalogs.get(normalizeProjectPath(workspaceActionRoot));
   const scopedIde = useScopedIdeState(workbench.ide, workspaceActionRoot);
   useEffect(() => {
     const identity = activeSession?.workspaceIdentity;
@@ -1672,7 +1752,7 @@ export function App() {
                 reasoningEffort: sessionModel.reasoningEffort,
                 requireCommandApproval: config.requireCommandApproval,
                 requireFileEditApproval: config.requireFileEditApproval,
-                fullAccess: Boolean(config.fullAccess),
+                fullAccess: false,
                 mode: "normal",
                 attachments: [],
                 suggestTitle: false,
@@ -1795,6 +1875,7 @@ export function App() {
     };
   };
   const companionSurfaceProps = (paneId: string) => ({
+    supportsSecondOpinion: isTauriRuntime(),
     onSaveWorkflow: isTauriRuntime() && (paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId)) ? (turnId?:string)=>{setWorkflowExtractionRequest({sessionId:(paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId))!,turnId,token:Date.now()});dispatchWorkbench({type:"select-destination",destination:"automations"});} : undefined,
     codeReviewEntry: workspaceReviewEntry?.sessionId === (paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId)) ? workspaceReviewEntry : undefined,
     codeReviews: isTauriRuntime() && (paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId)) ? codeReviewClient((paneId === SOLO_CHAT_PANE_ID ? activeSessionId : sessionForPane(paneId))!) : undefined,
@@ -2005,10 +2086,7 @@ export function App() {
       [activeDraftKey]: false,
     }));
   }, [activeDraftKey]);
-  const activeChatMode =
-    COUNCIL_COMING_SOON && selectedDraftMode === "council"
-      ? "normal"
-      : selectedDraftMode;
+  const activeChatMode = selectedDraftMode;
   const activeChatDraft = chatDrafts[activeDraftKey] ?? "";
   const activeChatAttachments = chatAttachments[activeDraftKey] ?? [];
   const activeQueuedChatMessages = activeSessionId
@@ -2339,12 +2417,12 @@ export function App() {
     },
     [notify],
   );
-  const { explorerFiles, onExpandedDirectoriesChange } =
+  const { explorerFiles, onExpandedDirectoriesChange, refreshChangedDirectories } =
     useWorkspaceExplorerFiles(
       files,
       isTauriRuntime() ? loadExplorerDirectory : undefined,
       reportExplorerError,
-      workspaceChangeGeneration,
+      workspaceWatchMode,
     );
   const visibleWorkspaceFiles = useMemo(
     () =>
@@ -2564,6 +2642,7 @@ export function App() {
           }
         }
         sendingSessionIdsRef.current.delete(sessionId);
+        setStoppingSessionIds((current) => updateSendingSessions(current, sessionId, false));
       }
       setSendingSessionIds((current) =>
         updateSendingSessions(current, sessionId, isSending),
@@ -2688,7 +2767,7 @@ export function App() {
   const selectedTerminalSourceControl = selectedTerminalPane
     ? terminalSourceControlByPane[selectedTerminalPane.id]
     : undefined;
-  useDebouncedPersist(chatDrafts, persistChatDrafts);
+  useDebouncedPersist(composerDrafts, persistChatDrafts);
   useEffect(() => {
     safeSetLocalStorage(
       CHAT_DRAFT_MODES_STORAGE_KEY,
@@ -2876,7 +2955,7 @@ export function App() {
   }, [notify, removedProjectPaths]);
 
   const readSessionEvents = useCallback(
-    async (sessionId: string) => {
+    async (sessionId: string, reportErrorToCaller = false) => {
       const requestId = (sessionEventsRequestRef.current[sessionId] ?? 0) + 1;
       sessionEventsRequestRef.current[sessionId] = requestId;
       // A preview chat has no persisted history yet; its id is not a UUID the
@@ -3001,6 +3080,7 @@ export function App() {
               mergePersistedAndOptimisticEvents(current, optimisticEvents),
             );
           }
+          if (reportErrorToCaller) throw error;
           if (initialHistory || recoveringGap)
             notify(
               "command-failed",
@@ -3871,38 +3951,29 @@ export function App() {
     return pending;
   }, []);
 
-  const refreshWorkspaceBranches = useCallback(async (root?: string) => {
-    const requestId = branchCatalogRequestRef.current + 1;
+  const refreshWorkspaceBranches = useCallback(async (root?: string, quiet = false) => {
+    if (!root) return;
+    const key = normalizeProjectPath(root);
+    const request = Symbol();
     const runId = workspacePreparationRunRef.current;
-    branchCatalogRequestRef.current = requestId;
-    if (!root) {
-      setBranchCatalog(undefined);
-      setIsBranchLoading(false);
-      return;
-    }
-    setIsBranchLoading(true);
-    if (!isTauriRuntime()) {
-      setBranchCatalog({
-        available: true,
-        current: "main",
-        branches: ["main"],
-      });
-      setIsBranchLoading(false);
-      return;
+    branchCatalogRequestsRef.current.set(key, request);
+    if (!quiet) {
+      branchLoadingRequestRef.current = request;
+      setIsBranchLoading(true);
     }
     try {
-      const catalog = await invoke<GitBranchCatalog>("git_branches", {
-        workspacePath: root,
-      });
-      if (branchCatalogRequestRef.current === requestId) {
-        setBranchCatalog(catalog);
+      const catalog: GitBranchCatalog = isTauriRuntime()
+        ? await invoke<GitBranchCatalog>("git_branches", { workspacePath: root })
+        : { available: true, current: "main", branches: ["main"] };
+      if (branchCatalogRequestsRef.current.get(key) === request && (!quiet || catalog.readState !== "failed")) {
+        setBranchCatalog(root, catalog);
         setWorkspacePreparation((current) => reconcileGitPreparation(
           current, { workspacePath: root, runId, check: "branches" }, catalog,
         ));
       }
     } catch (error) {
-      if (branchCatalogRequestRef.current === requestId) {
-        setBranchCatalog({
+      if (!quiet && branchCatalogRequestsRef.current.get(key) === request) {
+        setBranchCatalog(root, {
           available: false,
           branches: [],
           readState: "failed",
@@ -3914,11 +3985,15 @@ export function App() {
         ));
       }
     } finally {
-      if (branchCatalogRequestRef.current === requestId) {
+      if (branchCatalogRequestsRef.current.get(key) === request) {
+        branchCatalogRequestsRef.current.delete(key);
+      }
+      if (branchLoadingRequestRef.current === request) {
+        branchLoadingRequestRef.current = undefined;
         setIsBranchLoading(false);
       }
     }
-  }, []);
+  }, [setBranchCatalog]);
 
   useEffect(() => {
     void refreshWorkspaceBranches(
@@ -3927,8 +4002,9 @@ export function App() {
   }, [activeSession?.workspacePath, refreshWorkspaceBranches, workspacePath]);
 
   const switchWorkspaceBranch = useCallback(
-    async (branch: string) => {
-      const root = activeSession?.workspacePath ?? workspacePath;
+    async (branch: string, workspaceOverride?: string) => {
+      const chatRoot = activeSession?.workspacePath ?? workspacePath;
+      const root = workspaceOverride ?? chatRoot;
       if (!root) {
         notify(
           "command-failed",
@@ -3964,8 +4040,8 @@ export function App() {
               request: { workspacePath: root, branch },
             })
           : { available: true, current: branch, branches: [branch] };
-        setBranchCatalog(catalog);
-        if (activeSessionId && isTauriRuntime()) {
+        setBranchCatalog(root, catalog);
+        if (activeSessionId && root === chatRoot && isTauriRuntime()) {
           await invoke<Session>("set_session_branch", {
             sessionId: activeSessionId,
             branch,
@@ -4017,8 +4093,9 @@ export function App() {
   };
 
   const createWorkspaceBranch = useCallback(
-    async (startPoint?: string, rename = false) => {
-      const root = activeSession?.workspacePath ?? workspacePath;
+    async (startPoint?: string, rename = false, workspaceOverride?: string) => {
+      const chatRoot = activeSession?.workspacePath ?? workspacePath;
+      const root = workspaceOverride ?? chatRoot;
       if (!root) {
         notify(
           "command-failed",
@@ -4069,8 +4146,8 @@ export function App() {
               },
             )
           : { available: true, current: branch, branches: [branch] };
-        setBranchCatalog(catalog);
-        if (activeSessionId && isTauriRuntime()) {
+        setBranchCatalog(root, catalog);
+        if (activeSessionId && root === chatRoot && isTauriRuntime()) {
           await invoke<Session>("set_session_branch", {
             sessionId: activeSessionId,
             branch,
@@ -4147,7 +4224,7 @@ export function App() {
         const catalog = await invoke<GitBranchCatalog>("git_remove_worktree", {
           request: { workspacePath: root, branch },
         });
-        setBranchCatalog(catalog);
+        setBranchCatalog(root, catalog);
         notify("terminal", "Agent workspace removed", branch);
       } catch (error) {
         notify("command-failed", "Could not remove worktree", String(error));
@@ -4415,7 +4492,6 @@ export function App() {
             previewFiles,
           ),
         );
-        setWorkspaceWatchMode("polling");
         settleWorkspacePreparation({
           runId,
           workspacePath: root,
@@ -4442,15 +4518,21 @@ export function App() {
             snapshot.files,
           ),
         );
-        setWorkspaceWatchMode(snapshot.watcherMode);
-        setWorkspaceChangeGeneration(snapshot.generation);
+        setWatchedWorkspaceRoots((current) => {
+          const watched = snapshot.watcherMode === "event";
+          if (current.has(root) === watched) return current;
+          const next = new Set(current);
+          if (watched) next.add(root);
+          else next.delete(root);
+          return next;
+        });
         if (snapshot.sourceControl) {
           dispatchWorkbench({
             type: "ide-set-source-control",
             sourceControl: snapshot.sourceControl,
           });
         }
-        if (snapshot.branches) setBranchCatalog(snapshot.branches);
+        if (snapshot.branches) setBranchCatalog(root, snapshot.branches);
         dispatchWorkbench({
           type: "ide-set-tasks",
           tasks: snapshot.tasks,
@@ -4498,17 +4580,29 @@ export function App() {
       if (!eventRoot) {
         return;
       }
-      setFiles((current) =>
-        mergeWorkspaceRootFiles(
-          current,
-          workspaceRoots,
-          eventRoot,
-          event.payload.files,
-        ),
+      const { files: nextFiles, directoryEntriesChanged } = event.payload;
+      if (nextFiles) {
+        workspaceRevisionsRef.current.set(eventRoot, event.payload.generation);
+        setFiles((current) => {
+          const next = mergeWorkspaceRootFiles(current, workspaceRoots, eventRoot, nextFiles);
+          return workspaceTreeSignature(current) === workspaceTreeSignature(next) ? current : next;
+        });
+      }
+      if (document.visibilityState !== "visible" || !document.hasFocus()) return;
+      const changedPaths = event.payload.changedPaths?.map((path) =>
+        path ? absoluteWorkspaceFilePath(eventRoot, path) : eventRoot,
       );
-      // Watcher generations are per root; equal generations from different
-      // roots must still invalidate expanded directory caches.
-      setWorkspaceChangeGeneration((revision) => revision + 1);
+      if (changedPaths?.length !== 0) {
+        if (directoryEntriesChanged !== false) refreshChangedDirectories(eventRoot, changedPaths);
+        refreshEditorFilesRef.current?.(eventRoot, changedPaths);
+      }
+      if (eventRoot === workspaceActionRoot) void refreshIdeSourceControl(eventRoot);
+      if (
+        event.payload.branchesChanged &&
+        (normalizeProjectPath(eventRoot) === normalizeProjectPath(composerBranchRoot) || eventRoot === workspaceActionRoot)
+      ) {
+        void refreshWorkspaceBranches(eventRoot, true);
+      }
     }).then((unlisten) => {
       if (disposed) unlisten();
       else unlistenWorkspace = unlisten;
@@ -4518,7 +4612,10 @@ export function App() {
       unlistenProgress?.();
       unlistenWorkspace?.();
     };
-  }, [settleWorkspacePreparation, workspaceRoots]);
+  }, [
+    composerBranchRoot, refreshChangedDirectories, refreshIdeSourceControl,
+    refreshWorkspaceBranches, settleWorkspacePreparation, workspaceActionRoot, workspaceRoots,
+  ]);
 
   const refreshSourceControl = useCallback(() => {
     refreshIdeServices(workspaceActionRoot);
@@ -6419,7 +6516,7 @@ export function App() {
   }, [githubRequests, workspaceActionRoot]);
 
   const refreshGithub = useCallback(
-    (root: string, options?: { force?: boolean }) =>
+    (root: string, options?: GithubRefreshOptions) =>
       isTauriRuntime()
         ? githubRequests.refresh(root, options)
         : Promise.resolve(),
@@ -6443,8 +6540,6 @@ export function App() {
     refreshIdeSourceControl(workspaceActionRoot);
   }, [refreshIdeSourceControl, workspaceActionRoot]);
 
-  // While a run is queued or in progress its state is stale the moment we read
-  // it, so poll — but only while the user is actually looking at Source Control.
   const hasActiveGithubRun = workbench.ide.github.runs.some(
     (run) => run.state === "queued" || run.state === "in-progress",
   );
@@ -6472,38 +6567,68 @@ export function App() {
     onBranchesChanged: refreshWorkspaceBranches,
   });
 
-  // Edits made outside Gyro — another editor, a terminal, a rebase — never
-  // reach the file-edit refresh, so re-read while the panel is on screen.
+  // Watcher events drive local status. Reconcile on return and periodically
+  // while Workspace is visible for volumes that miss filesystem events.
   useEffect(() => {
-    if (!workspaceActionRoot || workbench.activeDestination !== "workspace") {
-      return;
+    if (!workspaceActionRoot || !isTauriRuntime()) return;
+    const onReturn = () => {
+      if (document.visibilityState !== "visible" || !document.hasFocus()) return;
+      void refreshIdeSourceControl(workspaceActionRoot);
+      if (composerBranchRoot) void refreshWorkspaceBranches(composerBranchRoot, true);
+      if (workspaceActionRoot !== composerBranchRoot && workbench.activeDestination === "workspace")
+        void refreshWorkspaceBranches(workspaceActionRoot, true);
+    };
+    if (workbench.activeDestination === "workspace" && document.hasFocus()) {
+      void refreshIdeSourceControl(workspaceActionRoot);
     }
-    refreshIdeSourceControl(workspaceActionRoot);
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
+    const timer = workbench.activeDestination === "workspace" ? window.setInterval(() => {
+      if (document.visibilityState !== "visible" || !document.hasFocus()) return;
       refreshIdeSourceControl(workspaceActionRoot);
-    }, 5_000);
-    return () => window.clearInterval(timer);
-  }, [refreshIdeSourceControl, workbench.activeDestination, workspaceActionRoot]);
+    }, watchedWorkspaceRoots.has(workspaceActionRoot) ? 20_000 : 5_000) : undefined;
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onReturn);
+      document.removeEventListener("visibilitychange", onReturn);
+    };
+  }, [
+    composerBranchRoot, refreshIdeSourceControl, refreshWorkspaceBranches,
+    watchedWorkspaceRoots, workbench.activeDestination, workspaceActionRoot,
+  ]);
   useEffect(() => {
     if (!workspaceActionRoot || !isSourceControlVisible) return;
-    // Pick up newly pushed workflows and recover from transient failures even
-    // when the last snapshot contained no active run.
-    void refreshGithub(workspaceActionRoot);
-    const timer = window.setInterval(
-      () => {
-        if (document.visibilityState !== "visible") return;
-        void refreshGithub(workspaceActionRoot);
-      },
-      hasActiveGithubRun ? 15_000 : 60_000,
-    );
-    return () => window.clearInterval(timer);
-  }, [
-    hasActiveGithubRun,
-    refreshGithub,
-    isSourceControlVisible,
-    workspaceActionRoot,
-  ]);
+    const refresh = () => {
+      if (document.visibilityState !== "visible" || !document.hasFocus() || navigator.onLine === false) return;
+      void refreshGithub(workspaceActionRoot, { background: "all" });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, GITHUB_IDLE_INTERVAL_MS);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("online", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("online", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [refreshGithub, isSourceControlVisible, workspaceActionRoot]);
+  useEffect(() => {
+    if (!workspaceActionRoot || !isSourceControlVisible || !hasActiveGithubRun) return;
+    const refresh = () => {
+      if (document.visibilityState !== "visible" || !document.hasFocus() || navigator.onLine === false) return;
+      void refreshGithub(workspaceActionRoot, { background: "runs" });
+    };
+    const timer = window.setInterval(refresh, GITHUB_ACTIVE_RUN_INTERVAL_MS);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [hasActiveGithubRun, isSourceControlVisible, refreshGithub, workspaceActionRoot]);
 
   const selectGithubRun = useCallback(
     (runId: number) => {
@@ -6639,6 +6764,116 @@ export function App() {
     [notify],
   );
 
+  // Install, connect, publish and switch run in a visible terminal because
+  // each can prompt (a browser code, a Homebrew password, an account choice).
+  // GitHub is re-probed when the command exits, whatever the outcome.
+  const [githubSetupRunning, setGithubSetupRunning] =
+    useState<GithubSetupAction>();
+  const githubSetupRunningRef = useRef<GithubSetupAction>();
+  const githubHost = workbench.ide.github.availability?.host;
+  const runGithubSetup = useCallback(
+    async (action: GithubSetupAction, expectedHasCommits?: boolean) => {
+      const root = workspaceActionRoot;
+      if (!root || githubSetupRunningRef.current) return;
+      const profile = githubSetupProfile(action, githubHost, expectedHasCommits);
+      const paneId = `github-${action}-${Date.now()}`;
+      dispatchWorkbench({
+        type: "select-workspace-layout",
+        layout: "terminal-grid",
+      });
+      dispatchWorkbench({ type: "open-tool-panel", tab: "terminal" });
+      dispatchWorkbench({
+        type: "add-terminal-pane",
+        pane: createTerminalPane(
+          paneId,
+          profile,
+          "running",
+          workspaceRunMetadata("local", profile.displayName, root),
+        ),
+      });
+      if (!isTauriRuntime()) return;
+      githubSetupRunningRef.current = action;
+      setGithubSetupRunning(action);
+      const sync = (snapshot: TerminalPaneSnapshot) => {
+        terminalOutputRevisionRef.current[snapshot.paneId] =
+          snapshot.outputRevision;
+        dispatchWorkbench({
+          type: "sync-terminal-pane-snapshot",
+          paneId: snapshot.paneId,
+          event:
+            snapshot.exitCode === null || snapshot.exitCode === undefined
+              ? snapshot.status
+              : `${snapshot.status} (${snapshot.exitCode})`,
+          output: snapshot.output ?? "",
+          outputCursor: snapshot.outputCursor,
+          outputComplete: snapshot.outputComplete,
+          status: terminalStatusFromSnapshot(snapshot.status),
+          hasForegroundJob: snapshot.hasForegroundJob ?? undefined,
+        });
+      };
+      try {
+        let snapshot = await invoke<TerminalPaneSnapshot>(
+          "create_terminal_pane",
+          {
+            request: {
+              args: profile.args,
+              command: profile.command,
+              paneId,
+              title: profile.displayName,
+              workspacePath: root,
+              workspaceMode: "local",
+              workingDirectory:
+                action === "publish" ? "Exact workspace" : "Home",
+            },
+          },
+        );
+        sync(snapshot);
+        // A browser sign-in or a Homebrew install can take minutes.
+        for (
+          let attempt = 0;
+          attempt < GITHUB_SETUP_POLL_ATTEMPTS &&
+          (snapshot.exitCode === null || snapshot.exitCode === undefined);
+          attempt += 1
+        ) {
+          await waitFor(GITHUB_SETUP_POLL_MS);
+          const next = await invoke<TerminalPaneSnapshot>(
+            "read_terminal_output",
+            {
+              paneId,
+              knownOutputRevision: terminalOutputRevisionRef.current[paneId],
+            },
+          ).catch(() => undefined);
+          if (!next) break;
+          snapshot = next;
+          sync(snapshot);
+        }
+        if (snapshot.exitCode === 0) {
+          notify("terminal", `${profile.displayName} finished`, root);
+        } else if (
+          snapshot.exitCode !== null &&
+          snapshot.exitCode !== undefined
+        ) {
+          notify(
+            "command-failed",
+            `${profile.displayName} didn't finish`,
+            `Exit ${snapshot.exitCode}. The terminal shows what happened.`,
+          );
+        }
+      } catch (error) {
+        notify(
+          "command-failed",
+          `Could not start ${profile.displayName}`,
+          String(error),
+        );
+      } finally {
+        githubSetupRunningRef.current = undefined;
+        setGithubSetupRunning(undefined);
+        void refreshGithub(root, { force: true });
+      }
+    },
+    [githubHost, notify, refreshGithub, workspaceActionRoot],
+  );
+
   // Reply links open in Gyro Browser by default; a ⌘/Ctrl-click hands the URL
   // to the device's own browser through this registration, so reply surfaces
   // need no extra callback of their own.
@@ -6724,7 +6959,7 @@ export function App() {
               "git_create_branch",
               { request: { workspacePath: root, branch: name.trim() } },
             );
-            setBranchCatalog(catalog);
+            setBranchCatalog(root, catalog);
             refreshIdeServices(root);
             settle("done", `Switched to ${name.trim()}`);
             return;
@@ -9610,10 +9845,8 @@ export function App() {
   );
 
   const updateActiveChatDraft = useCallback(
-    (value: string) => {
-      setChatDrafts((current) => ({ ...current, [activeDraftKey]: value }));
-    },
-    [activeDraftKey],
+    (value: string, reviewer?: ComposerReviewer) => updateComposerDraft(activeDraftKey, value, reviewer),
+    [activeDraftKey, updateComposerDraft],
   );
 
   const keepReviewedFile = useCallback(
@@ -10263,13 +10496,38 @@ export function App() {
     setIsGoalComposerActive(true);
   }, [activeDraftKey, changeChatMode]);
 
+  // Chats where the user chose "Use In This Chat" for Council: sending a
+  // message keeps Council selected instead of returning to Normal.
+  const [chatCouncilSticky, setChatCouncilSticky] = useState<
+    Record<string, true>
+  >({});
+  const chatCouncilStickyRef = useRef(chatCouncilSticky);
+  const setCouncilSticky = useCallback((draftKey: string, sticky: boolean) => {
+    const next = { ...chatCouncilStickyRef.current };
+    if (sticky) next[draftKey] = true;
+    else delete next[draftKey];
+    chatCouncilStickyRef.current = next;
+    setChatCouncilSticky(next);
+  }, []);
   const consumeDraftMode = useCallback(
-    (draftKey: string, revision: number) => {
-      if (chatDraftModeRevisionsRef.current[draftKey] === revision) {
-        changeChatMode("normal", draftKey);
+    (draftKey: string, revision: number, sessionKey?: string) => {
+      if (chatDraftModeRevisionsRef.current[draftKey] !== revision) return;
+      if (
+        chatCouncilStickyRef.current[draftKey] &&
+        chatDraftModesRef.current[draftKey] === "council"
+      ) {
+        // A new chat's draft hands its Council choice to the chat it starts.
+        if (sessionKey && sessionKey !== draftKey) {
+          changeChatMode("council", sessionKey);
+          setCouncilSticky(sessionKey, true);
+          setCouncilSticky(draftKey, false);
+          changeChatMode("normal", draftKey);
+        }
+        return;
       }
+      changeChatMode("normal", draftKey);
     },
-    [changeChatMode],
+    [changeChatMode, setCouncilSticky],
   );
 
   const handleComposerAction = useCallback(
@@ -10301,6 +10559,32 @@ export function App() {
       }
       const currentWorkspacePath =
         activeSession?.workspacePath ?? workspacePath;
+      if (action === "select-branch") {
+        const root = attachmentTarget?.workspacePath ?? currentWorkspacePath;
+        if (root) void refreshWorkspaceBranches(root, true);
+        return;
+      }
+      const permissionSessionId = attachmentTarget ? attachmentTarget.sessionId : activeSessionId;
+      const changeFullAccess = async (enabled: boolean) => {
+        const session = sessions.find((entry) => entry.id === permissionSessionId);
+        if (!session || !isTauriRuntime()) {
+          if (enabled) notify("terminal", "Open a chat first", "Full access applies to one saved chat.");
+          return false;
+        }
+        try {
+          const granted = await invoke<boolean>("set_chat_full_access", { sessionId: session.id, enabled });
+          setChatFullAccess((current) => {
+            const next = { ...current };
+            if (granted) next[session.id] = session;
+            else delete next[session.id];
+            return next;
+          });
+          return granted === enabled;
+        } catch (error) {
+          notify("command-failed", "Permissions could not be changed", String(error));
+          return false;
+        }
+      };
       const setComposerWorkspaceMode = (
         nextMode: WorkbenchState["workspaceMode"],
       ) => {
@@ -10657,7 +10941,6 @@ export function App() {
           setSelectedWorkspaceRoot(undefined);
           setFiles([]);
           setSelectedFile(undefined);
-          setBranchCatalog(undefined);
           startNewChat({ workspacePath: "", carryDraftFrom: activeDraftKey });
           break;
         case "add-goal":
@@ -10683,7 +10966,12 @@ export function App() {
                 : "normal";
             // A half-typed goal survives a mode change.
             changeChatMode(mode, draftKey);
+            if (mode !== "council") setCouncilSticky(draftKey, false);
           }
+          break;
+        case "council-scope-turn":
+        case "council-scope-chat":
+          setCouncilSticky(draftKey, action === "council-scope-chat");
           break;
         case "search-workspace":
           openGlobalSearch();
@@ -10692,40 +10980,22 @@ export function App() {
           openSettingsSection("permissions");
           break;
         case "set-approval-gated":
-          void persistConfig({
-            ...config,
-            requireCommandApproval: true,
-            requireFileEditApproval: true,
-            fullAccess: false,
-          });
-          {
-            const copy = approvalNotificationCopy(config, "gated");
-            notify("terminal", copy.title, copy.detail);
-          }
+        case "set-approval-auto": {
+          const ask = action === "set-approval-gated";
+          void (async () => {
+            const session = sessions.find((entry) => entry.id === permissionSessionId);
+            if (hasChatFullAccess(session) && !(await changeFullAccess(false))) return;
+            await persistConfig({
+              ...configRef.current,
+              requireCommandApproval: ask,
+              requireFileEditApproval: ask,
+              fullAccess: false,
+            });
+          })();
           break;
-        case "set-approval-auto":
-          void persistConfig({
-            ...config,
-            requireCommandApproval: false,
-            requireFileEditApproval: false,
-            fullAccess: false,
-          });
-          {
-            const copy = approvalNotificationCopy(config, "auto");
-            notify("terminal", copy.title, copy.detail);
-          }
-          break;
+        }
         case "set-approval-direct":
-          void persistConfig({
-            ...config,
-            requireCommandApproval: false,
-            requireFileEditApproval: false,
-            fullAccess: true,
-          });
-          {
-            const copy = approvalNotificationCopy(config, "direct");
-            notify("terminal", copy.title, copy.detail);
-          }
+          void changeFullAccess(true);
           break;
         case "select-model":
         case "open-providers":
@@ -10899,10 +11169,20 @@ export function App() {
           });
           break;
         default:
-          notify("terminal", "Composer action", action);
+          const councilWriter = parseCouncilSynthesizerAction(action);
+          if (councilWriter !== undefined) {
+            chatCouncilPresets.setChatCouncilWriter(draftKey, councilWriter);
+          } else if (action.startsWith("council-toggle-preset:")) {
+            chatCouncilPresets.toggleChatCouncilPreset(
+              draftKey,
+              config,
+              action.slice("council-toggle-preset:".length),
+            );
+          } else notify("terminal", "Composer action", action);
       }
     },
     [
+      persistConfig,
       attachEditorSnapshot,
       attachBrowserSnapshot,
       selectGoalComposer,
@@ -10911,6 +11191,7 @@ export function App() {
       activeSession?.workspacePath,
       checkProviderReadiness,
       changeChatMode,
+      setCouncilSticky,
       connectProvider,
       config,
       createWorkspaceBranch,
@@ -10944,6 +11225,7 @@ export function App() {
       setSessionSending,
       setEventsForSession,
       activeSession?.providerId,
+      hasChatFullAccess,
       sessions,
       workbench.ide.taskDefinitions,
       workbench.workspaceMode,
@@ -11168,11 +11450,7 @@ export function App() {
           chatDraftModeRevisionsRef.current[draftModeKey] ??
           0;
         const selectedMode = chatDraftModesRef.current[draftModeKey] ?? "normal";
-        const turnMode =
-          overrideContext?.mode ??
-          (COUNCIL_COMING_SOON && selectedMode === "council"
-            ? "normal"
-            : selectedMode);
+        const turnMode = overrideContext?.mode ?? selectedMode;
         const consumeSelectedMode =
           overrideContext?.consumeDraftMode ??
           (overrideContext?.mode === undefined &&
@@ -11278,7 +11556,8 @@ export function App() {
           overrideContext?.requireFileEditApproval ??
           config.requireFileEditApproval;
         const fullAccess =
-          overrideContext?.fullAccess ?? Boolean(config.fullAccess);
+          !overrideContext?.retryTurnId && !overrideContext?.queuedDelivery &&
+          (overrideContext?.fullAccess ?? hasChatFullAccess(targetSession));
         // A chat belongs to the project of the pane it was typed in. The global
         // workspace can move (Code layout, sidebar) while an already-focused
         // draft keeps its own project, so never let it pick the project here.
@@ -11392,6 +11671,7 @@ export function App() {
                 items: turnPlan.items.map((item) => ({ ...item })),
               },
               sessionModel: { ...sessionModel },
+              secondOpinion: overrideContext?.secondOpinion,
               requireCommandApproval,
               requireFileEditApproval,
               fullAccess,
@@ -11472,14 +11752,6 @@ export function App() {
           } else if (!checkProviderReadiness("chat", sessionModel.providerId))
             return outcome;
         }
-        if (isCouncilTurn && COUNCIL_COMING_SOON) {
-          notify(
-            "command-failed",
-            "Council is not available yet",
-            "Model Council is still in development. It will return in a later release.",
-          );
-          return outcome;
-        }
         // Reads the normalized config rather than the raw one: a stale persisted
         // `enabled: true` must not be able to start a run.
         if (isCouncilTurn && !normalizedCouncilConfig(config.council).enabled) {
@@ -11492,7 +11764,7 @@ export function App() {
         }
         const councilResolution = isCouncilTurn
           ? resolveCouncilSeatRequests(
-              config,
+              chatCouncilPresets.configWithChatCouncilPresets(config, draftModeKey),
               readyCouncilProviders(config, workbench.providerStatuses),
             )
           : null;
@@ -11599,6 +11871,7 @@ export function App() {
               ...current,
               [session.id]: current[draftModeKey] ?? "normal",
             }));
+            chatCouncilPresets.adoptChatCouncilPresets(draftModeKey, session.id);
           }
           optimisticEventsRef.current.set(
             session.id,
@@ -11607,7 +11880,7 @@ export function App() {
           suppressSessionAutoSelectRef.current = false;
           setSessionSending(session.id, true);
           if (consumeSelectedMode) {
-            consumeDraftMode(draftModeKey, draftModeRevision);
+            consumeDraftMode(draftModeKey, draftModeRevision, session.id);
           }
           setWorkspacePath(session.workspacePath);
           setFiles(
@@ -11721,6 +11994,7 @@ export function App() {
                 ...current,
                 [persistedSession.id]: current[session.id] ?? "normal",
               }));
+              chatCouncilPresets.adoptChatCouncilPresets(session.id, persistedSession.id);
             }
             setChatMessageQueues((current) => {
               const queued = current[session.id];
@@ -11925,6 +12199,7 @@ export function App() {
                 await turnTiming.invokeTimedProviderChat<ProviderChatResponse>(
                   "run_provider_chat",
                   {
+                    secondOpinion: overrideContext?.secondOpinion,
                     request: {
                       sessionId: persistedSession.id,
                       message,
@@ -12226,6 +12501,8 @@ export function App() {
               await turnTiming.invokeTimedProviderChat<ProviderChatResponse>(
                 "run_provider_chat",
                 {
+                  secondOpinion: overrideContext?.secondOpinion,
+                  retrySecondOpinion: Boolean(overrideContext?.retryTurnId),
                   request: {
                     sessionId: targetSessionId,
                     message,
@@ -12489,7 +12766,7 @@ export function App() {
         setSessionSending(sessionId, true);
         try {
           const resolution = resolveCouncilSeatRequests(
-            config,
+            chatCouncilPresets.configWithChatCouncilPresets(config, sessionId),
             readyCouncilProviders(config, workbench.providerStatuses),
           );
           const response = await invoke<CouncilChatInvokeResponse>(
@@ -12605,6 +12882,7 @@ export function App() {
     },
     [
       activeDraftKey,
+      hasChatFullAccess,
       activeSessionGoal,
       activeSessionPlan,
       changeChatMode,
@@ -12741,10 +13019,7 @@ export function App() {
       if (!selected) {
         return;
       }
-      setChatDrafts((current) => ({
-        ...current,
-        [activeDraftKey]: selected.message,
-      }));
+      updateComposerDraft(activeDraftKey, selected.message, selected.context.secondOpinion);
       setChatAttachments((current) => ({
         ...current,
         [activeDraftKey]: (selected.context.attachments ?? []).map(
@@ -12774,6 +13049,7 @@ export function App() {
       activeSessionId,
       changeChatMode,
       chatMessageQueues,
+      updateComposerDraft,
       notify,
     ],
   );
@@ -12823,7 +13099,7 @@ export function App() {
               (pane) =>
                 pane?.kind === "session" && pane.sessionId === event.sessionId,
             )?.paneId ?? SOLO_CHAT_PANE_ID;
-          subagentController.select(paneId, activity.resource.id);
+          subagentController.select(paneId, activity.resource.id, event.sessionId);
           return;
         }
         selectSession(event.sessionId);
@@ -13177,6 +13453,31 @@ export function App() {
     notify,
   });
 
+  const undoRecordedEdit = useCallback(async (sessionId: string, turnId: string, undoId: string) => {
+    const session = sessions.find((entry) => entry.id === sessionId);
+    if (!session?.workspacePath || !isTauriRuntime()) return;
+    try {
+      const root = session.workspacePath;
+      const sources = liveEditorSourcesRef.current;
+      const base = liveEditorEvidenceRef.current?.workspaceKey === root
+        ? liveEditorEvidenceRef.current
+        : { schema: "gyro.workspace-context.v1" as const, workspaceKey: root, revision: 0,
+            capturedAt: new Date().toISOString(), visibleTabs: [], buffers: [], diagnostics: [], testFailures: [] };
+      const evidence = workspaceContextWithLiveEditor(base, selectedFileRef.current, sources.buffers,
+        sources.selection, sources.tabs.map((tab) => tab.path));
+      await invoke("update_capability_ide_evidence", { request: {
+        workspacePath: root, diagnostics: evidence.diagnostics, context: evidence,
+      }});
+      await invoke("undo_recorded_chat_edit", { sessionId, turnId, undoId });
+      await refreshEvents(sessionId);
+      await refreshWorkspaceTree();
+      refreshIdeSourceControl(root);
+      notify("diff-ready", "Recorded edit undone", "The workspace was updated.");
+    } catch (error) {
+      notify("command-failed", "Could not undo recorded edit", String(error));
+    }
+  }, [sessions, refreshEvents, refreshWorkspaceTree, refreshIdeSourceControl, notify]);
+
   const handleMutationApprovalAction = useCallback(
     async (proposalId: string, decision: "approve" | "reject" | "preview") => {
       if (!activeSessionId || !isTauriRuntime()) {
@@ -13372,10 +13673,12 @@ export function App() {
         setQueueRetryTick((current) => current + 1);
         return;
       }
-      void invoke("stop_provider_chat", { sessionId, waitForStop: isSteering })
+      if (!isSteering) {
+        setStoppingSessionIds((current) => updateSendingSessions(current, sessionId, true));
+      }
+      void invoke("stop_provider_chat", { sessionId, waitForStop: true })
         .catch((error) => {
-          if (!isSteering) stoppedChatSessionsRef.current.delete(sessionId);
-          notify("command-failed", "Stop failed", String(error));
+          notify("command-failed", "Stop could not be confirmed", String(error));
         })
         .finally(() => {
           if (isSteering) pendingSteerStopsRef.current.delete(sessionId);
@@ -16961,173 +17264,105 @@ export function App() {
   }, [selectedFile, workbench.ide.tabs, workspaceRoots]);
 
   useEffect(() => {
-    const root = workspaceRootForPath(workspaceRoots, selectedFile);
-    if (!root || !isTauriRuntime()) {
-      return;
-    }
+    if (!isTauriRuntime() || workbench.activeDestination !== "workspace" ||
+        workspaceRoots.length === 0) return;
     let cancelled = false;
     let polling = false;
-    const pollWorkspace = async () => {
-      if (polling || document.visibilityState !== "visible") {
-        return;
-      }
+    const refreshTrees = async () => {
+      if (polling || document.visibilityState !== "visible" || !document.hasFocus()) return;
       polling = true;
       try {
-        const workspaceFiles = await Promise.all(
-          workspaceRoots.map(async (workspaceRoot) => ({
-            root: workspaceRoot,
-            files: await invoke<WorkspaceFile[]>("watch_workspace", {
-              workspacePath: workspaceRoot,
-            }),
-          })),
-        );
-        if (cancelled) {
-          return;
-        }
-        setFiles((current) =>
-          workspaceTreeSignature(current) ===
-          workspaceTreeSignature(
-            workspaceFiles.flatMap(
-              ({ root: workspaceRoot, files: rootFiles }) =>
-                workspaceFilesForRoot(workspaceRoot, rootFiles),
-            ),
-          )
-            ? current
-            : workspaceFiles.flatMap(
-                ({ root: workspaceRoot, files: rootFiles }) =>
-                  workspaceFilesForRoot(workspaceRoot, rootFiles),
-              ),
-        );
-        const buffer = selectedFile ? editorBuffersRef.current[selectedFile] : undefined;
-        if (!selectedFile || !buffer?.contentHash || buffer.status === "saving") {
-          return;
-        }
-        const stat = await invoke<WorkspaceFileStat>("stat_workspace_file", {
-          workspacePath: root,
-          path: selectedFile,
-        });
-        if (cancelled) {
-          return;
-        }
-        const live = editorBuffersRef.current[selectedFile];
-        if (!live || live.status === "saving" || live.content !== buffer.content || live.contentHash !== buffer.contentHash) return;
-        if (stat.kind === "missing") {
-          const error = "File is missing from disk. Your editor text has been retained.";
-          if (live.error !== error)
-            dispatchWorkbench({ type: "ide-mark-buffer-error", path: selectedFile, error });
-          return;
-        }
-        if (!stat.contentHash || (stat.contentHash === buffer.contentHash &&
-            buffer.status !== "error" && buffer.status !== "conflict")) {
-          return;
-        }
-        if (editorBufferHasUnsavedChanges(buffer)) {
-          if (stat.contentHash === buffer.contentHash || buffer.status === "conflict") return;
-          dispatchWorkbench({
-            type: "ide-mark-buffer-error",
-            path: selectedFile,
-            error:
-              "File changed on disk; reload or preserve your buffer before saving.",
+        await Promise.allSettled(workspaceRoots.map(async (root) => {
+          const revision = workspaceRevisionsRef.current.get(root);
+          const tree = await invoke<WorkspaceFile[]>("watch_workspace", { workspacePath: root });
+          if (cancelled || revision !== workspaceRevisionsRef.current.get(root)) return;
+          setFiles((current) => {
+            const next = mergeWorkspaceRootFiles(current, workspaceRoots, root, tree);
+            return workspaceTreeSignature(current) === workspaceTreeSignature(next) ? current : next;
           });
-          notify(
-            "command-failed",
-            "File changed on disk",
-            `${selectedFile} has external changes`,
-          );
-          return;
-        }
-        const content = await invoke<WorkspaceFileContent>(
-          "read_workspace_file_full",
-          { workspacePath: root, path: selectedFile },
-        );
-        const current = editorBuffersRef.current[selectedFile];
-        if (cancelled || !current || current.status === "saving" || current.content !== buffer.content || current.contentHash !== buffer.contentHash) {
-          return;
-        }
-        setSelectedFileContent(content);
-        dispatchWorkbench({
-          type: "ide-refresh-buffer",
-          before: buffer,
-          buffer: workspaceContentToEditorBuffer(content),
-        });
-      } catch {
-        // Polling is opportunistic; direct operations still surface errors.
+        }));
       } finally {
         polling = false;
       }
     };
-    // Native events are hints. Open generated files and missed events still need reconciliation.
-    const interval = window.setInterval(() => void pollWorkspace(), workspaceWatchMode === "polling" ? 2500 : 5000);
-    const onVisible = () => { if (document.visibilityState === "visible") void pollWorkspace(); };
-    document.addEventListener("visibilitychange", onVisible);
-    void pollWorkspace();
+    void refreshTrees();
+    const timer = window.setInterval(refreshTrees, workspaceWatchMode === "event" ? 20_000 : 3_000);
+    window.addEventListener("focus", refreshTrees);
+    document.addEventListener("visibilitychange", refreshTrees);
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
-      document.removeEventListener("visibilitychange", onVisible);
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshTrees);
+      document.removeEventListener("visibilitychange", refreshTrees);
     };
-  }, [
-    notify,
-    selectedFile,
-    selectedFile ? workbench.ide.buffers[selectedFile]?.contentHash : undefined,
-    selectedFile ? workbench.ide.buffers[selectedFile]?.status : undefined,
-    workspaceChangeGeneration,
-    workspaceRoots,
-    workspaceWatchMode,
-  ]);
+  }, [workbench.activeDestination, workspaceRoots, workspaceWatchMode]);
 
+  const hasOpenWorkspaceBuffers = Object.keys(workbench.ide.buffers).some(
+    (path) => Boolean(workspaceRootForPath(workspaceRoots, path)),
+  );
   useEffect(() => {
-    if (!isTauriRuntime() || workspaceRoots.length === 0) return;
+    if (!isTauriRuntime() || !hasOpenWorkspaceBuffers) return;
     let cancelled = false;
     let running = false;
-    const refresh = async () => {
-      if (running) return;
+    const queued = new Set<string>();
+    const drain = async () => {
+      if (running || cancelled || queued.size === 0 || document.visibilityState !== "visible" || !document.hasFocus()) return;
+      const batch = [...queued];
+      queued.clear();
       running = true;
       try {
         await refreshOpenEditorBuffers({
-          paths: Object.keys(editorBuffersRef.current).filter(path =>
-            path !== selectedFile && Boolean(workspaceRootForPath(workspaceRoots, path))),
-          getBuffer: path => editorBuffersRef.current[path],
+          paths: batch,
+          getBuffer: (path) => editorBuffersRef.current[path],
           cancelled: () => cancelled,
-          stat: path => invoke<WorkspaceFileStat>("stat_workspace_file", {
+          stat: (path) => invoke<WorkspaceFileStat>("stat_workspace_file", {
             path, workspacePath: workspaceRootForPath(workspaceRoots, path),
           }),
-          read: async path => workspaceContentToEditorBuffer(await invoke<WorkspaceFileContent>("read_workspace_file_full", {
-            path, workspacePath: workspaceRootForPath(workspaceRoots, path),
-          })),
+          read: async (path) => workspaceContentToEditorBuffer(await invoke<WorkspaceFileContent>(
+            "read_workspace_file_full", { path, workspacePath: workspaceRootForPath(workspaceRoots, path) },
+          )),
           apply: (before, buffer) => dispatchWorkbench({ type: "ide-refresh-buffer", before, buffer }),
           conflict: (path, error) => {
-            if (editorBuffersRef.current[path]?.error !== error)
-              dispatchWorkbench({ type: "ide-mark-buffer-error", path, error });
+            if (editorBuffersRef.current[path]?.error === error) return;
+            dispatchWorkbench({ type: "ide-mark-buffer-error", path, error });
+            if (path === selectedFileRef.current && error.includes("changed on disk")) {
+              notify("command-failed", "File changed on disk", `${path} has external changes`);
+            }
           },
         });
-      } finally { running = false; }
+      } finally {
+        running = false;
+        if (queued.size) void drain();
+      }
     };
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 5000);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [selectedFile, workspaceChangeGeneration, workspaceRoots]);
+    const enqueue = (root?: string, changes?: readonly string[]) => {
+      if (document.visibilityState !== "visible" || !document.hasFocus()) return;
+      for (const path of Object.keys(editorBuffersRef.current)) {
+        const bufferRoot = workspaceRootForPath(workspaceRoots, path);
+        if (!bufferRoot || (root && bufferRoot !== root)) continue;
+        if (!changes || changes.some((change) =>
+          path === change || path.startsWith(change.endsWith("/") ? change : `${change}/`),
+        )) queued.add(path);
+      }
+      void drain();
+    };
+    refreshEditorFilesRef.current = enqueue;
+    const reconcile = () => enqueue();
+    reconcile();
+    const timer = window.setInterval(reconcile, workspaceWatchMode === "event" ? 15_000 : 3_000);
+    window.addEventListener("focus", reconcile);
+    document.addEventListener("visibilitychange", reconcile);
+    return () => {
+      cancelled = true;
+      refreshEditorFilesRef.current = undefined;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", reconcile);
+      document.removeEventListener("visibilitychange", reconcile);
+    };
+  }, [hasOpenWorkspaceBuffers, notify, workspaceRoots, workspaceWatchMode]);
 
-  useEffect(() => {
-    if (!workspaceActionRoot || workspaceChangeGeneration === 0) {
-      return;
-    }
-    const timeout = window.setTimeout(
-      () => refreshIdeSourceControl(workspaceActionRoot),
-      250,
-    );
-    return () => window.clearTimeout(timeout);
-  }, [refreshIdeSourceControl, workspaceActionRoot, workspaceChangeGeneration]);
-
-  useEffect(() => {
-    const root =
-      workspaceRootForPath(workspaceRoots, selectedFile) ??
-      activeSession?.workspacePath ??
-      workspacePath;
-    if (!root) {
-      return;
-    }
-    const hasRunningFileEdit = deferredEventsForTurn.some((event) => {
+  const hasRunningFileEdit = useMemo(
+    () => isActiveSessionSending && deferredEventsForTurn.some((event) => {
       const payload = recordFromUnknown(event.payload);
       return (
         event.kind === "system-event" &&
@@ -17135,22 +17370,28 @@ export function App() {
         payload.activityKind === "file" &&
         stringFromRecord(payload, "status") === "running"
       );
-    });
-    if (!hasRunningFileEdit) {
-      return;
-    }
-    refreshIdeSourceControl(root);
+    }),
+    [deferredEventsForTurn, isActiveSessionSending],
+  );
+  useEffect(() => {
+    const root =
+      workspaceRootForPath(workspaceRoots, selectedFile) ??
+      activeSession?.workspacePath ??
+      workspacePath;
+    if (!root || !hasRunningFileEdit) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible" && document.hasFocus())
+        void refreshIdeSourceControl(root);
+    };
+    refresh();
     if (workspaceWatchMode === "event") {
       return;
     }
-    const interval = window.setInterval(
-      () => refreshIdeSourceControl(root),
-      2500,
-    );
+    const interval = window.setInterval(refresh, 2500);
     return () => window.clearInterval(interval);
   }, [
     activeSession?.workspacePath,
-    deferredEventsForTurn,
+    hasRunningFileEdit,
     refreshIdeSourceControl,
     selectedFile,
     workspacePath,
@@ -17676,8 +17917,9 @@ export function App() {
         action: `${path} marked reviewed`,
       }),
     onComment: (path) => dispatchWorkbench({ type: "add-diff-comment", path }),
-    onOpenInEditor: (path) => {
-      openEditorFile(path);
+    onOpenInEditor: (path, lineNumber) => {
+      if (lineNumber === undefined) openEditorFile(path);
+      else openEditorLocation(path, lineNumber);
       dispatchWorkbench({ type: "select-workspace-layout", layout: "code" });
     },
     onRejectAll: () =>
@@ -17769,10 +18011,6 @@ export function App() {
     selectedTerminalPaneId: workbench.selectedTerminalPaneId,
     terminalTemplate: workbench.terminalTemplate,
   };
-
-  const updater = useGyroUpdater({
-    automaticChecks: config.automaticUpdateChecks !== false,
-  });
 
   // Provider CLI updates (Claude, Codex, Grok, …) — separate from Gyro.app.
   const [cliUpdateOffers, setCliUpdateOffers] = useState<CliUpdateOffer[]>([]);
@@ -17942,12 +18180,14 @@ export function App() {
       notify(
         "terminal",
         `Gyro ${result.nextVersion} is available`,
-        "Use the update button at the bottom of the sidebar to download it",
+        automaticUpdates
+          ? "Gyro will download this update and install it when you quit"
+          : "Use the update button at the bottom of the sidebar to download it",
       );
     } else if (result.status === "failed") {
       notify("command-failed", "Update check failed", result.error);
     }
-  }, [notify, updater]);
+  }, [automaticUpdates, notify, updater]);
   const runUpdateAction = useCallback(
     (state: UpdateState = updater.state) => {
       if (state.status === "available") {
@@ -17987,10 +18227,7 @@ export function App() {
         ? sessions.find((session) => session.id === pane.sessionId)
         : undefined;
     const paneWorkspace = normalizeProjectPath(pane.workspacePath);
-    const branchRoot = normalizeProjectPath(branchCatalog?.repoRoot ?? "");
-    const paneBranchCatalog = branchRoot &&
-      (paneWorkspace === branchRoot || paneWorkspace.startsWith(branchRoot + "/"))
-      ? branchCatalog : undefined;
+    const paneBranchCatalog = branchCatalogs.get(paneWorkspace);
     const paneFiles = files.filter((file) =>
       normalizeProjectPath(file.workspacePath ?? workspacePath) === paneWorkspace,
     );
@@ -18019,10 +18256,7 @@ export function App() {
     const paneGoal =
       pane.kind === "session" ? paneContext?.goal : pendingNewChatGoal;
     const paneSelectedMode = chatDraftModes[paneDraftKey] ?? "normal";
-    const paneMode =
-      COUNCIL_COMING_SOON && paneSelectedMode === "council"
-        ? "normal"
-        : paneSelectedMode;
+    const paneMode = paneSelectedMode;
     const paneSessionUsage =
       pane.kind === "session" ? sessionUsageById[pane.sessionId] : undefined;
     // Plan still takes the rail on its own; the dock's tab shows through when
@@ -18194,7 +18428,7 @@ export function App() {
               normalizeProjectPath(pane.workspacePath)
             ]
           }
-          config={config}
+          config={configForChat(paneSession, paneDraftKey)}
           files={paneFiles}
           onOpenCompanionFile={openEditorFile}
           modelFocus={
@@ -18212,6 +18446,7 @@ export function App() {
           onResumeUsage={() => void resumeUsage()}
           attachments={chatAttachments[paneDraftKey] ?? []}
           chatMode={paneMode}
+          councilScope={chatCouncilSticky[paneDraftKey] ? "chat" : undefined}
           submittedChatMode={paneContext?.mode ?? "normal"}
           diffReview={isFocused ? workbench.diffReview : undefined}
           draftResetToken={draftResetToken}
@@ -18284,9 +18519,8 @@ export function App() {
               workspacePath: pane.workspacePath,
             });
           }}
-          onDraftChange={(value) =>
-            setChatDrafts((current) => ({ ...current, [paneDraftKey]: value }))
-          }
+          draftReviewer={draftReviewers[paneDraftKey]}
+          onDraftChange={(value, reviewer) => updateComposerDraft(paneDraftKey, value, reviewer)}
           onRemoveAttachment={(attachmentId) =>
             setChatAttachments((current) => ({
               ...current,
@@ -18301,6 +18535,7 @@ export function App() {
               [paneDraftKey]: message,
             }))
           }
+          isStoppingChat={pane.kind === "session" && stoppingSessionIds.includes(pane.sessionId)}
           onStopChat={() => {
             focusChatPane(pane);
             if (pane.kind === "session" && isTauriRuntime()) {
@@ -18377,7 +18612,6 @@ export function App() {
               ? fileReviewTools
               : undefined
           }
-          onLoadChangeDiff={(path) => loadInlineChangeDiff(path, pane.workspacePath)}
           onLoadComparisonDiff={(file, comparison) =>
             loadGitComparisonDiff(pane.workspacePath, file, comparison, isTauriRuntime())
           }
@@ -18393,6 +18627,7 @@ export function App() {
             focusChatPane(pane);
             steerQueuedChatMessage(messageId);
           }}
+          onUndoRecordedEdit={undoRecordedEdit}
           onMutationApprovalAction={(proposalId, decision) => {
             focusChatPane(pane);
             return handleMutationApprovalAction(proposalId, decision);
@@ -18582,7 +18817,7 @@ export function App() {
       }
       onToggleBrowserPanel={toggleBrowserPanel}
       capabilityPolicy={activeCapabilityPolicy}
-      config={config}
+      config={configForChat(activeSession, activeDraftKey)}
       files={files}
       onOpenCompanionFile={openEditorFile}
       modelFocus={
@@ -18604,6 +18839,7 @@ export function App() {
       }
       attachments={activeChatAttachments}
       chatMode={activeChatMode}
+      councilScope={chatCouncilSticky[activeDraftKey] ? "chat" : undefined}
       submittedChatMode={persistedSessionContext.mode}
       diffReview={workbench.diffReview}
       draftResetToken={draftResetToken}
@@ -18648,10 +18884,12 @@ export function App() {
         notify("command-failed", "Image could not be attached", message)
       }
       onComposerAction={handleComposerAction}
+      draftReviewer={draftReviewers[activeDraftKey]}
       onDraftChange={updateActiveChatDraft}
       onRemoveAttachment={removeChatAttachment}
       onReusePrompt={updateActiveChatDraft}
-      onStopChat={stopActiveChat}
+      isStoppingChat={Boolean(activeSessionId && stoppingSessionIds.includes(activeSessionId))}
+          onStopChat={stopActiveChat}
       onContinueChat={continueChat}
       onCouncilAction={handleCouncilAction}
       onOpenToolPanel={openToolPanel}
@@ -18666,11 +18904,11 @@ export function App() {
       onCancelGoalComposer={dismissGoalComposer}
       onCloseGoalComposer={closeGoalComposer}
       fileReview={fileReviewTools}
-      onLoadChangeDiff={loadInlineChangeDiff}
       onLoadComparisonDiff={loadComparisonDiff}
       onEditQueuedMessage={editQueuedChatMessage}
       onRemoveQueuedMessage={removeQueuedChatMessage}
       onSteerQueuedMessage={steerQueuedChatMessage}
+      onUndoRecordedEdit={undoRecordedEdit}
       onMutationApprovalAction={handleMutationApprovalAction}
       onProviderApprovalAction={handleProviderApprovalAction}
       onProviderStatusAction={handleProviderStatusAction}
@@ -18842,17 +19080,20 @@ export function App() {
       isSourceControlSyncing={sourceControlSyncing}
       onRefreshSourceControl={refreshSourceControl}
       onStageAllSourceControl={stageAllSourceControl}
-      branchCatalog={branchCatalog}
+      branchCatalog={workspaceBranchCatalog}
       isBranchLoading={isBranchLoading}
-      onSelectWorkspaceBranch={(branch) => void switchWorkspaceBranch(branch)}
+      onOpenBranchPicker={() => void refreshWorkspaceBranches(workspaceActionRoot, true)}
+      onSelectWorkspaceBranch={(branch) => void switchWorkspaceBranch(branch, workspaceActionRoot)}
       onCreateWorkspaceBranch={(startPoint) =>
-        void createWorkspaceBranch(startPoint)
+        void createWorkspaceBranch(startPoint, false, workspaceActionRoot)
       }
       onRefreshGithub={() =>
         workspaceActionRoot
           ? void refreshGithub(workspaceActionRoot)
           : undefined
       }
+      onGithubSetup={runGithubSetup}
+      githubSetupRunning={githubSetupRunning}
       onSelectGithubRun={selectGithubRun}
       onViewGithubRunLogs={viewGithubRunLogs}
       onRerunGithubRun={rerunGithubRun}
@@ -19033,7 +19274,7 @@ export function App() {
                     railTerminalTools={railTerminalTools}
                     browserPreview={browserPreview}
                     capabilityPolicy={activeCapabilityPolicy}
-                    config={config}
+                    config={configForChat(activeSession, activeDraftKey)}
                     files={files}
                     onOpenCompanionFile={openEditorFile}
                     modelFocus={
@@ -19057,6 +19298,7 @@ export function App() {
                     }
                     attachments={activeChatAttachments}
                     chatMode={activeChatMode}
+                    councilScope={chatCouncilSticky[activeDraftKey] ? "chat" : undefined}
                     submittedChatMode={persistedSessionContext.mode}
                     diffReview={workbench.diffReview}
                     draftResetToken={draftResetToken}
@@ -19111,10 +19353,12 @@ export function App() {
                       )
                     }
                     onComposerAction={handleComposerAction}
+                    draftReviewer={draftReviewers[activeDraftKey]}
                     onDraftChange={updateActiveChatDraft}
                     onRemoveAttachment={removeChatAttachment}
                     onReusePrompt={updateActiveChatDraft}
-                    onStopChat={stopActiveChat}
+                    isStoppingChat={Boolean(activeSessionId && stoppingSessionIds.includes(activeSessionId))}
+          onStopChat={stopActiveChat}
                     onContinueChat={continueChat}
                     onCouncilAction={handleCouncilAction}
                     onOpenToolPanel={openToolPanel}
@@ -19131,11 +19375,11 @@ export function App() {
                     onCancelGoalComposer={dismissGoalComposer}
                     onCloseGoalComposer={closeGoalComposer}
                     fileReview={fileReviewTools}
-                    onLoadChangeDiff={loadInlineChangeDiff}
                     onLoadComparisonDiff={loadComparisonDiff}
                     onEditQueuedMessage={editQueuedChatMessage}
                     onRemoveQueuedMessage={removeQueuedChatMessage}
                     onSteerQueuedMessage={steerQueuedChatMessage}
+                    onUndoRecordedEdit={undoRecordedEdit}
                     onMutationApprovalAction={handleMutationApprovalAction}
                     onProviderApprovalAction={handleProviderApprovalAction}
                     onProviderStatusAction={handleProviderStatusAction}
@@ -19479,7 +19723,7 @@ export function App() {
                   });
               }}
               activeBuffer={activeEditorBuffer}
-              branchCatalog={branchCatalog}
+              branchCatalog={workspaceBranchCatalog}
               editorSelection={workbench.ide.selection}
               fileContent={selectedFileContent}
               fileLoadState={selectedFileLoadState}
@@ -19506,10 +19750,13 @@ export function App() {
               }}
               onCreateBranch={() =>
                 void createWorkspaceBranch(
-                  scopedIde.sourceControl.branch ?? branchCatalog?.current,
+                  scopedIde.sourceControl.branch ?? workspaceBranchCatalog?.current,
+                  false,
+                  workspaceActionRoot,
                 )
               }
-              onSelectBranch={(branch) => void switchWorkspaceBranch(branch)}
+              onOpenBranchPicker={() => void refreshWorkspaceBranches(workspaceActionRoot, true)}
+              onSelectBranch={(branch) => void switchWorkspaceBranch(branch, workspaceActionRoot)}
               selectedPath={selectedFile}
             />
           ) : null}
@@ -19937,7 +20184,7 @@ export function App() {
               : []
           }
           capabilityPolicy={activeCapabilityPolicy}
-          config={config}
+          config={configForChat(activeSession, activeDraftKey)}
           files={files}
           onOpenCompanionFile={openEditorFile}
           providerUsageByProvider={providerUsageByProvider}
@@ -19946,6 +20193,7 @@ export function App() {
           onResumeUsage={() => void resumeUsage()}
           attachments={activeChatAttachments}
           chatMode={activeChatMode}
+          councilScope={chatCouncilSticky[activeDraftKey] ? "chat" : undefined}
           submittedChatMode={persistedSessionContext.mode}
           draftResetToken={draftResetToken}
           draft={activeChatDraft}
@@ -19979,9 +20227,11 @@ export function App() {
             notify("command-failed", "Image could not be attached", message)
           }
           onComposerAction={handleComposerAction}
+          draftReviewer={draftReviewers[activeDraftKey]}
           onDraftChange={updateActiveChatDraft}
           onRemoveAttachment={removeChatAttachment}
           onReusePrompt={updateActiveChatDraft}
+          isStoppingChat={Boolean(activeSessionId && stoppingSessionIds.includes(activeSessionId))}
           onStopChat={stopActiveChat}
           onContinueChat={continueChat}
           onCouncilAction={handleCouncilAction}
@@ -19999,6 +20249,7 @@ export function App() {
           onEditQueuedMessage={editQueuedChatMessage}
           onRemoveQueuedMessage={removeQueuedChatMessage}
           onSteerQueuedMessage={steerQueuedChatMessage}
+          onUndoRecordedEdit={undoRecordedEdit}
           onMutationApprovalAction={handleMutationApprovalAction}
           onProviderApprovalAction={handleProviderApprovalAction}
           onProviderStatusAction={handleProviderStatusAction}
@@ -20074,7 +20325,13 @@ export function App() {
         />
       ) : null}
       {quitConfirmation.requested ? (
-        <QuitConfirmDialog onResolve={quitConfirmation.resolve} />
+        <QuitConfirmDialog
+          onResolve={quitConfirmation.resolve}
+          willInstallUpdate={
+            automaticUpdates &&
+            (updater.state.status === "ready" || updater.state.status === "installing")
+          }
+        />
       ) : null}
       {modelStandardPrompt && canShowModelDefaultSuggestion ? (
         <ModelStandardPromptOverlay

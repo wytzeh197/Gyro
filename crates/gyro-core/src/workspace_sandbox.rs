@@ -44,11 +44,36 @@ impl PreparedWorkspaceSandbox {
     ) -> Result<Self> {
         #[cfg(target_os = "macos")]
         {
-            macos::prepare(workspace, cwd, home, private_data_root)
+            macos::prepare(workspace, cwd, home, private_data_root, NetworkPolicy::Open)
         }
         #[cfg(not(target_os = "macos"))]
         {
             let _ = (workspace, cwd, home, private_data_root);
+            bail!("Gyro's workspace command sandbox requires macOS; execution was not started")
+        }
+    }
+
+    /// Prepare an offline command, optionally allowing only its own local HTTPS proxy.
+    pub fn prepare_with_network_boundary(
+        workspace: &Path,
+        cwd: &Path,
+        home: &Path,
+        private_data_root: Option<&Path>,
+        proxy_port: Option<u16>,
+    ) -> Result<Self> {
+        #[cfg(target_os = "macos")]
+        {
+            macos::prepare(
+                workspace,
+                cwd,
+                home,
+                private_data_root,
+                NetworkPolicy::Bounded(proxy_port),
+            )
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (workspace, cwd, home, private_data_root, proxy_port);
             bail!("Gyro's workspace command sandbox requires macOS; execution was not started")
         }
     }
@@ -75,6 +100,13 @@ impl PreparedWorkspaceSandbox {
 }
 
 #[cfg(target_os = "macos")]
+#[derive(Clone, Copy)]
+enum NetworkPolicy {
+    Open,
+    Bounded(Option<u16>),
+}
+
+#[cfg(target_os = "macos")]
 mod macos {
     use super::*;
     use anyhow::{ensure, Context};
@@ -84,6 +116,7 @@ mod macos {
     use std::path::Component;
 
     const BASE_POLICY: &str = include_str!("workspace_sandbox.sbpl");
+    const OPEN_NETWORK_POLICY: &str = include_str!("workspace_sandbox_open_network.sbpl");
     const METADATA_NAMES: &[&str] = &[".git", ".gyro", ".codex", ".claude", ".agents"];
     // Case variants matter on the default case-insensitive macOS filesystem.
     const METADATA_FILTER: &str = r#"(regex #"(^|/)[.]([gG][iI][tT]|[gG][yY][rR][oO]|[cC][oO][dD][eE][xX]|[cC][lL][aA][uU][dD][eE]|[aA][gG][eE][nN][tT][sS])(/|$)")"#;
@@ -127,6 +160,7 @@ mod macos {
         cwd: &Path,
         home: &Path,
         private_data_root: Option<&Path>,
+        network: NetworkPolicy,
     ) -> Result<PreparedWorkspaceSandbox> {
         ensure!(
             Path::new(SANDBOX_EXECUTABLE).is_file(),
@@ -189,6 +223,25 @@ mod macos {
         fs::create_dir(&cache_path)?;
 
         let mut policy = Policy::new();
+        match network {
+            NetworkPolicy::Open => policy.source.push_str(OPEN_NETWORK_POLICY),
+            NetworkPolicy::Bounded(port) => {
+                policy.source.push_str("\n(allow system-socket (socket-domain AF_INET))\n");
+                if port.is_none() {
+                    policy.source.push_str("(allow system-socket (socket-domain AF_INET6))\n");
+                }
+                // Preview servers may listen on loopback. Outbound sockets
+                // reach only this invocation's private proxy when present.
+                policy
+                    .source
+                    .push_str("(allow network-inbound network-bind (local ip \"localhost:*\"))\n");
+                if let Some(port) = port {
+                    policy.source.push_str(&format!(
+                        "(allow network-outbound (remote ip \"localhost:{port}\"))\n"
+                    ));
+                }
+            }
+        }
         let workspace_filter = policy.path_filter(&workspace);
         let scratch_filter = policy.path_filter(&scratch_path);
         let mut read_exclusions = Vec::new();

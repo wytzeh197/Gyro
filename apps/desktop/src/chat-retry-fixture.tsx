@@ -284,7 +284,8 @@ function NativeRetryFixture() {
     approvals: 0,
   });
   const [action, setAction] = useState("");
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(params.get("draft") ?? "");
+  const [stopping, setStopping] = useState(false);
   const [lastStatusAction, setLastStatusAction] = useState<{
     action: string;
     eventId: string;
@@ -412,6 +413,7 @@ function NativeRetryFixture() {
           : {}),
         ...(isExhausted
           ? {
+              recovery: { continuationAvailable: true },
               recoveryKind: isRateLimit
                 ? "retry-exhausted"
                 : "model-capacity-exhausted",
@@ -422,6 +424,7 @@ function NativeRetryFixture() {
           : {}),
         ...(isCooldown
           ? {
+              recovery: { continuationAvailable: true },
               recoveryKind: "rate-limit",
               error: "rate limit exceeded. Please try again in 60s.",
               retryNotBefore: new Date(cooldownAt).toISOString(),
@@ -560,6 +563,8 @@ function NativeRetryFixture() {
           draft={draft}
           onDraftChange={setDraft}
           onSend={() => {}}
+          onStopChat={params.has("composerStop") ? () => setStopping(true) : undefined}
+          isStoppingChat={stopping}
           isComposerSending={
             !isCancelled &&
             !isExhausted &&

@@ -248,8 +248,16 @@
   .gyro-settings-surface.is-minimal-settings
   .gyro-workspace-settings-editor {
   display: grid;
-  gap: var(--gyro-space-section);
+  /* Same 40px group rhythm as .gyro-settings-section-body. */
+  gap: calc(var(--gyro-space-section) * 2);
   max-width: none;
+}
+/* The grid gap already separates the heading from the first group. */
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-workspace-settings-editor
+  > header {
+  padding-bottom: 0;
 }
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings
@@ -499,7 +507,6 @@
   .gyro-settings-surface.is-minimal-settings
   .gyro-theme-picker {
   max-width: 560px;
-  margin-left: auto;
 }
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings

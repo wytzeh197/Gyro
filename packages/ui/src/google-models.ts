@@ -1,3 +1,4 @@
+import { antigravityModelName } from "./antigravity-model-names.ts";
 import { providersForConfig } from "./provider-catalog.ts";
 import type { GyroConfig, ProviderId, ProviderModel } from "./types";
 
@@ -36,7 +37,7 @@ export function applyGoogleModelDiscovery(
         ids.add(id);
         models.push({
           id,
-          displayName: model.displayName?.trim().slice(0, 160) || id,
+          displayName: discoveredName(id, model.displayName),
           description: model.description?.slice(0, 500),
           cliDiscovered: true,
         });
@@ -59,4 +60,10 @@ export function applyGoogleModelDiscovery(
       };
     }),
   };
+}
+
+/** The agent's own label wins; a bare id (no label sent) gets Antigravity's name. */
+function discoveredName(id: string, label: string | undefined | null) {
+  const name = label?.trim().slice(0, 160);
+  return name && name !== id ? name : antigravityModelName(id);
 }

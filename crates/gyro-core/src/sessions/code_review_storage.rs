@@ -102,6 +102,49 @@ impl SessionStore {
         transaction.commit()?;
         Ok(removable)
     }
+    /// Project the reviewer lifecycle for the visible turns without loading findings or diffs.
+    pub fn turn_review_progress(
+        &self,
+        source: Uuid,
+        turns: &[Uuid],
+    ) -> Result<Vec<serde_json::Value>> {
+        let mut query = self.conn.prepare(
+            "select o.operation_id, r.id, r.status,
+                    exists(select 1 from code_review_transitions t where t.review_id=r.id and t.status='running'),
+                    json_extract(r.run_json, '$.providerId'), json_extract(r.run_json, '$.modelId'),
+                    json_extract(r.run_json, '$.suppliedFiles')
+             from code_review_operations o join code_reviews r on r.id=o.review_id
+             where r.source_session_id=?1 and o.operation_id in (select value from json_each(?2))"
+        )?;
+        let rows = query.query_map(
+            params![source.to_string(), serde_json::to_string(turns)?],
+            |row| {
+                Ok(serde_json::json!({
+                    "turnId": row.get::<_, String>(0)?, "reviewId": row.get::<_, String>(1)?,
+                    "status": row.get::<_, String>(2)?, "started": row.get::<_, bool>(3)?,
+                    "providerId": row.get::<_, String>(4)?, "modelId": row.get::<_, String>(5)?,
+                    "fileCount": row.get::<_, u64>(6)?,
+                }))
+            },
+        )?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn code_review_for_operation(&self, operation: Uuid) -> Result<Option<CodeReviewRun>> {
+        let id: Option<String> = self
+            .conn
+            .query_row(
+                "select review_id from code_review_operations where operation_id=?1",
+                [operation.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match id {
+            Some(id) => self.code_review(Uuid::parse_str(&id)?),
+            None => Ok(None),
+        }
+    }
+
     pub fn create_code_review_with_operation(
         &self,
         operation: Uuid,
@@ -116,17 +159,7 @@ impl SessionStore {
             &self.conn,
             rusqlite::TransactionBehavior::Immediate,
         )?;
-        let existing: Option<String> = transaction
-            .query_row(
-                "select review_id from code_review_operations where operation_id=?1",
-                [operation.to_string()],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let run = if let Some(existing) = existing {
-            let run = self
-                .code_review(Uuid::parse_str(&existing)?)?
-                .ok_or_else(|| anyhow::anyhow!("review operation is unavailable"))?;
+        let run = if let Some(run) = self.code_review_for_operation(operation)? {
             ensure!(
                 run.source_session_id == snapshot.source_session_id
                     && run.snapshot_id == Some(snapshot.id)
