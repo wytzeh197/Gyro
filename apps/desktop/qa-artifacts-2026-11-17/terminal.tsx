@@ -14,7 +14,7 @@ import {
   type TerminalPane,
 } from "@gyro-dev/ui";
 import "@gyro-dev/ui/styles.css";
-import "/@fs/Users/wytze/Gyro/packages/ui/src/appearance.css";
+import "../../../packages/ui/src/appearance.css";
 
 // Optional appearance variants make toolbar alignment reproducible without
 // changing the real app's saved preferences.

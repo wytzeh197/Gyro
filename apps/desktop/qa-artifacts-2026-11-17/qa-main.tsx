@@ -99,9 +99,9 @@ if (bootSurface === "embedded") {
   void Promise.all([
     import("/src/MenuBarPopover"),
     import("/src/menu-bar.css"),
-    import("/@fs/Users/wytze/Gyro/packages/ui/src/styles-entry.css"),
-    import("/@fs/Users/wytze/Gyro/packages/ui/src/installed-update.css"),
-    import("/@fs/Users/wytze/Gyro/packages/ui/src/gyro-tooltip.ts"),
+    import("../../../packages/ui/src/styles-entry.css"),
+    import("../../../packages/ui/src/installed-update.css"),
+    import("../../../packages/ui/src/gyro-tooltip.ts"),
   ])
     .then(([{ MenuBarPopover }, , , , { installGyroTooltips }]) => {
       installGyroTooltips();
@@ -126,11 +126,11 @@ if (bootSurface === "embedded") {
   void Promise.all([
     import("/src/App"),
     import("/src/remote-access/root"),
-    import("/@fs/Users/wytze/Gyro/packages/ui/src/styles-entry.css"),
-    import("/@fs/Users/wytze/Gyro/packages/ui/src/installed-update.css"),
+    import("../../../packages/ui/src/styles-entry.css"),
+    import("../../../packages/ui/src/installed-update.css"),
     import("/src/menu-bar.css"),
     import("/src/dictation-access"),
-    import("/@fs/Users/wytze/Gyro/packages/ui/src/gyro-tooltip.ts"),
+    import("../../../packages/ui/src/gyro-tooltip.ts"),
   ])
     .then(async ([{ App }, { RemoteWorkspaceRoot }, , , , , { installGyroTooltips }]) => {
       await initializeDurableEditRecovery();

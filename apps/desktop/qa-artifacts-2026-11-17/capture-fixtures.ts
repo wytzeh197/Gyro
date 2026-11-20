@@ -12,8 +12,8 @@
  * Every value below is invented demo content. Nothing here reads a real
  * session, repository, or provider account.
  */
-import appearanceCss from "/@fs/Users/wytze/Gyro/packages/ui/src/appearance.css?inline";
-import { writeTourRecord } from "/@fs/Users/wytze/Gyro/packages/ui/src/first-run-tour.ts";
+import appearanceCss from "../../../packages/ui/src/appearance.css?inline";
+import { writeTourRecord } from "../../../packages/ui/src/first-run-tour.ts";
 import { disconnectedCloudView } from "/src/cloud-connection-view";
 
 type Invoke = (command: string, args?: Record<string, unknown>) => unknown;
