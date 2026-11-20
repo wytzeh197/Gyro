@@ -480,10 +480,14 @@ assert.throws(() =>
       !model.insertBefore || siblings.has(model.insertBefore),
       `${label}: insertBefore "${model.insertBefore}" names no model`,
     );
-    // An entry replaces bundled metadata whole, so these are never optional.
-    for (const field of ["contextWindowTokens", "supportedReasoningEfforts"]) {
-      assert.ok(model[field] !== undefined, `${label}: ${field} is missing`);
-    }
+    // An entry replaces bundled metadata whole, so these are never optional
+    // for a bundled model. A model Gyro doesn't bundle has nothing to lose, so
+    // it may leave out a context window its maker doesn't publish.
+    assert.ok(model.supportedReasoningEfforts !== undefined, `${label}: supportedReasoningEfforts is missing`);
+    assert.ok(
+      model.contextWindowTokens !== undefined || !known.includes(model.id),
+      `${label}: contextWindowTokens is missing`,
+    );
     assert.equal(
       model.defaultReasoningEffort !== undefined,
       model.supportedReasoningEfforts.length > 0,
@@ -852,6 +856,15 @@ assert.equal(
       rows: [
         ["deepseek", "deepseek-flash", "api", 1_000_000],
         ["openrouter", "deepseek/deepseek-v4.1-flash", "api", 1_048_576],
+      ],
+    },
+    {
+      // Google publishes no window for Antigravity's Flash; OpenRouter's
+      // 1M must not be shown there.
+      name: "Gemini 3.8 Flash",
+      rows: [
+        ["antigravity", "gemini-3.8-flash", "cli", null],
+        ["openrouter", "google/gemini-3.8-flash", "api", 1_048_576],
       ],
     },
   ];
