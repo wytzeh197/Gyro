@@ -327,7 +327,7 @@ export function environmentFocus({
         isRunning && planCurrent
           ? `Step ${planCurrent} of ${planSteps}`
           : workingSubagents > 0
-            ? `${plural(workingSubagents, "agent")} working`
+            ? `${plural(workingSubagents, "agent")} active`
             : "Working",
     };
   }

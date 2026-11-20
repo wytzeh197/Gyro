@@ -13,7 +13,6 @@ use crate::{
         retry_recovery::run_provider_chat_with_retry_using_with_wait,
         run::compact_provider_chat_blocking,
         runner::runner_for,
-        runners::kimi_acp::provider_resume_cursor_from_binding,
         streaming::{provider_chat_cancelled, provider_stop_message},
         tauri_host::TauriRunnerHost,
         types::{ProviderResumeCursor, ProviderRunAttempt, ProviderRunnerOutput},
@@ -371,76 +370,7 @@ pub(crate) fn run_provider_chat_with_retry_inner(
     result
 }
 
-/// Wait out a retry delay in short steps, returning the stop message if the
-/// run is stopped meanwhile so a stopped turn never starts another attempt.
-pub(crate) fn wait_before_provider_retry(
-    delay: Duration,
-    stopped: &impl Fn() -> Option<String>,
-) -> Result<(), String> {
-    let deadline = Instant::now() + delay;
-    loop {
-        if let Some(message) = stopped() {
-            return Err(message);
-        }
-        let now = Instant::now();
-        if now >= deadline {
-            return Ok(());
-        }
-        std::thread::sleep((deadline - now).min(Duration::from_millis(50)));
-    }
-}
-
-pub(crate) fn persist_failed_provider_attempt(
-    store: &SessionStore,
-    request: &ProviderChatRequest,
-    binding: Option<&ProviderSessionBinding>,
-    attempt: &ProviderRunAttempt,
-    error: &anyhow::Error,
-) {
-    let last_error = Some(gyro_core::security::redact_secrets(&error.to_string()));
-    match binding {
-        Some(binding) => {
-            let _ = store.upsert_provider_session_binding(
-                binding.session_id,
-                binding.provider_id.clone(),
-                binding.model_id.clone(),
-                binding.model_label.clone(),
-                binding.reasoning_effort.clone(),
-                attempt
-                    .resume_cursor
-                    .as_ref()
-                    .and_then(|cursor| serde_json::to_value(cursor).ok())
-                    .unwrap_or_else(|| binding.resume_cursor_json.clone()),
-                "failed",
-                last_error,
-            );
-        }
-        // A session's first turn has no binding to carry forward, so the cursor
-        // this run created is the only record that the provider conversation
-        // exists. Dropping it is what made a stopped first turn restart from
-        // nothing on every retry.
-        None => {
-            let cursor_json = attempt
-                .resume_cursor
-                .as_ref()
-                .and_then(|cursor| serde_json::to_value(cursor).ok());
-            if let (Some(cursor_json), Ok(session_id)) =
-                (cursor_json, parse_uuid(&request.session_id))
-            {
-                let _ = store.upsert_provider_session_binding(
-                    session_id,
-                    request.provider_id.clone(),
-                    request.model_id.clone(),
-                    request.model_label.clone(),
-                    request.reasoning_effort.clone(),
-                    cursor_json,
-                    "failed",
-                    last_error,
-                );
-            }
-        }
-    }
-}
+pub(crate) use gyro_core::provider_runtime::recovery::wait_before_retry as wait_before_provider_retry;
 
 pub(crate) fn with_browser_attachment_images(
     request: &ProviderChatRequest,

@@ -106,6 +106,7 @@ export const reviewIsActive = (status: CodeReviewStatus) =>
   ["queued", "capturing", "running"].includes(status);
 
 export type CodeReviewEntryRequest = {
+  reviewId?: string;
   token: number;
   rootId?: string;
   scope: CodeReviewScope;

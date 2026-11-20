@@ -562,6 +562,7 @@ pub(crate) fn extract_codex_agent_message_text(value: &serde_json::Value) -> Opt
     gyro_core::extract_codex_agent_message_text(value)
 }
 
+#[cfg(test)]
 pub(crate) use gyro_core::provider_runtime::support::provider_activities_for_response;
 #[cfg(test)]
 pub(crate) use gyro_core::provider_runtime::support::recover_streamed_provider_answer;

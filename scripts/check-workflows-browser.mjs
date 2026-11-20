@@ -188,8 +188,8 @@ try {
     );
     await pause(200);
   }
-  async function setup() {
-    await click("Run workflow…");
+  async function setup(action = "Run workflow…") {
+    await click(action);
     await until(
       async () => (await text()).includes("Provider for reader"),
       "role setup",
@@ -353,6 +353,17 @@ try {
     true,
     "narrow library fits viewport",
   );
+  assert.equal(
+    await evaluate(`(() => {
+      const project = document.querySelector('.gyro-workflow-project select');
+      const area = project.getBoundingClientRect();
+      const icon = project.nextElementSibling.getBoundingClientRect();
+      const padding = parseFloat(getComputedStyle(project).paddingInlineEnd);
+      return area.width > 200 && icon.left >= area.right - padding;
+    })()`),
+    true,
+    "narrow project picker reserves room for the chevron",
+  );
   await screenshot("workflow-empty-light-narrow");
   await click("New workflow");
   await field("Name", "My task");
@@ -401,25 +412,43 @@ try {
   );
   await click("Schedules");
   await until(
-    async () => (await text()).includes("Existing prompt schedules"),
-    "legacy schedule preserved",
+    async () => (await text()).includes("Update readme"),
+    "existing prompt schedule is available",
   );
+  await click("New schedule");
+  await click("Schedule a prompt");
+  await until(
+    async () => (await text()).includes("New automation"),
+    "prompt setup opens",
+  );
+  await click("Close automation details");
+  await click("Update readme");
+  await until(
+    async () => (await text()).includes("README updated."),
+    "prompt schedule detail opens",
+  );
+  await click("Close automation details");
   await screenshot("workflow-schedules-dark");
   await load("theme=light&density=compact", 700);
-  await setup();
-  await evaluate(
-    "[...document.querySelectorAll('summary')].find(item=>item.textContent==='Schedule (optional)').click()",
-  );
+  await click("Schedules");
+  await click("New schedule");
+  await click("Schedule a workflow");
+  await setup("Schedule workflow…");
   await field("Run timing", "hourly");
   await click("Check setup");
   await click("Create schedule");
   await until(
     async () =>
-      (await text()).includes("Pinned version") &&
-      (await text()).includes("Existing prompt schedules"),
-    "created schedule remains alongside legacy schedules",
+      (await text()).includes("Next Nov 18") &&
+      (await text()).includes("Update readme"),
+    "workflow and prompt share one schedule list",
   );
+  assert.ok(!(await text()).includes("Pinned version"));
   await screenshot("workflow-schedule-created-light-compact");
+  await click("Inspect changes");
+  assert.ok((await text()).includes("Pinned version"));
+  await click("Pause schedule");
+  await click("Resume schedule");
   await load("state=stale&theme=light", 650);
   await click("Run workflow…");
   await until(
@@ -446,7 +475,19 @@ try {
   assert.ok((await text()).includes("Edit workflow"));
   await screenshot("workflow-save-conflict");
   await load("state=unproven", 430);
-  await click("Create from a chat");
+  assert.deepEqual(
+    await evaluate(
+      "[...document.querySelectorAll('.gyro-workflow-project option')].map(option => option.textContent)",
+    ),
+    ["Gyro"],
+  );
+  await click("Create from chat");
+  await field("Source chat", "other-chat");
+  assert.ok(
+    await evaluate(
+      "window.workflowFixture.calls.some(call => call.action === 'turns' && call.session === 'other-chat')",
+    ),
+  );
   await until(
     async () => (await text()).includes("Inspect the scoped arithmetic"),
     "source selection",
@@ -487,7 +528,7 @@ try {
     "extraction does not launch",
   );
   await load("state=extract-running");
-  await click("Create from a chat");
+  await click("Create from chat");
   await until(
     async () => (await text()).includes("Inspect the scoped arithmetic"),
     "source task ready",
@@ -540,10 +581,23 @@ try {
   );
   await load("state=attention&theme=light", 650);
   await click("Runs");
+  assert.ok((await text()).includes("Verification failed"));
+  await screenshot("workflow-runs-attention-light");
   await click("Inspect changes");
   await until(
     async () => (await text()).includes("2 open findings"),
     "attention detail",
+  );
+  assert.equal(
+    await evaluate("document.activeElement.matches('.is-attention-step')"),
+    true,
+  );
+  assert.equal(
+    await evaluate(
+      "document.activeElement.querySelector('.gyro-workflow-pill').textContent",
+    ),
+    "Failed",
+    "failed verification is visible on the step",
   );
   await screenshot("workflow-attention-light");
   await click("Delete run record…");

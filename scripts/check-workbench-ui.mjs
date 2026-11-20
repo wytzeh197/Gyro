@@ -599,6 +599,7 @@ expect(
 const appSource = [
   readRepoFile("apps/desktop/src/provider-login-profile.ts"),
   readRepoFile("apps/desktop/src/App.tsx"),
+  readRepoFile("apps/desktop/src/use-terminal-launch.ts"),
   readRepoFile("apps/desktop/src/use-workbench-appearance.ts"),
   readRepoFile("apps/desktop/src/editor-presentation.ts"),
   readRepoFile("apps/desktop/src/session-context-events.ts"),
@@ -1148,7 +1149,7 @@ expect(
     "const shouldShowFinalResponse = Boolean(responseEvent);",
   ) &&
     chatTurnSource.includes(
-      "{responseEvent && shouldShowFinalResponse && !isPlanResponseTurn ? (",
+      "{responseEvent && shouldShowFinalResponse && !isPlanResponseTurn && !waitingForOpinion ? (",
     ),
   "A completed workspace turn should retain its final response above the change summary, except when the plan lives in the right panel.",
 );
@@ -1192,13 +1193,13 @@ expect(
     desktopRustSource.includes(
       "wait_timeout(state, WORKSPACE_PREPARATION_WAIT_TIMEOUT)",
     ) &&
-    appSource.includes('workspaceWatchMode === "polling"') &&
+    appSource.includes('workspaceWatchMode === "event" ? 20_000 : 3_000') &&
     appSource.includes("workspacePreparationPathRef.current ===") &&
     appSource.includes("normalizeProjectPath(activeSession.workspacePath)") &&
     appSource.includes(
       "settleWorkspacePreparation(snapshot);\n        refreshIdeSourceControl(root)",
     ),
-  "Workspace preparation should expose honest native stages, bound Git inspect, and disable steady polling when the event watcher is healthy.",
+  "Workspace preparation should expose native stages, bound Git inspection, and slow reconciliation for watched roots.",
 );
 expect(
   desktopRustSource.includes("untracked_lines_before(&path, deadline)") &&
@@ -1206,7 +1207,7 @@ expect(
     desktopRustSource.includes("fn git_status_stamp") &&
     desktopRustSource.includes("--untracked-files=normal") &&
     desktopRustSource.includes("--untracked-files=all") &&
-    appSource.includes("workspaceChangeGeneration === 0") &&
+    appSource.includes("if (eventRoot === workspaceActionRoot) void refreshIdeSourceControl(eventRoot)") &&
     appSource.includes(
       'if (workspaceWatchMode === "event") {\n      return;',
     ) &&
@@ -4661,8 +4662,8 @@ expect(
     ) &&
     !sourceIncludes(surfaceSource, "assistantEvents: SessionEvent[]") &&
     !sourceIncludes(surfaceSource, "activityEvents: SessionEvent[]") &&
-    sourceIncludes(surfaceSource, "const isStopAction = Boolean(") &&
-    sourceIncludes(surfaceSource, "isStopAction ? (") &&
+    sourceIncludes(surfaceSource, "const canStop = isSending && Boolean(onStop)") &&
+    sourceIncludes(surfaceSource, "{canStop ? (") &&
     sourceIncludes(surfaceSource, '"Stop response"') &&
     sourceIncludes(surfaceSource, '"Queue message"') &&
     sourceIncludes(surfaceSource, "onStop?.();") &&
@@ -4673,10 +4674,10 @@ expect(
     sourceIncludes(surfaceSource, "event.detail === 0") &&
     sourceIncludes(
       surfaceSource,
-      "!isStopAction && (!canSubmitComposer || draft.trim().length === 0)",
+      "disabled={!canSubmitComposer || plainDraft.trim().length === 0}",
     ) &&
     sourceIncludes(surfaceSource, '"gyro-send-button"') &&
-    sourceIncludes(surfaceSource, 'isStopAction ? "is-stop"') &&
+    sourceIncludes(surfaceSource, 'className="gyro-send-button is-stop"') &&
     sourceIncludes(surfaceSource, 'isSending ? "is-sending"') &&
     styleSource.includes(".gyro-send-button.is-stop") &&
     styleSource.includes(".gyro-run.is-live") &&
@@ -6148,7 +6149,7 @@ expect(
       'const railPanel: ChatSidePanelId = activeRailPanel ?? "environment"',
     ) &&
     sourceIncludes(surfaceSource, "const isEnvironmentPopoverOpen =") &&
-    sourceIncludes(surfaceSource, "(!isEmptyStart || Boolean(environmentRemote)) &&") &&
+    sourceIncludes(surfaceSource, "(!isEmptyStart || Boolean(environmentRemote) || chatMode === \"council\") &&") &&
     sourceIncludes(surfaceSource, "const environmentPopover =") &&
     sourceIncludes(surfaceSource, "{sidePanel}") &&
     sourceIncludes(surfaceSource, '"Reopen goal"') &&
@@ -6179,7 +6180,7 @@ expect(
       chatSurfaceSource,
       "estimateComposerContextUsage(\n        transcriptEvents,\n        composerDraft,\n        contextModel)",
     ) &&
-    sourceIncludes(chatSurfaceSource, "handleComposerDraftChange") &&
+    sourceIncludes(chatSurfaceSource, "onDraftChange?.(value, reviewer)") &&
     sourceIncludes(chatSurfaceSource, "cancelGoalComposer") &&
     sourceIncludes(chatSurfaceSource, "onStartGoalChat(goal)") &&
     // A new goal is set and sent in one step; editing one only saves it.
@@ -6849,16 +6850,16 @@ expect(
     ) &&
     sourceIncludes(
       surfaceSource,
-      "if (canSubmitComposer && draft.trim().length > 0)",
+      "if (canSubmitComposer && plainDraft.trim().length > 0)",
     ) &&
     sourceIncludes(
       surfaceSource,
-      "!isStopAction && (!canSubmitComposer || draft.trim().length === 0)",
+      "disabled={!canSubmitComposer || plainDraft.trim().length === 0}",
     ) &&
     sourceIncludes(surfaceSource, 'action: "select-no-folder"') &&
     sourceIncludes(surfaceSource, 'label: "No folder"') &&
-    sourceIncludes(surfaceSource, "Choose a folder for Council") &&
-    sourceIncludes(surfaceSource, "Connect a provider before sending") &&
+    sourceIncludes(surfaceSource, "!councilResolution?.error") &&
+    sourceIncludes(surfaceSource, "const needsProviderSetup =") &&
     sourceIncludes(surfaceSource, "resolveCleanMachinePath") &&
     sourceIncludes(surfaceSource, "branchLabel") &&
     sourceIncludes(surfaceSource, 'action: "select-file"') &&
@@ -7258,7 +7259,7 @@ expect(
 // Model rail: provider marks down the left, the previewed provider's models
 // beside them once a mark is clicked, instead of a drill-down.
 expect(
-  modelRailSource.includes("export function ComposerModelRail") &&
+  modelRailSource.includes("export const ComposerModelRail = forwardRef(") &&
     modelRailSource.includes('role="tablist"') &&
     modelRailSource.includes('aria-orientation="vertical"') &&
     modelRailSource.includes('role="menuitemradio"') &&
@@ -7787,7 +7788,7 @@ expect(
     surfaceSource.includes('isPlanInPanel={activeRailPanel === "plan"}') &&
     !surfaceSource.includes("autoOpenedPlanDecisionKeyRef") &&
     !surfaceSource.includes("function PlanDecisionCard") &&
-    surfaceSource.includes("!isPlanResponseTurn ? (") &&
+    surfaceSource.includes("!isPlanResponseTurn && !waitingForOpinion ? (") &&
     /activePanel === "plan" &&\s*sessionPlan\?\.content/.test(surfaceSource) &&
     surfaceSource.includes('planView === "document"') &&
     planModeSource.includes('aria-label="Plan view"') &&
@@ -7821,7 +7822,7 @@ expect(
     planModeStyleSource.includes(".gyro-question-dock") &&
     // The card opens out of the text box and a typed answer goes to it; the
     // bar underneath drops only the add-context and approval controls.
-    sourceIncludes(surfaceSource, "{overlay}\n        {attachments.length > 0 ? (") &&
+    sourceIncludes(surfaceSource, "{writerPickerOpen ? null : overlay}\n        {attachments.length > 0 ? (") &&
     sourceIncludes(surfaceSource, "answerRef={composerAnswerRef}") &&
     sourceIncludes(surfaceSource, "const answerCard = composerAnswerRef.current;") &&
     styleSource.includes(".gyro-composer-input > .gyro-question-dock {") &&
@@ -7847,8 +7848,8 @@ expect(
       surfaceSource,
       '!isRunning && runModel.phase.name === "done"',
     ) &&
-    sourceIncludes(surfaceSource, "const reviewFiles = () => {") &&
-    sourceIncludes(surfaceSource, "setOpenPath(files[0]?.path)") &&
+    sourceIncludes(surfaceSource, "const openTurnChanges = (path?: string) =>") &&
+    sourceIncludes(surfaceSource, "onOpenChanges?.(path, changedFiles)") &&
     styleSource.includes(".gyro-composer-image-fallback") &&
     styleSource.includes(
       ':root[data-theme="light"]\n  .gyro-chat-thread-topbar\n  .gyro-thread-pill-button',
@@ -7906,18 +7907,18 @@ expect(
   sourceIncludes(surfaceSource, "OpenAI permissions") &&
     sourceIncludes(surfaceSource, "Anthropic permissions") &&
     sourceIncludes(surfaceSource, 'gatedLabel: "Ask for approval"') &&
-    sourceIncludes(surfaceSource, 'autoLabel: "Approve for me"') &&
+    sourceIncludes(surfaceSource, 'autoLabel = hasWorkspaceBoundary ? "Workspace access" : "Provider permissions"') &&
     sourceIncludes(surfaceSource, 'directLabel: "Full access"') &&
     sourceIncludes(surfaceSource, "detail: approvalCopy.gatedDetail") &&
     sourceIncludes(surfaceSource, "detail: approvalCopy.autoDetail") &&
     sourceIncludes(surfaceSource, "detail: approvalCopy.directDetail") &&
     sourceIncludes(
       surfaceSource,
-      "Always ask before commands and file edits",
+      "Ask before commands and file edits in this workspace",
     ) &&
     sourceIncludes(
       surfaceSource,
-      "Unrestricted access to the internet and any file on your computer",
+      "Unrestricted file and network access for this chat until you quit Gyro",
     ) &&
     sourceIncludes(surfaceSource, "icon: Hand") &&
     sourceIncludes(surfaceSource, "icon: Clock") &&
@@ -7939,8 +7940,10 @@ expect(
     sourceIncludes(appSource, "fullAccess: true") &&
     sourceIncludes(
       desktopRustSource,
-      "request.full_access = config.full_access",
+      "crate::chat_permissions::permits(&app, &session, store.paths())",
     ) &&
+    sourceIncludes(desktopRustSource, "request.full_access = false") &&
+    sourceIncludes(desktopRustSource, "request.full_access = true") &&
     sourceIncludes(desktopRustSource, '"danger-full-access"') &&
     readRepoFile("crates/gyro-core/src/provider_permissions.rs").includes(
       '"type": "dangerFullAccess"',
@@ -8061,7 +8064,7 @@ expect(
     ) &&
     sourceIncludes(surfaceSource, "if (isEmptyStart)") &&
     sourceIncludes(surfaceSource, 'aria-label="New Chat"') &&
-    sourceIncludes(surfaceSource, "(!isEmptyStart || Boolean(environmentRemote)) &&") &&
+    sourceIncludes(surfaceSource, "(!isEmptyStart || Boolean(environmentRemote) || chatMode === \"council\") &&") &&
     sourceIncludes(
       surfaceSource,
       'isCompanionPanel ? environmentOverlayKey === environmentKey : activeRailPanel === "environment"',
@@ -8398,15 +8401,15 @@ expect(
     styleSource.includes(
       "--gyro-premium-motion: calc(130ms * var(--gyro-motion-factor, 1))",
     ) &&
-    styleSource.includes("--gyro-app: #141415") &&
-    styleSource.includes("--gyro-pane: #141415") &&
+    styleSource.includes("--gyro-app: #1e1e1d") &&
+    styleSource.includes("--gyro-pane: var(--gyro-app)") &&
     styleSource.includes("--gyro-hero-composer: var(--gyro-surface)") &&
     styleSource.includes("--gyro-user-main: #ffffff") &&
     styleSource.includes("--gyro-user-secondary: #ffffff") &&
     styleSource.includes("var(--gyro-user-main) 86%") &&
     styleSource.includes(':root[data-theme="light"]') &&
-    styleSource.includes("--gyro-app: #fbfbfb") &&
-    styleSource.includes("--gyro-sidebar: #f3f3f4") &&
+    styleSource.includes("--gyro-app: #f9f8f7") &&
+    styleSource.includes("--gyro-sidebar: #f5f4f2") &&
     styleSource.includes("--gyro-premium-hairline: rgba(32, 32, 32, 0.1)") &&
     styleSource.includes("var(--gyro-user-main) 82%") &&
     styleSource.includes("--gyro-secondary-accent") &&

@@ -1,10 +1,15 @@
+import type { TurnReview } from "./code-reviews/turn-progress";
+import { reviewIsActive } from "./code-reviews/types";
 import { type ReactNode, useContext, useEffect, useId, useState } from "react";
 import {
   Book,
+  Send,
+  Check,
   ChevronRight,
   Eye,
   FileCode2,
   Globe2,
+  HelpCircle,
   Image as ImageIcon,
   ListChecks,
   type LucideIcon,
@@ -95,6 +100,8 @@ function workIcon(item: WorkItem): LucideIcon {
 }
 
 export type ChatRunProps = {
+  review?: TurnReview;
+  reviewerName?: string;
   model: RunModel;
   /** @deprecated Live agent lists no longer render inside a run. */
   agentRows?: ReactNode;
@@ -107,10 +114,12 @@ export type ChatRunProps = {
   aggregateFileStats?: { additions: number; deletions: number };
   onOpenChanges?: () => void;
   onRetry?: () => void;
+  recoveryAction?: "Resume" | "Retry";
+  recoveryUnavailable?: boolean;
   /** Failed status identity used to read the host's automatic retry deadline. */
   recoveryEventId?: string;
   /** Native continuation waits keep this turn's invoke and child tasks alive. */
-  nativeRetry?: { retryAt: number; attempt?: number; maxAttempts?: number; recoveryKind?: string };
+  nativeRetry?: { retryAt?: number; attempt?: number; maxAttempts?: number; recoveryKind?: string };
   onCancelNativeRetry?: () => void;
   onReconnect?: () => void;
   reconnectLabel?: string;
@@ -153,6 +162,8 @@ type WorkStep = Extract<RunStep, { kind: "work" }>;
 type FileStats = { additions: number; deletions: number };
 
 export function ChatRun({
+  review,
+  reviewerName = "the reviewer",
   model,
   agentApprovals = [],
   statusLabel,
@@ -160,6 +171,8 @@ export function ChatRun({
   aggregateFileStats,
   onOpenChanges,
   onRetry,
+  recoveryAction,
+  recoveryUnavailable,
   recoveryEventId,
   nativeRetry,
   onCancelNativeRetry,
@@ -178,6 +191,7 @@ export function ChatRun({
   const isProblem =
     model.phase.name === "failed" || model.phase.name === "interrupted";
   const nativeWait = model.phase.name === "retrying" ? nativeRetry : undefined;
+  const capacityWait = nativeWait?.recoveryKind === "model-capacity";
   const retryAt =
     nativeWait?.retryAt ??
     (isProblem && onRetry && recoveryEventId
@@ -194,7 +208,8 @@ export function ChatRun({
         onRetry();
       }
     : undefined;
-  const isLive = isRunPhaseLive(model.phase);
+  const reviewLive = Boolean(review && (!review.status || reviewIsActive(review.status)));
+  const isLive = isRunPhaseLive(model.phase) || reviewLive;
   const needsApproval =
     agentApprovals.length > 0 ||
     pendingSubagentApprovals(
@@ -202,12 +217,12 @@ export function ChatRun({
     ).length > 0;
   // A finished turn leads with its final response. Work remains available
   // behind the header; live work and failures stay open for visibility.
-  const isDone = model.phase.name === "done";
+  const isDone = model.phase.name === "done" && !reviewLive;
   const [isCollapsed, setIsCollapsed] = useState(isDone && !needsApproval);
   useEffect(() => {
     setIsCollapsed(isDone && !needsApproval);
   }, [isLive, isDone, needsApproval]);
-  const canCollapse = !isLive && !needsApproval && model.steps.length > 0;
+  const canCollapse = !isLive && !needsApproval && (model.steps.length > 0 || Boolean(review));
   const showSteps = isLive || needsApproval || !isCollapsed;
   const isSegments = layout === "segments";
   // Reasoning headlines only ever speak at the live tail, so the phase view
@@ -245,19 +260,21 @@ export function ChatRun({
   );
   const showThinkingPulse =
     !nativeWait &&
-    !suppressThinkingIndicator &&
+    !needsApproval &&
+    !suppressThinkingIndicator && !reviewLive &&
     isLive &&
     (model.phase.name === "thinking" ||
       (model.phase.name === "working" && !hasRunningWork));
-  const showFinalizingPulse = model.phase.name === "finalizing";
+  const showFinalizingPulse = model.phase.name === "finalizing" && !needsApproval;
   // The retry beat replaces the other live beats rather than joining them: two
   // things breathing at the tail of the rail reads as two runs.
   const retryPhase =
     model.phase.name === "retrying" && !nativeWait ? model.phase : undefined;
-  const showRail =
+  const showRail = Boolean(review) ||
     model.steps.length > 0 ||
     showThinkingPulse ||
     showFinalizingPulse ||
+    capacityWait ||
     retryPhase !== undefined;
 
   const shellClass = [
@@ -272,7 +289,7 @@ export function ChatRun({
         ? "is-problem"
         : "is-settled",
     isCancelledRunPhase(model.phase) ? "is-cancelled" : "",
-    isProblem || nativeWait ? "is-recovery" : "",
+    isProblem || (nativeWait && !capacityWait) ? "is-recovery" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -281,16 +298,18 @@ export function ChatRun({
     <div
       className={shellClass}
       data-run-state={
-        nativeWait ? "retrying" : needsApproval ? "approval" : model.phase.name
+        nativeWait ? "retrying" : needsApproval ? "approval" : reviewLive ? "working" : model.phase.name
       }
     >
       <RunHeader
         statusLabel={
-          retryAt !== undefined
-            ? "Waiting to retry"
-            : needsApproval
-              ? "Needs approval"
-              : statusLabel
+          capacityWait
+            ? "Waiting to resume"
+            : retryAt !== undefined
+              ? "Waiting to retry"
+              : needsApproval
+                ? "Needs approval"
+                : review && !review.status ? "Loading second opinion" : reviewLive ? "Working" : review ? "Worked" : statusLabel
         }
         canCollapse={canCollapse}
         headerActions={headerActions}
@@ -420,6 +439,15 @@ export function ChatRun({
               <RunRetry phase={retryPhase} />
             </li>
           ) : null}
+          {capacityWait ? (
+            <li className="gyro-run-row-item">
+              <RunCapacityWait
+                retryAt={nativeWait.retryAt}
+                onStop={onCancelNativeRetry}
+              />
+            </li>
+          ) : null}
+          {review && <ReviewActivity review={review} reviewerName={reviewerName} />}
         </ol>
       </MotionDisclosure>
       {agentApprovals.length > 0 && renderAsk ? (
@@ -429,7 +457,7 @@ export function ChatRun({
           ))}
         </div>
       ) : null}
-      {nativeWait ? (
+      {nativeWait && !capacityWait ? (
         <RunProblem
           onCancelAutoRetry={onCancelNativeRetry}
           retryAt={nativeWait.retryAt}
@@ -445,6 +473,8 @@ export function ChatRun({
         <RunProblem
           onReconnect={onReconnect}
           onRetry={retryNow}
+          recoveryAction={recoveryAction}
+          recoveryUnavailable={recoveryUnavailable}
           onCancelAutoRetry={cancelAutoRetry}
           retryAt={retryAt}
           phase={model.phase}
@@ -460,6 +490,32 @@ export function ChatRun({
       ) : null}
     </div>
   );
+}
+
+function ReviewActivity({ review, reviewerName }: { review: TurnReview; reviewerName: string }) {
+  const files = review.fileCount ? `${review.fileCount} changed ${review.fileCount === 1 ? "file" : "files"}` : "the changes";
+  const active = review.status === "running" ? `${reviewerName} is reviewing ${files}`
+    : review.status === "capturing" ? "Preparing the changes for review" : undefined;
+  return <>
+    <li className="gyro-run-row-item">
+      <div className="gyro-run-row is-done">
+        <span aria-hidden="true" className="gyro-run-row-icon"><Send size={15} /></span>
+        <span className="gyro-run-row-label">Sent review request to {reviewerName}</span>
+      </div>
+    </li>
+    {active && <li className="gyro-run-row-item">
+      <div className="gyro-run-row is-running gyro-reviewer-working" role="status">
+        <span aria-hidden="true" className="gyro-run-row-icon"><LoaderCircle size={15} /></span>
+        <span className="gyro-run-row-label">{active}</span>
+      </div>
+    </li>}
+    {!active && review.started && <li className="gyro-run-row-item">
+      <div className="gyro-run-row is-done">
+        <span aria-hidden="true" className="gyro-run-row-icon"><Check size={15} /></span>
+        <span className="gyro-run-row-label">{review.status === "completed" ? `${reviewerName} reviewed ${files}` : `${reviewerName} started reviewing the changes`}</span>
+      </div>
+    </li>}
+  </>;
 }
 
 function RunWorkGroup({
@@ -1064,6 +1120,52 @@ function RunRetry({
   );
 }
 
+function RunCapacityWait({
+  retryAt,
+  onStop,
+}: {
+  retryAt?: number;
+  onStop?: () => void;
+}) {
+  const now = useNow(retryAt !== undefined, retryAt);
+  const seconds =
+    retryAt === undefined ? undefined : Math.ceil((retryAt - now) / 1_000);
+  const detail =
+    seconds === undefined
+      ? "Will retry automatically"
+      : seconds > 0
+        ? `Retrying in ${formatRunDuration(seconds)}`
+        : "Retrying…";
+  return (
+    <div className="gyro-run-row gyro-run-capacity">
+      <span aria-hidden="true" className="gyro-run-row-icon">
+        <RotateCw size={15} />
+      </span>
+      <span className="gyro-run-row-text">
+        <span className="gyro-run-capacity-label">
+          <span className="gyro-run-row-label" role="status">
+            Model is at capacity
+            <span className="gyro-sr-only">. Will retry automatically.</span>
+          </span>
+          <span
+            aria-label="About model capacity"
+            className="gyro-run-capacity-help"
+            role="img"
+            tabIndex={0}
+            title="This model is temporarily too busy to accept more requests. Gyro will retry automatically."
+          >
+            <HelpCircle aria-hidden="true" size={13} />
+          </span>
+        </span>
+        <span aria-hidden="true" className="gyro-run-row-detail">{detail}</span>
+      </span>
+      {onStop ? (
+        <button type="button" onClick={onStop}>Stop</button>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * The "still going" beat: sits on the rail spine so an empty run still has shape.
  *
@@ -1143,6 +1245,8 @@ function RunProblem({
   onCancelAutoRetry,
   onReconnect,
   onRetry,
+  recoveryAction = "Retry",
+  recoveryUnavailable = false,
   phase,
   reconnectLabel,
   retryAt,
@@ -1151,6 +1255,8 @@ function RunProblem({
   onCancelAutoRetry?: () => void;
   onReconnect?: () => void;
   onRetry?: () => void;
+  recoveryAction?: "Resume" | "Retry";
+  recoveryUnavailable?: boolean;
   phase: Extract<RunPhase, { name: "failed" | "interrupted" }>;
   reconnectLabel?: string;
   retryAt?: number;
@@ -1219,7 +1325,9 @@ function RunProblem({
   const detail = continuation
     ? `Waiting for the provider before continuing.${attemptLabel}`
     : isInterrupted
-      ? "Gyro restarted or lost the provider before this turn finished. Retry continues the same message."
+      ? phase.detail ?? (onRetry
+        ? "Gyro restarted or lost the provider before this turn finished. Retry continues the same message."
+        : "This run ended before it could finish.")
       : isBusy
         ? "The conversation context is preserved."
         : isRateLimit
@@ -1229,7 +1337,9 @@ function RunProblem({
           : (phase.recoveryMessage ??
             "Open technical details for the provider error.");
   const title =
-    phase.name === "failed" && phase.recoveryKind === "quota-exceeded"
+    phase.name === "failed" && phase.recoveryKind === "cancelled"
+      ? "Stopped"
+      : phase.name === "failed" && phase.recoveryKind === "quota-exceeded"
       ? "Provider quota reached"
       : continuationUnavailable
         ? "Saved conversation unavailable"
@@ -1238,7 +1348,7 @@ function RunProblem({
           : isCapacityExhausted
             ? "Model is still busy"
             : isInterrupted
-              ? "Previous send was interrupted"
+              ? onRetry ? "Previous send was interrupted" : "Run interrupted"
               : isBusy
                 ? "Model is temporarily busy"
                 : isRateLimit
@@ -1263,6 +1373,7 @@ function RunProblem({
       <span className="gyro-run-problem-text">
         <strong>{title}</strong>
         {detail ? <span>{detail}</span> : null}
+        {recoveryUnavailable ? <span>Review the changes before starting a new turn.</span> : null}
         {!continuation && technicalDetail ? (
           <details className="gyro-run-error-details">
             <summary>Technical details</summary>
@@ -1293,7 +1404,7 @@ function RunProblem({
             onClick={onRetry}
             type="button"
           >
-            {isScheduled ? "Retry now" : "Retry"}
+            {isScheduled ? "Retry now" : recoveryAction}
           </button>
         ) : null}
         {isScheduled && onCancelAutoRetry ? (

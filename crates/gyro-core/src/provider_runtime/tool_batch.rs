@@ -564,7 +564,7 @@ pub fn spill_result_data_within(
     // fields intact. Do not recurse into arbitrary tool data or user documents.
     if matches!(
         capability,
-        "terminal.open" | "terminal.read" | "terminal.wait" | "terminal.stop"
+        "terminal.open" | "terminal.read" | "terminal.wait" | "terminal.input" | "terminal.stop"
     ) {
         if let Some(pane) = data.get_mut("pane").filter(|pane| pane.is_object()) {
             spill_result_data_within(capability, tool, pane, window);

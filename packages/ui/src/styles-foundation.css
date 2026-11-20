@@ -21,13 +21,13 @@
      free of cream casts. Accent hues belong to actions and semantic states. */
   --gyro-user-main: #ffffff;
   --gyro-user-secondary: #ffffff;
-  --gyro-app: #141415;
-  --gyro-sidebar: #1c1c1e;
-  --gyro-sidebar-soft: #262628;
-  --gyro-pane: #141415;
-  --gyro-surface: #1c1c1e;
-  --gyro-surface-raised: #242426;
-  --gyro-surface-soft: #1f1f21;
+  --gyro-app: #1e1e1d;
+  --gyro-sidebar: #212120;
+  --gyro-sidebar-soft: #333332;
+  --gyro-pane: var(--gyro-app);
+  --gyro-surface: #2a2a29;
+  --gyro-surface-raised: #2e2e2d;
+  --gyro-surface-soft: #2c2c2b;
   /* Lines are translucent ink, not grey paint: one hairline reads the same
      on the canvas, a card, or the frosted sidebar, so tonal steps can stay
      small without seams turning into stripes. */
@@ -203,9 +203,9 @@
   --gyro-hero-placeholder: var(--gyro-faint);
   --gyro-hero-hover: rgba(255, 255, 255, 0.06);
   --gyro-hero-hover-text: var(--gyro-hover-text);
-  --gyro-hero-send: #fafafa;
-  --gyro-hero-send-hover: #e6e6ea;
-  --gyro-hero-send-text: var(--gyro-app);
+  --gyro-hero-send: #606f7c;
+  --gyro-hero-send-hover: #6b7a86;
+  --gyro-hero-send-text: #ffffff;
   --gyro-hero-focus-border: rgba(255, 255, 255, 0.2);
   --gyro-hero-shadow:
     0 1px 2px rgba(4, 2, 10, 0.24), 0 24px 56px -28px rgba(4, 2, 10, 0.7);
@@ -336,13 +336,6 @@
   color: var(--gyro-warn);
 }
 
-.gyro-council-preflight-seats {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-left: auto;
-}
-
 /* What one Council send costs, disclosed before Enter commits it. */
 .gyro-council-preflight-cost {
   color: var(--gyro-faint);
@@ -353,18 +346,6 @@
 /* Why runs are stopped, or which budget is about to stop them. */
 
 /* Second-press confirmation for a send large enough to be worth agreeing to. */
-
-.gyro-council-preflight-chip {
-  background: color-mix(in srgb, var(--gyro-accent) 12%, transparent);
-  border-radius: var(--gyro-radius-pill);
-  color: var(--gyro-text);
-  font-size: var(--gyro-font-tiny);
-  padding: 2px 8px;
-}
-
-:root[data-theme="light"] .gyro-council-preflight-chip {
-  color: #1d2329;
-}
 
 .gyro-council-response {
   display: grid;
@@ -564,12 +545,6 @@
 
 :root[data-theme="light"] {
   /* Existing brand values share the theme token scope. */
-  --gyro-beam-1: rgb(190 204 255 / 14%);
-  --gyro-beam-2: rgb(120 146 245 / 24%);
-  --gyro-beam-3: rgb(84 112 235 / 44%);
-  --gyro-beam-4: rgb(255 140 110 / 48%);
-  --gyro-beam-drift: rgb(232 236 248 / 30%);
-  --gyro-beam-strength: 0.24;
   --gyro-ink-bg: #000000;
   --gyro-ink-hover: #2b2b2f;
   --gyro-ink-text: #ffffff;
@@ -578,13 +553,13 @@
   --gyro-lift-shadow:
     0 1px 0 rgb(255 255 255 / 18%) inset, 0 10px 22px -12px rgb(19 19 22 / 40%);
   color-scheme: light;
-  --gyro-app: #fbfbfb;
-  --gyro-sidebar: #f3f3f4;
-  --gyro-sidebar-soft: #e8e8ea;
-  --gyro-pane: #fdfdfd;
+  --gyro-app: #f9f8f7;
+  --gyro-sidebar: #f5f4f2;
+  --gyro-sidebar-soft: #e6e5e3;
+  --gyro-pane: var(--gyro-app);
   --gyro-surface: #ffffff;
   --gyro-surface-raised: #ffffff;
-  --gyro-surface-soft: #f2f2f3;
+  --gyro-surface-soft: #eeedeb;
   --gyro-border: rgb(19 19 22 / 11%);
   --gyro-border-soft: rgb(19 19 22 / 7%);
   --gyro-border-strong: rgb(19 19 22 / 40%);
@@ -752,9 +727,8 @@
   --gyro-hero-placeholder: var(--gyro-faint);
   --gyro-hero-hover: rgb(19 19 22 / 5%);
   --gyro-hero-hover-text: var(--gyro-hover-text);
-  --gyro-hero-send: #000000;
-  --gyro-hero-send-hover: #2b2b2f;
-  --gyro-hero-send-text: #ffffff;
+  --gyro-hero-send: #778a97;
+  --gyro-hero-send-hover: #667b89;
   --gyro-hero-focus-border: rgb(19 19 22 / 28%);
   --gyro-hero-shadow:
     0 1px 2px rgba(19, 19, 22, 0.04), 0 24px 56px -30px rgba(19, 19, 22, 0.26);

@@ -82,6 +82,13 @@ pub trait RunnerHost: Send + Sync {
     fn codex_client_options(&self) -> super::codex_client::CodexClientOptions {
         super::codex_client::CodexClientOptions::desktop()
     }
+    fn codex_capacity_retry(
+        &self,
+        _request: &ProviderChatRequest,
+        _retry: super::codex_client::CodexCapacityRetry,
+        _waiting: bool,
+    ) {
+    }
     fn supports_generated_images(&self) -> bool {
         true
     }
@@ -139,6 +146,10 @@ pub trait RunnerHost: Send + Sync {
     ) -> String;
     fn reasoning_efforts(&self, provider_id: &str, model_id: Option<&str>) -> Option<Vec<String>>;
     fn claude_capability_tools(&self, mode: super::types::ChatMode) -> String;
+
+    fn use_desktop_workspace_permissions(&self) -> bool {
+        false
+    }
     fn cancellation(&self, session_id: &str) -> anyhow::Result<CancellationToken>;
     fn emit(&self, request: &ProviderChatRequest, event: RunEvent<'_>);
     fn conversation_history(&self, request: &ProviderChatRequest) -> Option<String>;

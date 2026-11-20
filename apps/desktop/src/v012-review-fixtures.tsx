@@ -2,7 +2,11 @@
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  ChatSurface,
   CodeReviewPanel,
+  type GyroConfig,
+  type SessionEvent,
+  providersForConfig,
   applyAppearancePreferences,
   type CodeReviewRuntime,
   type CodeReviewRun,
@@ -71,7 +75,9 @@ const setup: ReviewerSetup = {
 };
 let runs: CodeReviewRun[] = [];
 const calls: string[] = [];
-Object.assign(window, { reviewFixture: { calls } });
+const sent: string[] = [];
+const openedFiles: { path: string; line?: number }[] = [];
+Object.assign(window, { reviewFixture: { calls, sent, openedFiles } });
 const listeners = new Set<() => void>();
 const changed = () => listeners.forEach((callback) => callback());
 const clone = <T,>(value: T): T => structuredClone(value);
@@ -98,6 +104,12 @@ const runtime: CodeReviewRuntime = {
       throw Error("Fixture: project unavailable. Reopen it and retry.");
     let result: unknown;
     switch (action) {
+      case "turn-progress":
+        result = runs.filter(run => run.id === "review-save" && (data.turnIds as string[]).includes("save-turn")).map(run => ({
+          turnId: "save-turn", reviewId: run.id, providerId: run.providerId, modelId: run.modelId,
+          status: run.status, started: ["running", "completed", "incomplete"].includes(run.status), fileCount: 1,
+        }));
+        break;
       case "reviewers":
         result = setup;
         break;
@@ -172,9 +184,11 @@ const runtime: CodeReviewRuntime = {
         changed();
         break;
       }
-      case "get":
+      case "get": {
+        const run = runs.find(run => run.id === data.reviewId);
+        if (!run) throw Error("Review is no longer available.");
         result = {
-          run: runs.find((run) => run.id === data.reviewId),
+          run,
           snapshot,
           freshness:
             params.get("state") === "stale" ? "source-changed" : "current",
@@ -183,9 +197,12 @@ const runtime: CodeReviewRuntime = {
           fixIntents,
         };
         break;
+      }
       case "file":
         result = {
-          diff: "--- original\n+++ modified\n@@ -1,3 +1,3 @@\n fn value() -> i32 {\n-    1\n+    2\n }\n",
+          diff: data.reviewId === "review-save"
+            ? "--- a/src/notes.ts\n+++ b/src/notes.ts\n@@ -12,1 +12,1 @@\n-  saveButton.disabled = false;\n+  saveButton.disabled = saving;\n"
+            : "--- original\n+++ modified\n@@ -1,3 +1,3 @@\n fn value() -> i32 {\n-    1\n+    2\n }\n",
         };
         break;
       case "raw":
@@ -314,4 +331,64 @@ function Fixture() {
     </main>
   );
 }
-createRoot(document.getElementById("root")!).render(<Fixture />);
+// A source-turn receipt and an independent review worker, using the same chat and right panel as desktop.
+const builderAnswer = "Disabled Save while a note is being saved. The button becomes available again when the save finishes.";
+const reviewEvents: SessionEvent[] = [
+  ["user-message", "Prevent duplicate note saves.", {}],
+  ["assistant-message", builderAnswer, {providerId: "openai"}],
+  ["system-event", "Done", {kind: "provider-status", status: "done", providerId: "openai"}],
+  ["system-event", "Second opinion requested", {kind: "turn-second-opinion", reviewId: "review-save", providerId: "anthropic", modelId: "claude-opus-5-5"}],
+].map(([kind, message, payload], index) => ({
+  id: "event-" + index, sessionId: "review-fixture", turnId: "save-turn",
+  createdAt: `2026-11-19T12:00:0${index}Z`, kind: kind as SessionEvent["kind"],
+  message: String(message), payload,
+}));
+const config: GyroConfig = {modelProviders: [], commandProfiles: [], requireCommandApproval: false, requireFileEditApproval: false, telemetryEnabled: false};
+if (params.has("turn-progress")) {
+  config.modelProviders = providersForConfig(config).map(provider => provider.id === "anthropic" ? {
+    ...provider, models: [{...provider.models[0]!, id: "claude-opus-5-5", displayName: "Claude Opus 5.5"}],
+  } : provider.id === "openai" ? { ...provider, enabled: true, authStatus: "connected" } : provider);
+  snapshot.rootPath = "/fixture/notes";
+  snapshot.scope = {kind: "turn", turnId: "save-turn"};
+  snapshot.request = reviewEvents[0]!.message;
+  snapshot.files = [{path: "src/notes.ts", status: "modified"}];
+  runs = [{
+    id: "review-save", revision: 1, rootId: snapshot.rootId, snapshotId: snapshot.id, status: "queued",
+    createdAt: reviewEvents[3]!.createdAt, providerId: "anthropic", modelId: "claude-opus-5-5",
+    summary: "Keyboard submission can still save a note twice.", limitations: [], suppliedFiles: 1, intendedFiles: 1,
+    findings: [{id: "enter-twice", revision: 1, path: "src/notes.ts", side: "modified", lineStart: 12, lineEnd: 12,
+      severity: "P2", title: "Guard keyboard submission", explanation: "Pressing Enter twice still calls save twice.",
+      suggestedResolution: "Check the saving flag inside [the submit handler](src/notes.ts#L12).", disposition: "open"}],
+  }];
+  if (params.get("state") === "zero") {
+    runs[0] = {...runs[0]!, findings: [], summary: "I found no remaining duplicate-save path."};
+  }
+  if (params.get("reviewer") === "custom") {
+    runs[0] = {...runs[0]!, providerId: "custom:local", modelId: "team-review-v2"};
+  }
+  // The first item in history belongs to another review. Opening the turn must use its own ID.
+  runs.unshift({...runs[0]!, id: "review-unrelated", status: "completed", summary: "Unrelated review", findings: []});
+  Object.assign(window, {setReviewFixtureStatus(status: CodeReviewRun["status"] | "deleted") {
+    if (status === "deleted") {
+      runs = runs.filter(run => run.id !== "review-save");
+    } else {
+      const finishedAt = ["completed", "incomplete", "failed", "cancelled"].includes(status) ? "2026-11-19T12:00:23Z" : undefined;
+      runs = runs.map(run => run.id === "review-save" ? {...run, revision: run.revision + 1, status, finishedAt} : run);
+    }
+    changed();
+  }});
+}
+function TurnReviewFixture() {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState("");
+  return <main style={{height: "100dvh", display: "grid", background: "var(--gyro-app)", color: "var(--gyro-text)"}}>
+    <ChatSurface config={config} events={reviewEvents} codeReviews={runtime} draft={draft} onDraftChange={setDraft}
+      onSend={message => { sent.push(message); setDraft(""); }}
+      railDiffTools={{onOpenInEditor: (path, line) => openedFiles.push({path, line})}}
+      workspacePath="/fixture/notes" shellReady sessionModel={{providerId: "openai", modelLabel: "GPT-5.6 Sol"}}
+      activeChatPanel={open ? "review" : undefined} companionTabs={open ? ["review"] : []}
+      onOpenCompanionTab={tab => setOpen(tab === "review")} onCloseCompanionDock={() => setOpen(false)}
+      onCloseCompanionTab={() => setOpen(false)} onSelectChatPanel={panel => setOpen(panel === "review")}/>
+  </main>;
+}
+createRoot(document.getElementById("root")!).render(params.has("turn-progress") ? <TurnReviewFixture/> : <Fixture />);

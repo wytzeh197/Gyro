@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { type ProviderStreamOrderState } from "./provider-stream-events";
 import { createProviderStreamDispatcher } from "./provider-stream-dispatcher";
 import { invoke } from "@tauri-apps/api/core";
-import type { ProviderChatStreamEvent, SessionEvent } from "@gyro-dev/ui";
+import type { ComposerReviewer, ProviderChatStreamEvent, SessionEvent } from "@gyro-dev/ui";
 
 type Sample = {
   started: number;
@@ -121,7 +121,7 @@ function save(turnId: string, sample: Sample) {
 }
 export async function invokeTimedProviderChat<T>(
   command: string,
-  args: { request: { turnId?: string; [key: string]: unknown } },
+  args: { request: { turnId?: string; [key: string]: unknown }; secondOpinion?: ComposerReviewer; retrySecondOpinion?: boolean },
 ): Promise<T> {
   const turnId = args.request.turnId;
   const sample = turnId ? samples.get(turnId) : undefined;

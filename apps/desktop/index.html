@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="/gyro-logo.png" />
-    <meta name="theme-color" content="#181818" />
+    <meta name="theme-color" content="#1e1e1d" />
     <title>Gyro</title>
     <style>
       /* Quiet themed canvas only — no boot gate. First paint is the early
@@ -12,7 +12,7 @@
       html,
       body,
       #root {
-        background: #181818;
+        background: #1e1e1d;
         color: #ededed;
         height: 100%;
         margin: 0;
@@ -22,7 +22,7 @@
       html[data-theme="light"],
       html[data-theme="light"] body,
       html[data-theme="light"] #root {
-        background: #f7f7f7;
+        background: #f9f8f7;
         color: #252525;
       }
     </style>
@@ -33,7 +33,7 @@
         document.documentElement.dataset.theme = theme;
         document
           .querySelector('meta[name="theme-color"]')
-          ?.setAttribute("content", theme === "light" ? "#f7f7f7" : "#181818");
+          ?.setAttribute("content", theme === "light" ? "#f9f8f7" : "#1e1e1d");
       } catch (_) {}
     </script>
   </head>

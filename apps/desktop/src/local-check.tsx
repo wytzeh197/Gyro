@@ -11,6 +11,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   CheckWorkContext,
   CheckWorkActivityContext,
+  CloseIcon,
   type CheckWorkActivity,
   type SessionEvent,
   confirmAction,
@@ -309,9 +310,17 @@ export function LocalCheckDialog({
     "requirements",
   );
   const dialogRef = useRef<HTMLElement>(null);
+  const requirementInput = useRef<HTMLInputElement>(null);
+  const focusNewRequirement = useRef(false);
   useLayoutEffect(() => {
     dialogRef.current?.scrollTo({ top: 0 });
   }, [plan?.id, visible, stage]);
+  useLayoutEffect(() => {
+    if (focusNewRequirement.current) {
+      requirementInput.current?.focus();
+      focusNewRequirement.current = false;
+    }
+  }, [requirements.length]);
   const [confirmed, setConfirmed] = useState(false);
   const [hasActivity, setHasActivity] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -675,8 +684,6 @@ export function LocalCheckDialog({
                 <summary>Original task</summary>
                 <p>{requestText}</p>
               </details>
-            ) : sourceTurnId ? (
-              <p>Check the requirements for the originating task.</p>
             ) : null}
           </div>
           <button
@@ -684,25 +691,11 @@ export function LocalCheckDialog({
             onClick={close}
             disabled={busy && !running}
             aria-label="Close Check"
+            className="gyro-check-icon-button"
           >
-            Close
+            <CloseIcon size={16} aria-hidden="true" />
           </button>
         </header>
-        <ol className="gyro-check-steps" aria-label="Check progress">
-          {["Requirements", "Review", "Results"].map((label, index) => {
-            const current = plan ? 1 : stage === "results" ? 2 : 0;
-            return (
-              <li
-                key={label}
-                aria-current={index === current ? "step" : undefined}
-                data-complete={index < current}
-              >
-                <span>{index + 1}</span>
-                {label}
-              </li>
-            );
-          })}
-        </ol>
         {!available ? (
           <p role="status">
             Run this flow in the desktop app. This browser preview cannot
@@ -722,278 +715,324 @@ export function LocalCheckDialog({
             }}
           >
             <fieldset disabled={busy || !available}>
-              <legend>Requirements</legend>
+              <legend>What should pass?</legend>
               {!requirements.length ? (
-                <p>No requirements yet. Add what this task needs to achieve.</p>
-              ) : null}
-              {requestText && !requirements.length ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setRequirements([
-                      {
-                        id: "task-outcome",
-                        requirement: requestText.slice(0, 2000),
-                        expected: "true",
-                        scope: "command",
-                      },
-                    ])
-                  }
-                >
-                  Use task request
-                </button>
+                <p className="gyro-check-help">Add an outcome you can test.</p>
               ) : null}
               {requirements.map((criterion, index) => (
                 <div className="gyro-check-criterion" key={criterion.id}>
-                  <label>
-                    Requirement {index + 1}
-                    <input
-                      required
-                      maxLength={2000}
-                      value={criterion.requirement}
-                      onChange={(e) =>
+                  <div className="gyro-check-criterion-row">
+                    <label>
+                      Requirement {index + 1}
+                      <input
+                        ref={
+                          index === requirements.length - 1
+                            ? requirementInput
+                            : undefined
+                        }
+                        required
+                        maxLength={2000}
+                        value={criterion.requirement}
+                        onChange={(e) =>
+                          setRequirements((current) =>
+                            current.map((r, i) =>
+                              i === index
+                                ? { ...r, requirement: e.target.value }
+                                : r,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      aria-label={`Remove requirement ${index + 1}`}
+                      title="Remove requirement"
+                      className="gyro-check-icon-button"
+                      onClick={() =>
                         setRequirements((current) =>
-                          current.map((r, i) =>
-                            i === index
-                              ? { ...r, requirement: e.target.value }
-                              : r,
-                          ),
-                        )
-                      }
-                    />
-                  </label>
-                  <label>
-                    Evidence needed for requirement {index + 1}
-                    <select
-                      value={criterion.scope}
-                      onChange={(e) =>
-                        setRequirements((current) =>
-                          current.map((r, i) =>
-                            i === index
-                              ? { ...r, scope: e.target.value as CheckScope }
-                              : r,
-                          ),
+                          current.filter((r) => r.id !== criterion.id),
                         )
                       }
                     >
-                      <option value="api">API responses</option>
-                      <option value="browser">Browser interaction</option>
-                      <option value="command">Other command assertions</option>
-                    </select>
-                  </label>
-                  <label>
-                    Expected observation · <code>{criterion.id}</code>
-                    <input
-                      value={criterion.expected}
-                      onChange={(e) =>
-                        setRequirements((current) =>
-                          current.map((r, i) =>
-                            i === index
-                              ? { ...r, expected: e.target.value }
-                              : r,
-                          ),
-                        )
-                      }
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    aria-label={`Remove requirement ${index + 1}`}
-                    onClick={() =>
-                      setRequirements((current) =>
-                        current.filter((r) => r.id !== criterion.id),
-                      )
-                    }
-                  >
-                    Remove requirement
-                  </button>
+                      <CloseIcon size={14} aria-hidden="true" />
+                    </button>
+                  </div>
+                  <details className="gyro-check-evidence">
+                    <summary>Evidence settings</summary>
+                    <div className="gyro-check-field-pair">
+                      <label>
+                        Evidence needed
+                        <select
+                          value={criterion.scope}
+                          onChange={(e) =>
+                            setRequirements((current) =>
+                              current.map((r, i) =>
+                                i === index
+                                  ? {
+                                      ...r,
+                                      scope: e.target.value as CheckScope,
+                                    }
+                                  : r,
+                              ),
+                            )
+                          }
+                        >
+                          <option value="api">API responses</option>
+                          <option value="browser">Browser interaction</option>
+                          <option value="command">Other command assertions</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span>
+                          Expected observation · <code>{criterion.id}</code>
+                        </span>
+                        <input
+                          value={criterion.expected}
+                          onChange={(e) =>
+                            setRequirements((current) =>
+                              current.map((r, i) =>
+                                i === index
+                                  ? { ...r, expected: e.target.value }
+                                  : r,
+                              ),
+                            )
+                          }
+                        />
+                      </label>
+                    </div>
+                  </details>
                 </div>
               ))}
-              <button
-                type="button"
-                disabled={requirements.length >= MAX_CHECK_REQUIREMENTS}
-                onClick={() =>
-                  setRequirements((current) => [
-                    ...current,
-                    {
-                      id: `requirement-${crypto.randomUUID()}`,
-                      requirement: "",
-                      expected: "true",
-                      scope: actionKind === "browser" ? "browser" : "command",
-                    },
-                  ])
-                }
-              >
-                Add requirement
-              </button>
-              <label>
-                Local test URL
-                <input
-                  type="url"
-                  required
-                  value={previewUrl}
-                  onChange={(e) => setPreviewUrl(e.target.value)}
-                />
-              </label>
-              <label>
-                Check action
-                <select
-                  value={actionKind}
-                  onChange={(e) => setActionKind(e.target.value)}
+              <div className="gyro-check-requirement-actions">
+                {requestText && !requirements.length ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      focusNewRequirement.current = true;
+                      setRequirements([
+                        {
+                          id: "task-outcome",
+                          requirement: requestText.slice(0, 2000),
+                          expected: "true",
+                          scope: "command",
+                        },
+                      ]);
+                    }}
+                  >
+                    Use task request
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={requirements.length >= MAX_CHECK_REQUIREMENTS}
+                  onClick={() => {
+                    focusNewRequirement.current = true;
+                    setRequirements((current) => [
+                      ...current,
+                      {
+                        id: `requirement-${crypto.randomUUID()}`,
+                        requirement: "",
+                        expected: "true",
+                        scope: actionKind === "browser" ? "browser" : "command",
+                      },
+                    ]);
+                  }}
                 >
-                  <option value="command">Test command</option>
-                  <option value="browser">Native browser steps</option>
-                </select>
-              </label>
-              {actionKind === "command" ? (
-                <label>
-                  Test command
-                  <textarea
-                    required
-                    rows={2}
-                    value={command}
-                    onChange={(e) => setCommand(e.target.value)}
-                    placeholder="Your reviewed test command"
-                    spellCheck={false}
-                  />
-                </label>
-              ) : (
-                <>
+                  Add requirement
+                </button>
+              </div>
+              <details
+                className="gyro-check-test-setup"
+                onInvalidCapture={(event) => {
+                  // Reveal required fields before the browser focuses an invalid input.
+                  event.currentTarget.open = true;
+                }}
+              >
+                <summary tabIndex={0}>Test setup</summary>
+                <div className="gyro-check-test-fields">
+                  <div className="gyro-check-field-pair">
+                    <label>
+                      Local test URL
+                      <input
+                        type="url"
+                        required
+                        value={previewUrl}
+                        onChange={(e) => setPreviewUrl(e.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Check action
+                      <select
+                        value={actionKind}
+                        onChange={(e) => setActionKind(e.target.value)}
+                      >
+                        <option value="command">Test command</option>
+                        <option value="browser">Native browser steps</option>
+                      </select>
+                    </label>
+                  </div>
+                  {actionKind === "command" ? (
+                    <label>
+                      Test command
+                      <textarea
+                        required
+                        rows={2}
+                        value={command}
+                        onChange={(e) => setCommand(e.target.value)}
+                        placeholder="Your reviewed test command"
+                        spellCheck={false}
+                      />
+                    </label>
+                  ) : (
+                    <>
+                      <label>
+                        Expected page · ready selector
+                        <input
+                          required
+                          value={browserReadySelector}
+                          onChange={(e) => setBrowserReadySelector(e.target.value)}
+                        />
+                      </label>
+                      <label>
+                        Browser steps · JSON
+                        <textarea
+                          required
+                          rows={10}
+                          value={browserSteps}
+                          onChange={(e) => setBrowserSteps(e.target.value)}
+                          spellCheck={false}
+                        />
+                      </label>
+                      <div className="gyro-check-field-pair">
+                        <label>
+                          Viewport width · CSS pixels
+                          <input
+                            type="number"
+                            min={320}
+                            max={2560}
+                            step={1}
+                            required
+                            value={browserWidth}
+                            onChange={(e) => setBrowserWidth(e.target.value)}
+                          />
+                        </label>
+                        <label>
+                          Viewport height · CSS pixels
+                          <input
+                            type="number"
+                            min={320}
+                            max={1600}
+                            step={1}
+                            required
+                            value={browserHeight}
+                            onChange={(e) => setBrowserHeight(e.target.value)}
+                          />
+                        </label>
+                      </div>
+                    </>
+                  )}
                   <label>
-                    Expected page · ready selector
-                    <input
+                    Expected data changes
+                    <textarea
                       required
-                      value={browserReadySelector}
-                      onChange={(e) => setBrowserReadySelector(e.target.value)}
+                      rows={2}
+                      value={dataChanges}
+                      onChange={(e) => setDataChanges(e.target.value)}
                     />
                   </label>
                   <label>
-                    Browser steps · JSON
+                    Files to check
                     <textarea
                       required
-                      rows={10}
-                      value={browserSteps}
-                      onChange={(e) => setBrowserSteps(e.target.value)}
+                      rows={3}
+                      value={files}
+                      placeholder="One workspace-relative path per line"
+                      onChange={(e) => setFiles(e.target.value)}
                       spellCheck={false}
                     />
                   </label>
-                  <label>
-                    Viewport width · CSS pixels
-                    <input
-                      type="number"
-                      min={320}
-                      max={2560}
-                      step={1}
-                      required
-                      value={browserWidth}
-                      onChange={(e) => setBrowserWidth(e.target.value)}
-                    />
-                  </label>
-                  <label>
-                    Viewport height · CSS pixels
-                    <input
-                      type="number"
-                      min={320}
-                      max={1600}
-                      step={1}
-                      required
-                      value={browserHeight}
-                      onChange={(e) => setBrowserHeight(e.target.value)}
-                    />
-                  </label>
-                </>
-              )}
-              <label>
-                Expected data changes
-                <textarea
-                  required
-                  rows={2}
-                  value={dataChanges}
-                  onChange={(e) => setDataChanges(e.target.value)}
-                />
-              </label>
-              <label>
-                Files covered by the result · one relative path per line
-                <textarea
-                  required
-                  rows={4}
-                  value={files}
-                  onChange={(e) => setFiles(e.target.value)}
-                  spellCheck={false}
-                />
-              </label>
-              <p>
-                Only these files and Git HEAD are fingerprinted. Add your app
-                code and test runner. Runtime data and other files are outside
-                this snapshot.
-              </p>
-              <details>
-                <summary>Test command output format</summary>
-                <p>
-                  The command must exit successfully and return this JSON on
-                  stdout. Expected observations are JSON values; each is
-                  compared exactly with <code>actual</code>. The command
-                  receives the test URL as <code>GYRO_CHECK_URL</code>. Output
-                  is saved locally; use synthetic data without secrets.
-                </p>
-                <pre>
-                  {JSON.stringify(
-                    {
-                      version: 2,
-                      previewUrl,
-                      observations: [
-                        {
-                          criterionId: "add-item",
-                          scope: requirements[0]?.scope ?? "api",
-                          actual: true,
-                          evidence: "The actual response or assertion output",
-                        },
-                      ],
-                    },
-                    null,
-                    2,
-                  )}
-                </pre>
-              </details>
-              <details>
-                <summary>
-                  Controlled to-do example · in the Gyro repository
-                </summary>
-                <p>
-                  Working: both pass. Broken: empty titles are accepted. Broken
-                  form: the API works but the Add button does not add an item.
-                  Unavailable: the server cannot be reached. These are
-                  command/API fixture checks; no visual behavior is checked.
-                </p>
-                <div className="gyro-check-actions">
-                  {["working", "broken", "broken-form", "unavailable"].map(
-                    (variant) => (
-                      <button
-                        type="button"
-                        key={variant}
-                        onClick={() => loadExample(variant)}
-                      >
-                        Load {variant}
-                      </button>
-                    ),
-                  )}
+                  <p className="gyro-check-help">
+                    Include the app code and test runner. The result tracks changes
+                    to these files and Git HEAD.
+                  </p>
+                  {actionKind === "command" ? (
+                    <details>
+                      <summary>Test command output format</summary>
+                      <p>
+                        The command must exit successfully and return this JSON on
+                        stdout. Expected observations are JSON values; each is
+                        compared exactly with <code>actual</code>. The command
+                        receives the test URL as <code>GYRO_CHECK_URL</code>. Output
+                        is saved locally; use synthetic data without secrets.
+                      </p>
+                      <pre>
+                        {JSON.stringify(
+                          {
+                            version: 2,
+                            previewUrl,
+                            observations: [
+                              {
+                                criterionId: "add-item",
+                                scope: requirements[0]?.scope ?? "api",
+                                actual: true,
+                                evidence: "The actual response or assertion output",
+                              },
+                            ],
+                          },
+                          null,
+                          2,
+                        )}
+                      </pre>
+                    </details>
+                  ) : null}
+                  <details>
+                    <summary>
+                      Controlled to-do example · in the Gyro repository
+                    </summary>
+                    <p>
+                      Working: both pass. Broken: empty titles are accepted. Broken
+                      form: the API works but the Add button does not add an item.
+                      Unavailable: the server cannot be reached. These are
+                      command/API fixture checks; no visual behavior is checked.
+                    </p>
+                    <div className="gyro-check-actions">
+                      {["working", "broken", "broken-form", "unavailable"].map(
+                        (variant) => (
+                          <button
+                            type="button"
+                            key={variant}
+                            onClick={() => loadExample(variant)}
+                          >
+                            Load {variant}
+                          </button>
+                        ),
+                      )}
+                    </div>
+                    <p>
+                      For a browser form check, first start a fresh fixture with
+                      <code>
+                        {" "}
+                        node scripts/fixtures/gyro-check/server.mjs working
+                      </code>
+                      (or <code>broken</code> / <code>broken-form</code>). Restart
+                      it between checks. The browser action never starts a server.
+                    </p>
+                    <button type="button" onClick={loadBrowserExample}>
+                      Load browser form check
+                    </button>
+                  </details>
                 </div>
-                <p>
-                  For a browser form check, first start a fresh fixture with
-                  <code>
-                    {" "}
-                    node scripts/fixtures/gyro-check/server.mjs working
-                  </code>
-                  (or <code>broken</code> / <code>broken-form</code>). Restart
-                  it between checks. The browser action never starts a server.
-                </p>
-                <button type="button" onClick={loadBrowserExample}>
-                  Load browser form check
-                </button>
               </details>
-              <button type="submit" className="gyro-check-primary">
-                {busy ? "Preparing…" : "Review check plan"}
-              </button>
+              <div className="gyro-check-form-actions">
+                <button
+                  type="submit"
+                  className="gyro-check-primary"
+                  disabled={!requirements.length}
+                >
+                  {busy ? "Preparing…" : "Review check plan"}
+                </button>
+              </div>
             </fieldset>
           </form>
         ) : plan ? (
@@ -1006,12 +1045,11 @@ export function LocalCheckDialog({
                 Checking… You can close this window and keep working.
               </p>
             ) : null}
-            <h3>Requirements</h3>
+            <h3>Review check plan</h3>
             <div className="gyro-check-reviewed-requirements">
-              {plan.draft.criteria.map((criterion, index) => (
+              {plan.draft.criteria.map((criterion) => (
                 <details key={criterion.id}>
                   <summary>
-                    <span className="gyro-check-number">{index + 1}</span>
                     <span>
                       {criterion.requirement}
                       <small>{scopeLabels[criterion.scope]}</small>
@@ -1094,24 +1132,21 @@ export function LocalCheckDialog({
             </button>
           </div>
         ) : null}
-        <details
-          open={stage === "results" && !plan}
-          className="gyro-check-history"
-        >
-          <summary>
-            {stage === "results" && !plan
-              ? "Local reports"
-              : `Previous checks (${reports.length})`}
-          </summary>
-          <section
-            aria-label="Saved Check reports"
-            className="gyro-check-reports"
+        {reports.length ? (
+          <details
+            open={stage === "results" && !plan}
+            className="gyro-check-history"
           >
-            <h3>Local reports</h3>
-            {!reports.length ? (
-              <p>No saved checks for this chat.</p>
-            ) : (
-              reports.map((report) => (
+            <summary tabIndex={0}>
+              {stage === "results" && !plan
+                ? "Local reports"
+                : `Previous checks (${reports.length})`}
+            </summary>
+            <section
+              aria-label="Saved Check reports"
+              className="gyro-check-reports"
+            >
+              {reports.map((report) => (
                 <CheckReportView
                   key={report.plan.id}
                   report={report}
@@ -1126,10 +1161,10 @@ export function LocalCheckDialog({
                     report.plan.id === latest?.plan.id
                   }
                 />
-              ))
-            )}
-          </section>
-        </details>
+              ))}
+            </section>
+          </details>
+        ) : null}
         {plan ? (
           <>
             <div className="gyro-check-footer">

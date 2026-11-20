@@ -36,11 +36,18 @@ export function RemoteWorkspaceRoot({
   const [selectedHost, setSelectedHost] = useState<Peer>();
   const [selection, setSelection] = useState<RemoteSelection>();
   const peers = status?.peers ?? [];
+  const discoverablePeers = useMemo(
+    () =>
+      (status?.peers ?? []).filter((peer) =>
+        peer.transport === "ssh"
+          ? status?.sshHosts?.some((host) => host.id === peer.id && host.connected)
+          : status?.settings.enabled && peer.role !== "client",
+      ),
+    [status],
+  );
   const { catalogs, refresh: refreshCatalog } = useRemoteCatalog(
     ports,
-    peers.filter(
-      (peer) => status?.settings.enabled || peer.transport === "ssh",
-    ),
+    discoverablePeers,
   );
   const refreshSequence = useRef(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -100,7 +107,8 @@ export function RemoteWorkspaceRoot({
   const selectRemote = useCallback((next: RemoteSelection) => {
     setSelection(next);
     setSettingsOpen(false);
-  }, []);
+    if (next.sessionId) void refreshCatalog(next.hostId);
+  }, [refreshCatalog]);
   const selectLocal = useCallback(() => setSelection(undefined), []);
   const projectSyncKey = useRef<string>();
   const projectSyncedAt = useRef(0);
@@ -160,6 +168,12 @@ export function RemoteWorkspaceRoot({
     window.addEventListener("keydown", shortcut);
     return () => window.removeEventListener("keydown", shortcut);
   }, [selection, openSettings, selectRemote]);
+  const availableCatalogs = useMemo(() => {
+    const discoverableIds = new Set(discoverablePeers.map((peer) => peer.id));
+    return catalogs.filter(
+      (catalog) => catalog.online && discoverableIds.has(catalog.host.id),
+    );
+  }, [catalogs, discoverablePeers]);
   const context = useMemo(
     () => ({
       ports,
@@ -172,7 +186,7 @@ export function RemoteWorkspaceRoot({
       openSettings,
       selectRemote,
       refreshCatalog,
-      connectedHostIds: catalogs.filter((c) => c.online).map((c) => c.host.id),
+      connectedHostIds: availableCatalogs.map((c) => c.host.id),
     }),
     [
       ports,
@@ -185,12 +199,9 @@ export function RemoteWorkspaceRoot({
       openSettings,
       selectRemote,
       refreshCatalog,
-      catalogs,
+      availableCatalogs,
     ],
   );
-  // Cached catalogs preserve recovery state, but only reachable hosts belong
-  // in navigation and new-chat project choices.
-  const availableCatalogs = catalogs.filter((catalog) => catalog.online);
   const settings = (
     <Suspense fallback={fallback()}>
       <Settings />
@@ -213,9 +224,6 @@ export function RemoteWorkspaceRoot({
               hostName: host.name,
             })),
           ),
-          selectedProjectKey: selection?.projectId
-            ? JSON.stringify([selection.hostId, selection.projectId])
-            : undefined,
           selectProject: (key, draft) => {
             for (const catalog of availableCatalogs) {
               const project = catalog.projects.find(

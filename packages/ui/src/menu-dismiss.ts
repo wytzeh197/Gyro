@@ -105,6 +105,7 @@ export function useOutsidePointerDismiss<T extends HTMLElement>(
       ].filter(
         (item) =>
           !item.matches(":disabled, [aria-disabled=true]") &&
+          !item.closest("[inert]") &&
           item.getClientRects().length > 0,
       );
       if (!items.length) return;

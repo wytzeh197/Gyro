@@ -1,0 +1,251 @@
+.gyro-inline-reviewer-space {
+  display: inline-block;
+  position: relative;
+  white-space: nowrap;
+  color: transparent;
+}
+
+.gyro-inline-reviewer {
+  position: absolute;
+  inset: -1px 0;
+  z-index: 2;
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--gyro-chat-space-1) * 0.75);
+  padding: 0 calc(var(--gyro-chat-space-1) * 0.75);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-pill);
+  background: var(--gyro-surface-raised);
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: var(--gyro-chat-meta-size);
+  cursor: pointer;
+}
+
+.gyro-inline-reviewer .gyro-provider-logo { width: 1em; height: 1em; flex: none; }
+
+.gyro-inline-reviewer:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
+
+.gyro-reviewer-menu > .gyro-reviewer-controls {
+  display: grid;
+  justify-content: stretch;
+  gap: var(--gyro-space-standard);
+  padding: var(--gyro-space-standard) var(--gyro-space-standard) var(--gyro-space-standard);
+  border-bottom: 1px solid var(--gyro-premium-hairline-soft);
+}
+
+.gyro-reviewer-title,
+.gyro-reviewer-group-heading > span {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-compact);
+}
+
+.gyro-reviewer-title { padding: var(--gyro-space-compact) var(--gyro-space-compact) 0; }
+
+.gyro-reviewer-description {
+  margin: 0;
+  padding-inline: var(--gyro-space-compact);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+  line-height: 1.4;
+}
+
+.gyro-reviewer-menu > header strong {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+}
+
+.gyro-reviewer-providers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gyro-space-compact);
+  min-width: 0;
+}
+
+.gyro-reviewer-providers > button,
+.gyro-reviewer-search > button,
+.gyro-reviewer-menu > footer button {
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  min-height: 0;
+  color: var(--gyro-muted);
+}
+
+.gyro-reviewer-providers > button {
+  flex: none;
+  gap: calc(var(--gyro-chat-space-1) * 1.25);
+  height: calc(24px * var(--gyro-ui-scale, 1));
+  padding: 0 calc(var(--gyro-chat-space-1) * 2.25);
+  border: 1px solid var(--gyro-premium-hairline-soft);
+  border-radius: var(--gyro-radius-pill);
+  font-size: var(--gyro-font-micro);
+  white-space: nowrap;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.gyro-reviewer-providers > button:hover { color: var(--gyro-text); background: var(--gyro-control-hover); }
+
+.gyro-reviewer-providers > button[aria-pressed="true"] {
+  color: var(--gyro-text);
+  background: var(--gyro-control-hover);
+  border-color: var(--gyro-border);
+  font-weight: 600;
+}
+
+.gyro-reviewer-menu .gyro-provider-logo { width: 14px; height: 14px; flex: none; }
+
+.gyro-reviewer-providers .gyro-provider-logo { width: 12px; height: 12px; }
+
+.gyro-reviewer-search {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  min-width: 0;
+  min-height: calc(30px * var(--gyro-ui-scale, 1));
+  padding: 0 var(--gyro-space-standard);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+  background: var(--gyro-app);
+  color: var(--gyro-muted);
+}
+
+.gyro-reviewer-search:focus-within { border-color: var(--gyro-focus-ring); }
+
+.gyro-reviewer-search > input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: var(--gyro-chat-meta-size);
+}
+
+.gyro-reviewer-search > input::placeholder { color: var(--gyro-muted); }
+
+.gyro-reviewer-search > button { padding: var(--gyro-space-compact); border-radius: var(--gyro-radius-pill); }
+
+.gyro-reviewer-search > button:hover { color: var(--gyro-text); background: var(--gyro-control-hover); }
+
+.gyro-reviewer-results {
+  height: calc(252px * var(--gyro-ui-scale, 1));
+  min-height: 0;
+  padding: 0 var(--gyro-space-compact) var(--gyro-space-compact);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.gyro-reviewer-menu:not(:has(.gyro-reviewer-search)) .gyro-reviewer-results { height: auto; }
+
+.gyro-reviewer-group { flex: none; }
+
+.gyro-reviewer-group-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  padding: var(--gyro-space-standard) var(--gyro-space-standard) var(--gyro-space-compact);
+  background: var(--gyro-surface-raised);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.gyro-reviewer-group-heading em {
+  margin-left: calc(var(--gyro-chat-space-1) * 0.5);
+  padding: 0 calc(var(--gyro-chat-space-1) * 1.25);
+  border: 1px solid var(--gyro-premium-hairline-soft);
+  border-radius: var(--gyro-radius-pill);
+  font-style: normal;
+  font-weight: 500;
+  font-size: var(--gyro-font-tiny);
+  line-height: 1.5;
+}
+
+.gyro-reviewer-menu .gyro-reviewer-option {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-compact);
+  min-height: calc(30px * var(--gyro-ui-scale, 1));
+  padding: 0 var(--gyro-space-standard) 0 var(--gyro-space-compact);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-text);
+}
+
+.gyro-reviewer-check {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  flex: none;
+  color: var(--gyro-accent, var(--gyro-text));
+}
+
+.gyro-reviewer-menu .gyro-reviewer-option:hover,
+.gyro-reviewer-menu .gyro-reviewer-option:focus-visible,
+.gyro-reviewer-menu:has(.gyro-reviewer-search input:focus) .gyro-reviewer-option[tabindex="0"] {
+  background: var(--gyro-control-hover);
+}
+
+.gyro-reviewer-menu .gyro-reviewer-option:focus-visible { outline: 0; box-shadow: inset 0 0 0 1px var(--gyro-border); }
+
+.gyro-reviewer-option[aria-current="true"] .gyro-reviewer-model-name { font-weight: 600; }
+
+.gyro-reviewer-model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--gyro-chat-meta-size);
+}
+
+.gyro-reviewer-option small {
+  margin-left: auto;
+  flex: none;
+  padding: 0 calc(var(--gyro-chat-space-1) * 1.5);
+  border: 1px solid var(--gyro-premium-hairline-soft);
+  border-radius: var(--gyro-radius-pill);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+}
+
+.gyro-reviewer-empty {
+  margin: auto;
+  padding: var(--gyro-space-panel);
+  color: var(--gyro-muted);
+  text-align: center;
+  font-size: var(--gyro-font-support);
+}
+
+.gyro-reviewer-menu > footer {
+  flex: none;
+  padding: var(--gyro-space-compact);
+  border-top: 1px solid var(--gyro-premium-hairline-soft);
+}
+
+.gyro-reviewer-menu > footer button {
+  gap: var(--gyro-space-standard);
+  width: 100%;
+  min-height: calc(28px * var(--gyro-ui-scale, 1));
+  padding: 0 var(--gyro-space-standard);
+  border-radius: var(--gyro-radius-md);
+  font-size: var(--gyro-font-caption);
+}
+
+.gyro-reviewer-menu > footer button:hover { color: var(--gyro-text); background: var(--gyro-control-hover); }

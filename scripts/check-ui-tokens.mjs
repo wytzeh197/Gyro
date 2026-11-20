@@ -135,12 +135,8 @@ for (const { path, source } of styleFiles) {
       /^\.gyro-effort-slider-popover\[data-max-effort="true"\]\s+\.gyro-effort-slider-(?:fill|track::after)$/.test(
         selector,
       );
-    const isStartBeam =
-      /\.gyro-chat-surface\.is-empty/.test(selector) &&
-      /var\(--gyro-beam-drift\)/.test(declaration.value);
     expect(
       isEffortIndicator ||
-        isStartBeam ||
         allowedGradient.some((pattern) => pattern.test(declaration.value)),
       `Decorative gradient at ${path}:${declaration.source.start.line} is not on the content allowlist: ${declaration.value}`,
     );

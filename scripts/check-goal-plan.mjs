@@ -71,6 +71,7 @@ const context = {
   activeSessionGoal: goal,
   chatDraftModesRef: { current: {} },
   chatDraftModeRevisionsRef: { current: {} },
+  chatCouncilStickyRef: { current: {} },
   setChatDraftModes: (modes) => updates.push(modes),
   setChatDraftGoalModes: (update) => { goalSelections = update(goalSelections); },
   setIsGoalComposerActive: (value) => { goalEditorOpen = value; },

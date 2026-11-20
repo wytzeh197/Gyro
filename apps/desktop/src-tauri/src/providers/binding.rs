@@ -141,13 +141,20 @@ pub(crate) fn bind_provider_chat_request(
     request.model_label = session.model_label.clone();
     request.reasoning_effort = session.reasoning_effort.clone();
     request.workspace_path = Some(workspace.display().to_string());
-    request.require_command_approval = config.require_command_approval;
-    request.require_file_edit_approval = config.require_file_edit_approval;
-    // Approval requirements are the stronger authority. A stale or manually
-    // edited config must not let a provider's full-access flag bypass them.
-    request.full_access = config.full_access
-        && !request.require_command_approval
-        && !request.require_file_edit_approval;
+    let policy = role_store
+        .get_project_capability_policy(&workspace.to_string_lossy())
+        .map_err(to_string)?;
+    let writes_denied = policy.access_for(gyro_core::CapabilityClass::WorkspaceWrite)
+        == gyro_core::CapabilityAccess::Deny;
+    let commands_denied = policy.access_for(gyro_core::CapabilityClass::TerminalExecute)
+        == gyro_core::CapabilityAccess::Deny;
+    request.require_command_approval = request.workflow_run_id.is_some()
+        || config.require_command_approval
+        || writes_denied
+        || commands_denied;
+    request.require_file_edit_approval =
+        request.workflow_run_id.is_some() || config.require_file_edit_approval || writes_denied;
+    request.full_access = false;
     Ok(())
 }
 

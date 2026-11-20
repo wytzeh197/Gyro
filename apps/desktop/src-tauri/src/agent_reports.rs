@@ -40,14 +40,18 @@ pub(super) fn render(snapshots: &[AgentSnapshot], options: &Options) -> anyhow::
                     "status":agent.status, "revision":revision, "unchanged":true});
             }
             let (summary, truncated) = subagent_capability::truncate_chars(agent.summary.as_deref().unwrap_or(""), limit);
-            json!({
+            let mut report = json!({
                 "agentId":agent.agent_id, "name":agent.name, "status":agent.status,
                 "readOnly":agent.read_only, "providerId":agent.provider_id, "modelId":agent.model_id,
                 "tokens":agent.tokens, "elapsedMs":agent.elapsed_ms, "runId":agent.run_id,
                 "revision":revision, "summary":summary,
                 "summaryTruncated":truncated || agent.summary.as_ref().is_some_and(|text| text.chars().count() >= 8_000),
                 "error":agent.error.as_ref().map(|text| subagent_capability::truncate_chars(text, 120).0),
-            })
+            });
+            if agent.queued_followups > 0 {
+                report["queuedFollowups"] = json!(agent.queued_followups);
+            }
+            report
         }).collect::<Vec<_>>();
         redact_json_strings(json!({"schema":"gyro.agents.v1", "agents":agents}))
     };

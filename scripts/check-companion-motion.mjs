@@ -99,6 +99,7 @@ function harness({ connected = true, width = 570, reduced = false } = {}) {
   vm.runInNewContext(outputText, {
     exports,
     require: (name) => {
+      if (name === "./surface-motion") return { surfaceExitRate: () => 1.25 };
       assert.equal(name, "react");
       return React;
     },
@@ -336,6 +337,14 @@ check("reopening before close completes does not run a stale exit", () => {
   h.animations.at(-1).finish();
   assert.equal(h.exits, 0);
   assert.equal(h.moving, false);
+});
+check("a fully open dock closes in 80% of its normal opening duration", () => {
+  const h = harness();
+  h.render();
+  assert.equal(h.animations[0].options.duration, 160);
+  h.animations[0].finish();
+  h.render({ open: false });
+  assert.equal(h.animations.at(-1).options.duration, 128);
 });
 console.log(
   JSON.stringify(

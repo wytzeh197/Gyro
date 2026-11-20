@@ -35,7 +35,8 @@
 }
 .gyro-usage-settings > [role="tabpanel"]:not([hidden]) {
   display: grid;
-  gap: var(--gyro-space-section);
+  /* Same rhythm as every other settings page's section body. */
+  gap: calc(var(--gyro-space-section) * 2);
 }
 .gyro-usage-scope {
   margin-bottom: var(--gyro-space-section);

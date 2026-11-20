@@ -5,6 +5,7 @@ import { flushSync } from "react-dom";
 import { ChatSurface, SizingMotionFixture, type ChatSidePanelId, type GyroConfig, type SessionEvent } from "@gyro-dev/ui";
 import { ChatRun, MotionDisclosure, type RunModel } from "@gyro-dev/ui";
 import { BranchNameDialog } from "./branch-name-dialog";
+import { ToolbarOverflow } from "../../../packages/ui/src/toolbar-overflow";
 import "@gyro-dev/ui/styles.css";
 import "./motion-upgrade-fixture.css";
 
@@ -73,6 +74,9 @@ function Fixture() {
       <button onClick={() => setPanel(undefined)}>Close panel</button>
       <button onClick={() => { setPanel("files"); setTimeout(() => setPanel(undefined), 55); setTimeout(() => setPanel("files"), 110); }}>Reverse panel quickly</button>
       <button onClick={() => setDialog(true)}>Open branch dialog</button>
+      <ToolbarOverflow label="Preview actions">
+        <button role="menuitem" type="button">Preview action</button>
+      </ToolbarOverflow>
       <output>Panel state: {panel ?? "closed"}</output>
     </section>
     <section className="motion-qa-chat" aria-label="Production chat and companion fixture">

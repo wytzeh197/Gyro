@@ -133,6 +133,8 @@ function harness() {
     refreshEvents: async () => {},
     providerFailureNotice: () => ({ title: "failed", detail: "" }),
     isPreviewSessionId: () => false,
+    hasChatFullAccess: () => false,
+    setStoppingSessionIds: noop,
     notify: (...x) => notices.push(x),
   };
   Object.assign(context, {
@@ -167,7 +169,6 @@ function harness() {
     chatMessageLength: (x) => x.length,
     isStartingFirstTurn: false,
     checkProviderReadiness: () => true,
-    COUNCIL_COMING_SOON: true,
     createTurnId: () => `turn-${++sequence}`,
     shouldSuggestSessionTitle: () => false,
     setTurnSourceControlBaselines: noop,

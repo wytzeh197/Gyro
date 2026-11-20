@@ -136,11 +136,13 @@
 .gyro-review-filter-count {
   flex: none;
 }
-.gyro-review-scope .gyro-review-files-toggle {
+.gyro-review-scope .gyro-review-scope-actions {
+  margin-inline-start: auto;
+}
+.gyro-review-scope .gyro-review-scope-button {
   display: flex;
   align-items: center;
   gap: var(--gyro-space-standard);
-  margin-left: auto;
   min-height: 24px;
   padding: var(--gyro-space-compact) var(--gyro-space-standard);
   background: transparent;
@@ -148,9 +150,10 @@
   border-radius: var(--gyro-radius-sm);
   color: var(--gyro-muted);
   font: var(--gyro-font-micro) var(--gyro-font-sans);
+  white-space: nowrap;
   cursor: pointer;
 }
-.gyro-review-files-toggle:hover {
+.gyro-review-scope-button:hover {
   background: var(--gyro-control-hover);
   color: var(--gyro-text);
 }

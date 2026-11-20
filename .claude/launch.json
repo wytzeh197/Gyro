@@ -81,6 +81,21 @@
         "--strictPort"
       ],
       "port": 1460
+    },
+    {
+      "name": "launch-film",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "--prefix",
+        "docs/media/launch/film",
+        "remotion",
+        "studio",
+        "--no-open",
+        "--port",
+        "3123"
+      ],
+      "cwd": "docs/media/launch/film",
+      "port": 3123
     }
   ]
 }

@@ -6,6 +6,86 @@
   font-weight: 600;
   line-height: 1.4;
 }
+
+:root[data-theme] .gyro-provider-table.is-native-list .gyro-provider-default-model:has(.gyro-provider-default-picker) {
+  --gyro-provider-default-model-width: 100%;
+}
+.gyro-provider-default-picker {
+  position: relative;
+  width: min(100%, calc(198px * var(--gyro-ui-scale, 1)));
+}
+.gyro-provider-model-trigger,
+.gyro-provider-model-menu > button {
+  align-items: center;
+  color: var(--gyro-text);
+  display: flex;
+  font: 500 var(--gyro-font-support) var(--gyro-font-sans);
+  gap: var(--gyro-space-standard);
+  justify-content: space-between;
+  min-width: 0;
+  text-align: start;
+  width: 100%;
+}
+.gyro-provider-model-trigger {
+  background: transparent;
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: var(--gyro-radius-md);
+  min-height: calc(28px * var(--gyro-ui-scale, 1));
+  padding: 0 8px;
+}
+.gyro-provider-model-trigger:hover {
+  background: var(--gyro-control-hover);
+}
+.gyro-provider-model-trigger[aria-expanded="true"] {
+  border-color: var(--gyro-accent);
+  box-shadow: 0 0 0 1px var(--gyro-accent);
+}
+.gyro-provider-model-trigger > span,
+.gyro-provider-model-menu > button > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-provider-model-trigger > svg,
+.gyro-provider-model-menu > button > svg {
+  flex: none;
+}
+.gyro-provider-model-trigger > svg {
+  color: var(--gyro-muted);
+}
+.gyro-provider-model-menu {
+  background: var(--gyro-surface-raised);
+  border: 1px solid var(--gyro-premium-hairline-strong);
+  border-radius: var(--gyro-radius-md);
+  box-shadow: 0 8px 20px var(--gyro-premium-shadow-soft);
+  inset-inline-start: 0;
+  max-height: calc(152px * var(--gyro-ui-scale, 1));
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 3px;
+  position: absolute;
+  scrollbar-width: thin;
+  top: calc(100% + 4px);
+  width: 100%;
+  z-index: 20;
+}
+.gyro-provider-model-menu > button {
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  min-height: calc(28px * var(--gyro-ui-scale, 1));
+  padding: 0 7px;
+}
+.gyro-provider-model-menu > button:hover {
+  background: var(--gyro-control-hover);
+}
+.gyro-provider-model-menu > button[aria-checked="true"] {
+  background: color-mix(in srgb, var(--gyro-accent) 17%, transparent);
+}
+:root[data-theme] .gyro-settings-surface .gyro-provider-model-menu > button:focus-visible {
+  outline: 1px solid var(--gyro-accent);
+  outline-offset: -1px;
+}
 :root[data-theme] .gyro-provider-connect-help:first-child .gyro-settings-subsection-title {
   margin-top: 0;
 }
@@ -258,7 +338,7 @@
 }
 :root[data-theme]
   .gyro-settings-surface
-  :is(.gyro-settings-row strong, .gyro-workspace-settings-list strong) {
+  :is(.gyro-settings-row strong, .gyro-workspace-settings-list strong, .gyro-import-archived strong) {
   font-size: var(--gyro-font-support);
   font-weight: 500;
 }
@@ -836,7 +916,8 @@
   .gyro-settings-surface
   :is(
     .gyro-settings-row > div:first-child > span,
-    .gyro-workspace-settings-list small
+    .gyro-workspace-settings-list small,
+    .gyro-import-archived > div > span
   ) {
   color: var(--gyro-muted);
   font-size: var(--gyro-font-micro);
@@ -1425,6 +1506,11 @@
   color: var(--gyro-muted);
   font-size: var(--gyro-font-micro);
 }
+/* Dashes mark empty placeholders; installed services and contributions are real items. */
+:root[data-theme] .gyro-settings-surface .gyro-workspace-services article,
+:root[data-theme] .gyro-settings-surface .gyro-workspace-contributions article {
+  border-style: solid;
+}
 
 :root[data-theme] .gyro-settings-surface :is(.gyro-secondary-button) {
   border-color: var(--gyro-border-soft);
@@ -1711,7 +1797,6 @@
   .gyro-settings-section:has(.gyro-appearance-scope)
   > header {
   margin-bottom: 0;
-  padding-bottom: calc(12px * var(--gyro-ui-scale, 1));
 }
 
 :root[data-theme] .gyro-settings-surface .gyro-settings-section-body {
@@ -2154,7 +2239,7 @@
   padding-inline: var(--gyro-space-panel);
   border: 1px solid var(--gyro-border-soft);
   border-radius: var(--gyro-radius-md);
-  margin-bottom: calc(20px * var(--gyro-ui-scale, 1));
+  margin-bottom: 0;
 }
 /* Usage: an unreported allowance is a note, not a hero block. */
 :root[data-theme] .gyro-settings-surface.is-minimal-settings .gyro-usage-dashboard {

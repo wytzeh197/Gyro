@@ -21,8 +21,7 @@ mod terminal;
 mod text;
 mod usage;
 mod workspace;
-pub use app::setup::run;
-pub use app::setup::run_entrypoint;
+pub use app::setup::{run, run_entrypoint};
 mod agent_reports;
 mod app_preview;
 #[cfg(all(debug_assertions, feature = "native-browser-events-smoke"))]
@@ -38,6 +37,7 @@ mod capability_execution_guard;
 mod capability_inspection;
 mod capability_output_budget;
 mod capability_workspace_helpers;
+mod chat_permissions;
 mod claude_usage_cli;
 mod cloud_connection;
 mod cloud_v3;

@@ -12,12 +12,15 @@ use crate::{
         chat_types::{ChatMode, ProviderChatRequest, ProviderChatResponse},
         markers::GYRO_AGENT_UPDATE_MARKER,
         run::run_provider_chat_blocking,
+        session_lifecycle::ProviderSessionLease,
         streaming::{provider_chat_cancelled, provider_stop_message},
     },
     session_browser,
     state::{
         managers::ProviderCancellationManager,
-        provider_run::{BoundProviderCapabilityContext, PROVIDER_INTERRUPTED_MARKER},
+        provider_run::{
+            BoundProviderCapabilityContext, ProviderRunControl, PROVIDER_INTERRUPTED_MARKER,
+        },
     },
     stores::{open_store, to_string},
     subagent_capability,
@@ -31,8 +34,8 @@ use gyro_core::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    collections::HashMap,
-    sync::Mutex,
+    collections::{HashMap, VecDeque},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tauri::{Emitter, Manager};
@@ -240,6 +243,28 @@ pub(super) struct AgentSnapshot {
     pub run_id: String,
     pub summary: Option<String>,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub queued_followups: usize,
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
+}
+
+impl AgentSnapshot {
+    fn touch(&mut self, now: chrono::DateTime<Utc>) {
+        // The renderer compares millisecond timestamps. Keep lifecycle
+        // revisions ordered even when two transitions happen in one tick.
+        let next = chrono::DateTime::parse_from_rfc3339(&self.updated_at)
+            .ok()
+            .and_then(|previous| {
+                previous
+                    .with_timezone(&Utc)
+                    .checked_add_signed(chrono::Duration::milliseconds(1))
+            })
+            .map_or(now, |previous| previous.max(now));
+        self.updated_at = next.to_rfc3339();
+    }
 }
 
 struct AgentEntry {
@@ -247,9 +272,30 @@ struct AgentEntry {
     request: ProviderChatRequest,
     ceiling: CapabilityPolicySnapshot,
     previous_tokens: Option<UsageTokens>,
-    pending: Vec<String>,
+    pending: VecDeque<Followup>,
+    approval_waits: usize,
     continuations: u8,
     delivered: bool,
+}
+
+struct Followup {
+    task: String,
+    policy: CapabilityPolicySnapshot,
+    full_access: bool,
+    require_command_approval: bool,
+    require_file_edit_approval: bool,
+}
+
+impl Followup {
+    fn new(task: String, parent: &ProviderChatRequest, policy: &CapabilityPolicySnapshot) -> Self {
+        Self {
+            task,
+            policy: policy.clone(),
+            full_access: parent.full_access && policy.mode == CapabilityRunMode::Normal,
+            require_command_approval: parent.require_command_approval,
+            require_file_edit_approval: parent.require_file_edit_approval,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -260,6 +306,80 @@ pub(super) struct AgentManager {
 
 fn is_live(status: &str) -> bool {
     matches!(status, "running" | "waiting" | "stopping")
+}
+
+/// One approval can settle while another tool is still waiting. Each guard is
+/// scoped to its invocation so a late decision cannot change a later run.
+pub(crate) struct ApprovalWait<'a> {
+    app: &'a tauri::AppHandle,
+    agent_id: String,
+    run_id: String,
+}
+
+impl<'a> ApprovalWait<'a> {
+    pub(crate) fn start(
+        app: &'a tauri::AppHandle,
+        agent_id: Uuid,
+        turn_id: Option<Uuid>,
+    ) -> Option<Self> {
+        let guard = Self {
+            app,
+            agent_id: agent_id.to_string(),
+            run_id: turn_id?.to_string(),
+        };
+        guard.update(true).then_some(guard)
+    }
+
+    fn update(&self, entering: bool) -> bool {
+        let Some(manager) = self.app.try_state::<AgentManager>() else {
+            return false;
+        };
+        let Ok(mut entries) = manager.entries.lock() else {
+            return false;
+        };
+        let Some(entry) = entries.get_mut(&self.agent_id) else {
+            return false;
+        };
+        let Some(changed) = update_approval_wait(entry, &self.run_id, entering) else {
+            return false;
+        };
+        if changed {
+            if let Err(error) = publish(self.app, &entry.snapshot, true) {
+                eprintln!("could not persist sub-agent approval state: {error}");
+            }
+        }
+        true
+    }
+}
+
+impl Drop for ApprovalWait<'_> {
+    fn drop(&mut self) {
+        self.update(false);
+    }
+}
+
+fn update_approval_wait(entry: &mut AgentEntry, run_id: &str, entering: bool) -> Option<bool> {
+    if entry.snapshot.run_id != run_id
+        || !matches!(entry.snapshot.status.as_str(), "running" | "waiting")
+    {
+        return None;
+    }
+    entry.approval_waits = if entering {
+        entry.approval_waits.saturating_add(1)
+    } else {
+        entry.approval_waits.saturating_sub(1)
+    };
+    let status = if entry.approval_waits > 0 {
+        "waiting"
+    } else {
+        "running"
+    };
+    if status == entry.snapshot.status {
+        return Some(false);
+    }
+    entry.snapshot.status = status.into();
+    entry.snapshot.touch(Utc::now());
+    Some(true)
 }
 
 fn owned(entry: &AgentSnapshot, parent: &str) -> anyhow::Result<()> {
@@ -299,26 +419,39 @@ fn task_text(value: &str) -> anyhow::Result<String> {
     Ok(gyro_core::security::redact_secrets(text))
 }
 
+fn persist_snapshot(
+    store: &SessionStore,
+    snapshot: &AgentSnapshot,
+) -> anyhow::Result<SessionEvent> {
+    store.append_event_with_turn_id(
+        Uuid::parse_str(&snapshot.parent_session_id)?,
+        SessionEventKind::SystemEvent,
+        format!("{}: {}", snapshot.name, snapshot.status),
+        json!({"kind": "subagent-state", "agent": snapshot}),
+        snapshot
+            .parent_turn_id
+            .as_deref()
+            .map(Uuid::parse_str)
+            .transpose()?,
+    )
+}
+
 fn publish(app: &tauri::AppHandle, snapshot: &AgentSnapshot, persist: bool) -> anyhow::Result<()> {
     if persist {
+        // The in-memory transition has already happened. Wake waiters and
+        // deliver it even if the disk write fails.
+        app.state::<AgentManager>().changed.notify_all();
+    }
+    let _ = app.emit(EVENT, snapshot);
+    if persist {
         let store = open_store().map_err(anyhow::Error::msg)?;
-        let event = store.append_event_with_turn_id(
-            Uuid::parse_str(&snapshot.parent_session_id)?,
-            SessionEventKind::SystemEvent,
-            format!("{}: {}", snapshot.name, snapshot.status),
-            json!({"kind": "subagent-state", "agent": snapshot}),
-            snapshot
-                .parent_turn_id
-                .as_deref()
-                .map(Uuid::parse_str)
-                .transpose()?,
-        )?;
+        let event = persist_snapshot(&store, snapshot)?;
         let _ = app.emit(PROVIDER_CAPABILITY_EVENT, event);
         // A child may settle after the parent answer or after reopening the
         // chat. Publish the durable task total so both surfaces see the revision.
-        if let Some(turn) = snapshot
-            .parent_turn_id
-            .as_deref()
+        if let Some(turn) = (!is_live(&snapshot.status))
+            .then_some(snapshot)
+            .and_then(|snapshot| snapshot.parent_turn_id.as_deref())
             .and_then(|id| Uuid::parse_str(id).ok())
         {
             let parent = Uuid::parse_str(&snapshot.parent_session_id)?;
@@ -330,11 +463,33 @@ fn publish(app: &tauri::AppHandle, snapshot: &AgentSnapshot, persist: bool) -> a
             }
         }
     }
-    if persist {
-        app.state::<AgentManager>().changed.notify_all();
-    }
-    let _ = app.emit(EVENT, snapshot);
     Ok(())
+}
+
+fn active_parent_request(
+    app: &tauri::AppHandle,
+    bound: &BoundProviderCapabilityContext,
+) -> anyhow::Result<(ProviderChatRequest, Arc<ProviderRunControl>)> {
+    let control = app
+        .state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .map_err(|_| anyhow::anyhow!("run state unavailable"))?
+        .get(&bound.session_id)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("parent turn is no longer running"))?;
+    anyhow::ensure!(
+        !control.cancellation.is_cancelled(),
+        "parent turn was stopped"
+    );
+    let request = control
+        .request
+        .lock()
+        .map_err(|_| anyhow::anyhow!("run request unavailable"))?
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("parent has no active request"))?;
+    anyhow::ensure!(request.turn_id == bound.turn_id, "parent turn changed");
+    Ok((request, control))
 }
 
 pub(super) fn spawn(
@@ -358,19 +513,7 @@ pub(super) fn spawn_with_runtime(
     let parent = store
         .get_session(Uuid::parse_str(&bound.session_id)?)?
         .ok_or_else(|| anyhow::anyhow!("parent chat disappeared"))?;
-    let parent_request = app
-        .state::<ProviderCancellationManager>()
-        .flags
-        .lock()
-        .map_err(|_| anyhow::anyhow!("run state unavailable"))?
-        .get(&bound.session_id)
-        .cloned()
-        .ok_or_else(|| anyhow::anyhow!("parent turn is no longer running"))?
-        .request
-        .lock()
-        .map_err(|_| anyhow::anyhow!("run request unavailable"))?
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("parent has no active request"))?;
+    let (parent_request, parent_control) = active_parent_request(app, bound)?;
     let task = task_text(task)?;
     let name = gyro_core::sanitize_capability_summary(name.trim());
     if name.is_empty() || name.chars().count() > 60 {
@@ -419,10 +562,11 @@ pub(super) fn spawn_with_runtime(
         return Err(error);
     }
     let id = child.id.to_string();
-    let control = match subagent_capability::ChildRunControl::claim_with_runtime(
+    let control = match subagent_capability::ChildRunControl::claim(
         app,
         &id,
         &bound.session_id,
+        &parent_control,
         runtime,
     ) {
         Ok(control) => control,
@@ -453,6 +597,7 @@ pub(super) fn spawn_with_runtime(
         run_id: request.turn_id.clone().unwrap(),
         summary: None,
         error: None,
+        queued_followups: 0,
     };
     let manager = app.state::<AgentManager>();
     let mut entries = match manager.entries.lock() {
@@ -463,6 +608,14 @@ pub(super) fn spawn_with_runtime(
             anyhow::bail!("agent state unavailable");
         }
     };
+    let event = match persist_snapshot(&store, &snapshot) {
+        Ok(event) => event,
+        Err(error) => {
+            drop(control);
+            let _ = store.delete_session(child.id);
+            return Err(error);
+        }
+    };
     entries.insert(
         id.clone(),
         AgentEntry {
@@ -470,17 +623,14 @@ pub(super) fn spawn_with_runtime(
             request,
             ceiling: bound.policy.clone(),
             previous_tokens: None,
-            pending: Vec::new(),
+            pending: VecDeque::new(),
+            approval_waits: 0,
             continuations: 0,
             delivered: false,
         },
     );
-    if let Err(error) = publish(app, &snapshot, true) {
-        entries.remove(&id);
-        drop(control);
-        let _ = store.delete_session(child.id);
-        return Err(error);
-    }
+    let _ = app.emit(PROVIDER_CAPABILITY_EVENT, event);
+    let _ = app.emit(EVENT, &snapshot);
     drop(entries);
     start_worker(app.clone(), id, control)?;
     Ok(snapshot)
@@ -508,13 +658,49 @@ fn inherited_chat_mode(mode: CapabilityRunMode) -> ChatMode {
     }
 }
 
-fn inherit_entry_permissions(
+fn begin_assigned_followup(
+    store: &SessionStore,
     entry: &mut AgentEntry,
-    parent: &ProviderChatRequest,
-    policy: &CapabilityPolicySnapshot,
-) {
-    entry.snapshot.read_only = inherit_parent_permissions(&mut entry.request, parent, policy);
-    entry.ceiling = policy.clone();
+    followup: Followup,
+    parent_turn: Option<String>,
+) -> anyhow::Result<()> {
+    store.append_event(
+        Uuid::parse_str(&entry.snapshot.agent_id)?,
+        SessionEventKind::SystemEvent,
+        "Delegation authority inherited",
+        json!({
+            "kind": "subagent-authority", "policy": followup.policy,
+            "fullAccess": followup.full_access,
+            "requireCommandApproval": followup.require_command_approval,
+            "requireFileEditApproval": followup.require_file_edit_approval,
+        }),
+    )?;
+    apply_followup(entry, followup, parent_turn);
+    Ok(())
+}
+
+fn apply_followup(entry: &mut AgentEntry, followup: Followup, parent_turn: Option<String>) {
+    entry.snapshot.parent_turn_id = parent_turn;
+    entry.snapshot.read_only = followup.policy.mode != CapabilityRunMode::Normal;
+    entry.request.mode = inherited_chat_mode(followup.policy.mode);
+    entry.request.full_access = followup.full_access;
+    entry.request.require_command_approval = followup.require_command_approval;
+    entry.request.require_file_edit_approval = followup.require_file_edit_approval;
+    entry.ceiling = followup.policy;
+    begin_followup(entry, followup.task);
+}
+
+fn discard_followups(entry: &mut AgentEntry, reason: &str) {
+    if entry.snapshot.queued_followups == 0 {
+        return;
+    }
+    entry.pending.clear();
+    entry.snapshot.queued_followups = 0;
+    let error = entry.snapshot.error.get_or_insert_with(String::new);
+    if !error.is_empty() {
+        error.push(' ');
+    }
+    error.push_str(reason);
 }
 
 fn prepare_child_request(request: &mut ProviderChatRequest, task: &str, read_only: bool) {
@@ -637,14 +823,14 @@ fn recover_worker_entries(
 fn fail_worker(app: &tauri::AppHandle, id: &str, error: &str) {
     let manager = app.state::<AgentManager>();
     let mut entries = recover_worker_entries(&manager);
+    release_private_browser(app, id);
     if let Some(entry) = entries.get_mut(id) {
         if is_live(&entry.snapshot.status) || !entry.pending.is_empty() {
-            settle(entry, Err(error.into()), false);
+            let stopped = entry.snapshot.status == "stopping";
+            settle(entry, Err(error.into()), stopped);
             let _ = publish(app, &entry.snapshot, true);
         }
     }
-    drop(entries);
-    release_private_browser(app, id);
 }
 
 fn release_private_browser(app: &tauri::AppHandle, id: &str) {
@@ -655,34 +841,9 @@ fn release_private_browser(app: &tauri::AppHandle, id: &str) {
     }
 }
 
-struct PrivateBrowserScope<'a> {
-    app: &'a tauri::AppHandle,
-    id: &'a str,
-}
-impl Drop for PrivateBrowserScope<'_> {
-    fn drop(&mut self) {
-        release_private_browser(self.app, self.id);
-    }
-}
-
 fn worker_loop(app: tauri::AppHandle, id: &str, mut control: subagent_capability::ChildRunControl) {
-    let _browser_scope = PrivateBrowserScope { app: &app, id };
     loop {
-        let request = match app
-            .state::<AgentManager>()
-            .entries
-            .lock()
-            .ok()
-            .and_then(|entries| entries.get(id).map(|entry| entry.request.clone()))
-        {
-            Some(request) => request,
-            None => {
-                drop(control);
-                fail_worker(&app, id, "the sub-agent request state is unavailable");
-                return;
-            }
-        };
-        if let Some((parent, parent_turn)) = app
+        let (request, parent, parent_turn) = match app
             .state::<AgentManager>()
             .entries
             .lock()
@@ -690,30 +851,36 @@ fn worker_loop(app: tauri::AppHandle, id: &str, mut control: subagent_capability
             .and_then(|entries| {
                 entries.get(id).map(|entry| {
                     (
+                        entry.request.clone(),
                         entry.snapshot.parent_session_id.clone(),
                         entry.snapshot.parent_turn_id.clone(),
                     )
                 })
-            })
-        {
-            if let (Ok(store), Ok(child), Some(child_turn), Ok(parent), Some(parent_turn)) = (
-                open_store(),
-                Uuid::parse_str(&request.session_id),
-                request
-                    .turn_id
-                    .as_deref()
-                    .and_then(|value| Uuid::parse_str(value).ok()),
-                Uuid::parse_str(&parent),
-                parent_turn
-                    .as_deref()
-                    .and_then(|value| Uuid::parse_str(value).ok()),
-            ) {
-                if let Err(error) = store.link_usage_turn(child, child_turn, parent, parent_turn) {
-                    eprintln!("could not attribute child usage: {error}");
-                }
+            }) {
+            Some(request) => request,
+            None => {
+                drop(control);
+                fail_worker(&app, id, "the sub-agent request state is unavailable");
+                return;
             }
-        }
+        };
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if let (Some(child_turn), Some(parent_turn)) =
+                (request.turn_id.as_deref(), parent_turn.as_deref())
+            {
+                let link = (|| -> anyhow::Result<()> {
+                    open_store().map_err(anyhow::Error::msg)?.link_usage_turn(
+                        Uuid::parse_str(id)?,
+                        Uuid::parse_str(child_turn)?,
+                        Uuid::parse_str(&parent)?,
+                        Uuid::parse_str(parent_turn)?,
+                    )
+                })();
+                link.map_err(|error| format!("could not attribute child usage: {error}"))?;
+            }
+            if control.is_cancelled() {
+                return Err(provider_stop_message(&app, id).into());
+            }
             run_provider_chat_blocking(app.clone(), request, UsageOrigin::SubAgent)
         }))
         .unwrap_or_else(|_| Err("the sub-agent worker exited unexpectedly".into()));
@@ -727,6 +894,7 @@ fn worker_loop(app: tauri::AppHandle, id: &str, mut control: subagent_capability
             }
         };
         let Some(entry) = entries.get_mut(id) else {
+            release_private_browser(&app, id);
             return;
         };
         let stopped = control.is_cancelled() || entry.snapshot.status == "stopping";
@@ -745,8 +913,8 @@ fn worker_loop(app: tauri::AppHandle, id: &str, mut control: subagent_capability
                     if let Err(error) = publish(&app, &entry.snapshot, true) {
                         settle(entry, Err(error.to_string()), false);
                         let _ = publish(&app, &entry.snapshot, true);
+                        release_private_browser(&app, id);
                         drop(control);
-                        drop(entries);
                         return;
                     }
                     drop(entries);
@@ -760,28 +928,41 @@ fn worker_loop(app: tauri::AppHandle, id: &str, mut control: subagent_capability
         if !stopped && entry.snapshot.status == "completed" && !entry.pending.is_empty() {
             match control.renew(&entry.snapshot.parent_session_id) {
                 Ok(()) => {
-                    let finished = entry.snapshot.clone();
-                    if let Err(error) = publish(&app, &finished, true) {
-                        eprintln!("could not persist agent state: {error}");
+                    let parent_turn = entry.snapshot.parent_turn_id.clone();
+                    let handoff = publish(&app, &entry.snapshot, true).and_then(|()| {
+                        let followup = entry.pending.pop_front().expect("queue checked under lock");
+                        let store = open_store().map_err(anyhow::Error::msg)?;
+                        begin_assigned_followup(&store, entry, followup, parent_turn)
+                    });
+                    match handoff {
+                        Ok(()) => {
+                            if let Err(error) = publish(&app, &entry.snapshot, true) {
+                                settle(entry, Err(error.to_string()), false);
+                            } else {
+                                drop(entries);
+                                continue;
+                            }
+                        }
+                        Err(error) => {
+                            entry.snapshot.error =
+                                Some(gyro_core::security::redact_secrets(&error.to_string()));
+                            discard_followups(entry, "Queued follow-ups could not be started.");
+                            entry.snapshot.touch(Utc::now());
+                        }
                     }
-                    let task = entry.pending.remove(0);
-                    begin_followup(entry, task);
-                    if let Err(error) = publish(&app, &entry.snapshot, true) {
-                        settle(entry, Err(error.to_string()), false);
-                        let _ = publish(&app, &entry.snapshot, true);
-                        drop(control);
-                        drop(entries);
-                        return;
-                    }
-                    drop(entries);
-                    continue;
                 }
                 Err(error) => {
-                    settle(entry, Err(error.to_string()), control.is_cancelled());
+                    entry.snapshot.error =
+                        Some(gyro_core::security::redact_secrets(&error.to_string()));
+                    discard_followups(entry, "Queued follow-ups could not be started.");
+                    entry.snapshot.touch(Utc::now());
                 }
             }
         }
-        let _ = publish(&app, &entry.snapshot, true);
+        release_private_browser(&app, id);
+        if let Err(error) = publish(&app, &entry.snapshot, true) {
+            eprintln!("could not persist sub-agent settlement: {error}");
+        }
         // Keep settlement, durable publication, and release serialized with
         // send. A completed entry is never visible with its old run booked.
         drop(control);
@@ -791,6 +972,7 @@ fn worker_loop(app: tauri::AppHandle, id: &str, mut control: subagent_capability
 }
 
 fn settle(entry: &mut AgentEntry, outcome: Result<ProviderChatResponse, String>, stopped: bool) {
+    entry.approval_waits = 0;
     let now = Utc::now();
     if let Some(start) = entry
         .snapshot
@@ -803,7 +985,7 @@ fn settle(entry: &mut AgentEntry, outcome: Result<ProviderChatResponse, String>,
             .elapsed_ms
             .saturating_add((now.signed_duration_since(start).num_milliseconds().max(0)) as u64);
     }
-    entry.snapshot.updated_at = now.to_rfc3339();
+    entry.snapshot.touch(now);
     match outcome {
         Ok(response) => {
             let tokens = response
@@ -816,15 +998,8 @@ fn settle(entry: &mut AgentEntry, outcome: Result<ProviderChatResponse, String>,
             entry.snapshot.summary = Some(
                 subagent_capability::truncate_chars(&response.assistant_event.message, 8_000).0,
             );
-            let notice = response
-                .status_event
-                .payload
-                .get("error")
-                .and_then(Value::as_str)
-                .filter(|notice| {
-                    provider_reliability::is_tool_budget_notice(notice)
-                        || notice.contains("may be cut off")
-                });
+            let notice = partial_run_notice(response.status_event.payload["error"].as_str());
+            let stopped = stopped || response.status_event.payload["status"] == "cancelled";
             let requires_completion = entry.request.message.contains(GYRO_AGENT_UPDATE_MARKER);
             let error = if stopped {
                 Some("The sub-agent was stopped before task completion.".into())
@@ -855,13 +1030,11 @@ fn settle(entry: &mut AgentEntry, outcome: Result<ProviderChatResponse, String>,
             "{INCOMPLETE_TASK_NOTICE} Automatic continuation limit reached; the report is retained."
         ));
     }
-    if entry.snapshot.status != "completed" && !can_continue(entry) && !entry.pending.is_empty() {
-        entry.pending.clear();
-        let error = entry
-            .snapshot
-            .error
-            .get_or_insert_with(|| "the sub-agent did not finish".into());
-        error.push_str(" Queued follow-ups were not started because this run did not finish.");
+    if entry.snapshot.status != "completed" && !can_continue(entry) {
+        discard_followups(
+            entry,
+            "Queued follow-ups were not started because this run did not finish.",
+        );
     }
 }
 
@@ -897,11 +1070,13 @@ fn begin_followup(entry: &mut AgentEntry, task: String) {
     entry.previous_tokens = entry.snapshot.tokens;
     entry.snapshot.task = task.clone();
     entry.snapshot.run_id = Uuid::new_v4().to_string();
-    entry.snapshot.started_at = Some(Utc::now().to_rfc3339());
-    entry.snapshot.updated_at = Utc::now().to_rfc3339();
+    let now = Utc::now();
+    entry.snapshot.started_at = Some(now.to_rfc3339());
+    entry.snapshot.touch(now);
     entry.snapshot.status = "running".into();
     entry.snapshot.summary = None;
     entry.snapshot.error = None;
+    entry.snapshot.queued_followups = entry.pending.len();
     prepare_child_request(&mut entry.request, &task, entry.snapshot.read_only);
     entry.continuations = 0;
     entry.request.turn_id = Some(entry.snapshot.run_id.clone());
@@ -922,7 +1097,7 @@ pub(super) fn observe_tokens(
             return None;
         }
         entry.snapshot.tokens = add_tokens(entry.previous_tokens, Some(tokens));
-        entry.snapshot.updated_at = Utc::now().to_rfc3339();
+        entry.snapshot.touch(Utc::now());
         Some(entry.snapshot.clone())
     });
     if let Some(snapshot) = snapshot {
@@ -1020,11 +1195,24 @@ pub(super) fn wait(
     ids: &[String],
     timeout: Duration,
 ) -> anyhow::Result<Vec<AgentSnapshot>> {
-    for id in ids {
-        restore_entry(app, bound, id)?;
-    }
-    let deadline = Instant::now() + timeout;
     let manager = app.state::<AgentManager>();
+    let has_saved_agents = {
+        let entries = manager
+            .entries
+            .lock()
+            .map_err(|_| anyhow::anyhow!("agent state unavailable"))?;
+        ids.iter().any(|id| !entries.contains_key(id))
+    };
+    // Reading a saved report does not require permission to start a new run.
+    let saved = if has_saved_agents {
+        list(app, &bound.session_id)?
+            .into_iter()
+            .map(|agent| (agent.agent_id.clone(), agent))
+            .collect::<HashMap<_, _>>()
+    } else {
+        HashMap::new()
+    };
+    let deadline = Instant::now() + timeout;
     loop {
         if provider_chat_cancelled(app, &bound.session_id) {
             anyhow::bail!(provider_stop_message(app, &bound.session_id));
@@ -1036,11 +1224,18 @@ pub(super) fn wait(
         let snapshots = ids
             .iter()
             .map(|id| {
-                let entry = entries
+                if let Some(entry) = entries.get(id) {
+                    owned(&entry.snapshot, &bound.session_id)?;
+                    return Ok(entry.snapshot.clone());
+                }
+                let snapshot = saved
                     .get(id)
                     .ok_or_else(|| anyhow::anyhow!("agent not found: {id}"))?;
-                owned(&entry.snapshot, &bound.session_id)?;
-                Ok(entry.snapshot.clone())
+                anyhow::ensure!(
+                    !is_live(&snapshot.status),
+                    "this sub-agent is still owned by another provider host"
+                );
+                Ok(snapshot.clone())
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
         let remaining = deadline.saturating_duration_since(Instant::now());
@@ -1095,6 +1290,8 @@ fn send(
     message: &str,
 ) -> anyhow::Result<AgentSnapshot> {
     let task = task_text(message)?;
+    let store = open_store().map_err(anyhow::Error::msg)?;
+    validate_caller(&store, bound, CapabilityId::AgentSend)?;
     restore_entry(app, bound, id)?;
     let manager = app.state::<AgentManager>();
     let mut entries = manager
@@ -1111,33 +1308,32 @@ fn send(
     if entry.pending.len() >= 8 {
         anyhow::bail!("agent already has eight pending tasks");
     }
-    entry.snapshot.parent_turn_id = bound.turn_id.clone();
-    let parent_request = app
-        .state::<ProviderCancellationManager>()
-        .flags
-        .lock()
-        .map_err(|_| anyhow::anyhow!("run state unavailable"))?
-        .get(&bound.session_id)
-        .cloned()
-        .ok_or_else(|| anyhow::anyhow!("parent turn no longer active"))?
-        .request
-        .lock()
-        .map_err(|_| anyhow::anyhow!("run request unavailable"))?
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("parent request unavailable"))?;
-    inherit_entry_permissions(entry, &parent_request, &bound.policy);
-    open_store().map_err(anyhow::Error::msg)?.append_event(Uuid::parse_str(id)?, SessionEventKind::SystemEvent, "Delegation authority inherited", json!({
-        "kind": "subagent-authority", "policy": entry.ceiling,
-        "fullAccess": entry.request.full_access, "requireCommandApproval": entry.request.require_command_approval,
-        "requireFileEditApproval": entry.request.require_file_edit_approval,
-    }))?;
+    let (parent_request, parent_control) = active_parent_request(app, bound)?;
+    let followup = Followup::new(task, &parent_request, &bound.policy);
     if is_live(&entry.snapshot.status) {
-        entry.pending.push(task);
+        anyhow::ensure!(
+            entry.snapshot.parent_turn_id == bound.turn_id,
+            "the sub-agent is still working for an earlier turn"
+        );
+        let mut snapshot = entry.snapshot.clone();
+        snapshot.queued_followups = entry.pending.len() + 1;
+        snapshot.touch(Utc::now());
+        let event = persist_snapshot(&store, &snapshot)?;
+        entry.pending.push_back(followup);
+        entry.snapshot = snapshot.clone();
         entry.delivered = false;
-        return Ok(entry.snapshot.clone());
+        let _ = app.emit(PROVIDER_CAPABILITY_EVENT, event);
+        let _ = app.emit(EVENT, &snapshot);
+        return Ok(snapshot);
     }
-    let control = subagent_capability::ChildRunControl::claim(app, id, &bound.session_id)?;
-    begin_followup(entry, task);
+    let control = subagent_capability::ChildRunControl::claim(
+        app,
+        id,
+        &bound.session_id,
+        &parent_control,
+        None,
+    )?;
+    begin_assigned_followup(&store, entry, followup, bound.turn_id.clone())?;
     let snapshot = entry.snapshot.clone();
     if let Err(error) = publish(app, &snapshot, true) {
         settle(entry, Err(error.to_string()), false);
@@ -1176,6 +1372,17 @@ fn restore_entry(
         .into_iter()
         .find(|agent| agent.agent_id == id)
         .ok_or_else(|| anyhow::anyhow!("saved agent state is unavailable"))?;
+    if is_live(&snapshot.status) {
+        anyhow::ensure!(
+            app.state::<AgentManager>()
+                .entries
+                .lock()
+                .map_err(|_| anyhow::anyhow!("agent state unavailable"))?
+                .contains_key(id),
+            "this sub-agent is still owned by another provider host"
+        );
+        return Ok(());
+    }
     let authority = store
         .read_events(child.id)?
         .into_iter()
@@ -1227,7 +1434,8 @@ fn restore_entry(
             snapshot,
             request,
             ceiling,
-            pending: Vec::new(),
+            pending: VecDeque::new(),
+            approval_waits: 0,
             continuations: 0,
             delivered: true,
         });
@@ -1235,44 +1443,74 @@ fn restore_entry(
 }
 
 fn stop(app: &tauri::AppHandle, parent: &str, id: &str) -> anyhow::Result<AgentSnapshot> {
+    stop_for_turn(app, parent, id, None)
+}
+
+fn stop_for_turn(
+    app: &tauri::AppHandle,
+    parent: &str,
+    id: &str,
+    expected_turn: Option<&str>,
+) -> anyhow::Result<AgentSnapshot> {
     let manager = app.state::<AgentManager>();
     let mut entries = manager
         .entries
         .lock()
         .map_err(|_| anyhow::anyhow!("agent state unavailable"))?;
-    let entry = entries
-        .get_mut(id)
-        .ok_or_else(|| anyhow::anyhow!("agent not found"))?;
+    let Some(entry) = entries.get_mut(id) else {
+        drop(entries);
+        return list(app, parent)?
+            .into_iter()
+            .find(|agent| agent.agent_id == id && !is_live(&agent.status))
+            .ok_or_else(|| anyhow::anyhow!("agent is unavailable"));
+    };
     owned(&entry.snapshot, parent)?;
-    entry.pending.clear();
-    if is_live(&entry.snapshot.status) {
-        if let Some(control) = app
-            .state::<ProviderCancellationManager>()
-            .flags
-            .lock()
-            .map_err(|_| anyhow::anyhow!("run state unavailable"))?
-            .get(id)
-        {
-            control.cancellation.cancel();
-        }
-        entry.snapshot.status = "stopping".into();
+    if expected_turn.is_some_and(|turn| entry.snapshot.parent_turn_id.as_deref() != Some(turn))
+        || entry.snapshot.status == "stopping"
+        || !is_live(&entry.snapshot.status)
+    {
+        return Ok(entry.snapshot.clone());
     }
-    let snapshot = entry.snapshot.clone();
-    drop(entries);
-    publish(app, &snapshot, true)?;
-    Ok(snapshot)
+    let control = app
+        .state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .map_err(|_| anyhow::anyhow!("run state unavailable"))?
+        .get(id)
+        .cloned();
+    if control.is_some() {
+        entry.snapshot.status = "stopping".into();
+        entry.snapshot.touch(Utc::now());
+    } else {
+        settle(
+            entry,
+            Err("The sub-agent stopped before task completion.".into()),
+            true,
+        );
+    }
+    // Publish under the entry lock so settlement cannot be overtaken by a
+    // stale stopping event. Once accepted, a disk error cannot undo the stop.
+    if let Err(error) = publish(app, &entry.snapshot, true) {
+        eprintln!("could not persist sub-agent stop: {error}");
+    }
+    if let Some(control) = control {
+        control.cancellation.cancel();
+    }
+    Ok(entry.snapshot.clone())
 }
 
 /// A parent turn must never leave spending children behind after a failure.
 pub(super) struct ParentRunScope {
     app: tauri::AppHandle,
     session: String,
+    turn: String,
 }
 impl ParentRunScope {
-    pub(super) fn new(app: &tauri::AppHandle, session: &str) -> Self {
+    pub(super) fn new(app: &tauri::AppHandle, session: &str, turn: Uuid) -> Self {
         Self {
             app: app.clone(),
             session: session.into(),
+            turn: turn.to_string(),
         }
     }
 }
@@ -1289,6 +1527,7 @@ impl Drop for ParentRunScope {
                     .values()
                     .filter(|entry| {
                         entry.snapshot.parent_session_id == self.session
+                            && entry.snapshot.parent_turn_id.as_deref() == Some(&self.turn)
                             && is_live(&entry.snapshot.status)
                     })
                     .map(|entry| entry.snapshot.agent_id.clone())
@@ -1296,7 +1535,7 @@ impl Drop for ParentRunScope {
             })
             .unwrap_or_default();
         for id in ids {
-            let _ = stop(&self.app, &self.session, &id);
+            let _ = stop_for_turn(&self.app, &self.session, &id, Some(&self.turn));
         }
     }
 }
@@ -1349,7 +1588,7 @@ fn reconcile_saved_snapshot(snapshot: &mut AgentSnapshot, events: &[SessionEvent
     let run = Uuid::parse_str(&snapshot.run_id).ok();
     let relevant = events
         .iter()
-        .filter(|event| run.is_some() && event.turn_id == run)
+        .filter(|event| (run.is_some() || snapshot.run_id.is_empty()) && event.turn_id == run)
         .collect::<Vec<_>>();
     let response = relevant
         .iter()
@@ -1359,113 +1598,256 @@ fn reconcile_saved_snapshot(snapshot: &mut AgentSnapshot, events: &[SessionEvent
         .iter()
         .rev()
         .find(|event| event.payload.get("kind").and_then(Value::as_str) == Some("provider-status"));
-    let notice = status.and_then(|event| event.payload.get("error").and_then(Value::as_str));
-    snapshot.status = "interrupted".into();
-    snapshot.summary = None;
-    snapshot.error = Some(PROVIDER_INTERRUPTED_MARKER.into());
-    if let Some(response) = response {
-        snapshot.summary = Some(subagent_capability::truncate_chars(&response.message, 8_000).0);
-        let partial = notice.filter(|notice| {
-            provider_reliability::is_tool_budget_notice(notice) || notice.contains("may be cut off")
-        });
-        let stopped = status.is_some_and(|event| event.payload["status"] == "cancelled");
+    let payload = status.map(|event| &event.payload).unwrap_or(&Value::Null);
+    let notice = payload["error"].as_str();
+    let stopped = snapshot.status == "stopping" || payload["status"] == "cancelled";
+    let failure = matches!(payload["status"].as_str(), Some("failed" | "blocked"))
+        && notice != Some(PROVIDER_INTERRUPTED_MARKER);
+    let summary =
+        response.map(|event| subagent_capability::truncate_chars(&event.message, 8_000).0);
+    let (status, mut error) = if stopped {
+        (
+            "cancelled",
+            Some(
+                notice
+                    .filter(|msg| *msg != PROVIDER_INTERRUPTED_MARKER)
+                    .unwrap_or("The sub-agent was stopped before task completion.")
+                    .into(),
+            ),
+        )
+    } else if failure {
+        (
+            "failed",
+            Some(
+                notice
+                    .unwrap_or("The provider could not finish the sub-agent run.")
+                    .into(),
+            ),
+        )
+    } else if let Some(response) = response {
         let requires_completion = relevant.iter().any(|event| {
             event.kind == SessionEventKind::UserMessage
                 && event.message.contains(GYRO_AGENT_UPDATE_MARKER)
         });
-        snapshot.error = if stopped {
-            Some("The sub-agent was stopped before task completion.".into())
-        } else {
-            partial
-                .map(gyro_core::security::redact_secrets)
-                .or_else(|| completion_error(&response.payload, requires_completion))
-        };
-        snapshot.status = if stopped {
-            "cancelled"
-        } else if snapshot.error.is_some() {
-            "interrupted"
-        } else {
-            "completed"
+        let error = partial_run_notice(notice)
+            .map(str::to_owned)
+            .or_else(|| completion_error(&response.payload, requires_completion));
+        (
+            if error.is_some() {
+                "interrupted"
+            } else {
+                "completed"
+            },
+            error,
+        )
+    } else {
+        ("interrupted", Some(PROVIDER_INTERRUPTED_MARKER.into()))
+    };
+    if snapshot.queued_followups > 0 {
+        let message = error.get_or_insert_with(String::new);
+        if !message.is_empty() {
+            message.push(' ');
         }
-        .into();
-    } else if let Some(status) = status {
-        match status.payload.get("status").and_then(Value::as_str) {
-            Some("failed") if notice != Some(PROVIDER_INTERRUPTED_MARKER) => {
-                snapshot.status = "failed".into()
-            }
-            Some("cancelled") => snapshot.status = "cancelled".into(),
-            _ => {}
-        }
-        snapshot.error = notice
-            .map(gyro_core::security::redact_secrets)
-            .or(snapshot.error.take());
+        message.push_str("Queued follow-ups were cleared when Gyro restarted.");
+        snapshot.queued_followups = 0;
     }
+    snapshot.status = status.into();
+    snapshot.summary = summary;
+    snapshot.error = error.map(|error| gyro_core::security::redact_secrets(&error));
+    let latest_evidence = relevant
+        .iter()
+        .filter(|event| event.payload["error"].as_str() != Some(PROVIDER_INTERRUPTED_MARKER))
+        .map(|event| event.created_at)
+        .chain(
+            chrono::DateTime::parse_from_rfc3339(&snapshot.updated_at)
+                .ok()
+                .map(|ts| ts.with_timezone(&Utc)),
+        )
+        .max();
     if let Some(start) = snapshot
         .started_at
         .take()
         .and_then(|value| chrono::DateTime::parse_from_rfc3339(&value).ok())
     {
-        let end = relevant
-            .iter()
-            .rev()
-            .find(|event| {
-                event.payload.get("error").and_then(Value::as_str)
-                    != Some(PROVIDER_INTERRUPTED_MARKER)
-            })
-            .map(|event| event.created_at)
-            .unwrap_or_else(|| start.with_timezone(&Utc));
+        let end = latest_evidence.unwrap_or_else(|| start.with_timezone(&Utc));
         snapshot.elapsed_ms = snapshot
             .elapsed_ms
             .saturating_add(end.signed_duration_since(start).num_milliseconds().max(0) as u64);
     }
-    if let Some(last) = relevant.last() {
-        snapshot.updated_at = last.created_at.to_rfc3339();
+    if let Some(end) = latest_evidence {
+        snapshot.touch(end);
     }
+}
+
+fn partial_run_notice(notice: Option<&str>) -> Option<&str> {
+    notice.filter(|notice| {
+        provider_reliability::is_tool_budget_notice(notice) || notice.contains("may be cut off")
+    })
+}
+
+fn abandoned_approvals(events: &[SessionEvent]) -> Vec<&SessionEvent> {
+    let mut pending = HashMap::new();
+    for event in events {
+        let kind = event.payload["kind"].as_str();
+        if !matches!(kind, Some("provider-tool-approval" | "capability-approval"))
+            || event.payload["historical"] == true
+        {
+            continue;
+        }
+        let Some(id) = event.payload["approvalId"].as_str() else {
+            continue;
+        };
+        let key = (event.turn_id, kind, id);
+        if event.kind == SessionEventKind::ApprovalRequested
+            && matches!(
+                event.payload["status"].as_str(),
+                Some("pending" | "waiting" | "requested") | None
+            )
+        {
+            pending.insert(key, event);
+        } else {
+            pending.remove(&key);
+        }
+    }
+    let mut pending = pending.into_values().collect::<Vec<_>>();
+    pending.sort_by_key(|event| event.created_at);
+    pending
+}
+
+fn latest_saved_snapshots(parent: &str, events: &[SessionEvent]) -> HashMap<String, AgentSnapshot> {
+    let mut snapshots: HashMap<String, AgentSnapshot> = HashMap::new();
+    for event in events {
+        if event.payload["kind"] != "subagent-state" {
+            continue;
+        }
+        let Ok(snapshot) = serde_json::from_value::<AgentSnapshot>(event.payload["agent"].clone())
+        else {
+            continue;
+        };
+        if snapshot.parent_session_id != parent {
+            continue;
+        }
+        let should_replace = snapshots.get(&snapshot.agent_id).map_or(true, |current| {
+            let incoming = chrono::DateTime::parse_from_rfc3339(&snapshot.updated_at).ok();
+            let previous = chrono::DateTime::parse_from_rfc3339(&current.updated_at).ok();
+            incoming >= previous
+                && (snapshot.run_id != current.run_id
+                    || is_live(&current.status)
+                    || !is_live(&snapshot.status))
+        });
+        if should_replace {
+            snapshots.insert(snapshot.agent_id.clone(), snapshot);
+        }
+    }
+    snapshots
+}
+
+fn needs_recovery(snapshot: &AgentSnapshot) -> bool {
+    is_live(&snapshot.status) || snapshot.queued_followups > 0
+}
+
+fn recover_saved_agent(
+    store: &SessionStore,
+    snapshot: &mut AgentSnapshot,
+    events: &[SessionEvent],
+) -> anyhow::Result<Vec<SessionEvent>> {
+    // The caller owns the child lease. A restarted process can close the
+    // record, but only a new authorized send may launch another invocation.
+    if is_live(&snapshot.status) {
+        reconcile_saved_snapshot(snapshot, events);
+    } else {
+        snapshot.queued_followups = 0;
+        snapshot.error = Some("Queued follow-ups were cleared when Gyro restarted.".into());
+        snapshot.touch(Utc::now());
+    }
+    let child_id = Uuid::parse_str(&snapshot.agent_id)?;
+    if let Ok(Some(tokens)) = store.session_usage_tokens(child_id) {
+        snapshot.tokens = Some(tokens);
+    }
+    let mut receipts = Vec::new();
+    for event in abandoned_approvals(events) {
+        receipts.push(store.append_event_with_turn_id(
+            child_id,
+            SessionEventKind::SystemEvent,
+            "Approval closed when Gyro restarted",
+            json!({"kind": event.payload["kind"], "approvalId": event.payload["approvalId"],
+                "status": "cancelled"}),
+            event.turn_id,
+        )?);
+    }
+    receipts.push(persist_snapshot(store, snapshot)?);
+    Ok(receipts)
 }
 
 fn list(app: &tauri::AppHandle, parent: &str) -> anyhow::Result<Vec<AgentSnapshot>> {
     let store = open_store().map_err(anyhow::Error::msg)?;
-    let mut snapshots = HashMap::new();
-    let parent_events = store.read_events(Uuid::parse_str(parent)?)?;
-    for event in &parent_events {
-        if event.payload.get("kind").and_then(Value::as_str) == Some("subagent-state") {
-            if let Ok(snapshot) =
-                serde_json::from_value::<AgentSnapshot>(event.payload["agent"].clone())
-            {
-                snapshots.insert(snapshot.agent_id.clone(), snapshot);
-            }
-        }
-    }
-    for child in store.list_sessions()?.into_iter().filter(|session| {
-        session
-            .parent_session_id
-            .map(|id| id.to_string())
-            .as_deref()
-            == Some(parent)
-    }) {
+    let parent_id = Uuid::parse_str(parent)?;
+    let manager = app.state::<AgentManager>();
+    let live = manager
+        .entries
+        .lock()
+        .map_err(|_| anyhow::anyhow!("agent state unavailable"))?;
+    let parent_events = store.read_events(parent_id)?;
+    let mut saved = latest_saved_snapshots(parent, &parent_events);
+    let children = store
+        .list_sessions()?
+        .into_iter()
+        .filter(|session| session.parent_session_id == Some(parent_id))
+        .collect::<Vec<_>>();
+    let mut snapshots = Vec::with_capacity(children.len());
+    for child in children {
         let id = child.id.to_string();
-        if snapshots.contains_key(&id) {
+        if let Some(entry) = live.get(&id) {
+            snapshots.push(entry.snapshot.clone());
             continue;
         }
+        let mut saved_snapshot = saved.remove(&id);
+        if let Some(snapshot) = saved_snapshot
+            .as_ref()
+            .filter(|snapshot| !needs_recovery(snapshot))
+        {
+            snapshots.push(snapshot.clone());
+            continue;
+        }
+        let lease = ProviderSessionLease::try_acquire(store.paths(), child.id)?;
+        if lease.is_some() {
+            // A different host may have settled the child between the parent
+            // log read and our acquisition of the child lease.
+            if let Some(latest) =
+                latest_saved_snapshots(parent, &store.read_events(parent_id)?).remove(&id)
+            {
+                if !needs_recovery(&latest) {
+                    snapshots.push(latest);
+                    continue;
+                }
+                saved_snapshot = Some(latest);
+            }
+        }
         let events = store.read_events(child.id)?;
-        let latest_turn = events.iter().rev().find_map(|event| event.turn_id);
-        let response = events.iter().rev().find(|event| {
-            event.kind == SessionEventKind::AssistantMessage && event.turn_id == latest_turn
-        });
-        let parent_turn = parent_events
-            .iter()
-            .find(|event| {
-                event
-                    .payload
-                    .pointer("/resource/id")
-                    .and_then(Value::as_str)
-                    == Some(&id)
+        // Creation writes the child row before the first lifecycle receipt.
+        // Only reconstruct legacy children with evidence that a run started.
+        if saved_snapshot.is_none()
+            && !events.iter().any(|event| {
+                event.kind == SessionEventKind::UserMessage
+                    || event.payload["kind"] == "provider-status"
             })
-            .and_then(|event| event.turn_id)
-            .map(|id| id.to_string());
-        let totals = store.session_usage_totals(child.id).ok();
-        snapshots.insert(
-            id.clone(),
+        {
+            continue;
+        }
+        let mut snapshot = saved_snapshot.unwrap_or_else(|| {
+            let latest_turn = events.iter().rev().find_map(|event| event.turn_id);
+            let parent_turn = parent_events
+                .iter()
+                .rev()
+                .find(|event| {
+                    event
+                        .payload
+                        .pointer("/resource/id")
+                        .and_then(Value::as_str)
+                        == Some(&id)
+                })
+                .and_then(|event| event.turn_id)
+                .map(|id| id.to_string());
             AgentSnapshot {
                 agent_id: id,
                 parent_session_id: parent.into(),
@@ -1473,7 +1855,9 @@ fn list(app: &tauri::AppHandle, parent: &str) -> anyhow::Result<Vec<AgentSnapsho
                 name: child.title,
                 task: events
                     .iter()
-                    .find(|event| event.kind == SessionEventKind::UserMessage)
+                    .find(|event| {
+                        event.kind == SessionEventKind::UserMessage && event.turn_id == latest_turn
+                    })
                     .map(|event| event.message.clone())
                     .unwrap_or_default(),
                 provider_id: child.provider_id.unwrap_or_default(),
@@ -1488,45 +1872,49 @@ fn list(app: &tauri::AppHandle, parent: &str) -> anyhow::Result<Vec<AgentSnapsho
                     .signed_duration_since(child.created_at)
                     .num_milliseconds()
                     .max(0) as u64,
-                tokens: totals
-                    .filter(|totals| totals.calls > 0)
-                    .and_then(|_| store.session_usage_tokens(child.id).ok().flatten()),
+                tokens: None,
                 run_id: latest_turn.map(|id| id.to_string()).unwrap_or_default(),
-                summary: response
-                    .map(|event| subagent_capability::truncate_chars(&event.message, 8_000).0),
+                summary: None,
                 error: None,
-            },
-        );
-    }
-    let manager = app.state::<AgentManager>();
-    let live = manager
-        .entries
-        .lock()
-        .map_err(|_| anyhow::anyhow!("agent state unavailable"))?;
-    for snapshot in snapshots.values_mut() {
-        if !live.contains_key(&snapshot.agent_id) && is_live(&snapshot.status) {
-            let events = store.read_events(Uuid::parse_str(&snapshot.agent_id)?)?;
-            reconcile_saved_snapshot(snapshot, &events);
-            // Ledger counts survive even if the last lifecycle write was lost.
-            if let Ok(totals) = store.session_usage_totals(Uuid::parse_str(&snapshot.agent_id)?) {
-                if totals.calls > 0 {
-                    snapshot.tokens = store
-                        .session_usage_tokens(Uuid::parse_str(&snapshot.agent_id)?)
-                        .ok()
-                        .flatten();
+                queued_followups: 0,
+            }
+        });
+        if let Some(_lease) = lease {
+            // A host can hold the parent lease while it starts its child or
+            // hands the slot to a follow-up. A free child lease in that gap
+            // is not enough evidence that the work was abandoned.
+            if let Some(turn) = snapshot
+                .parent_turn_id
+                .as_deref()
+                .and_then(|id| Uuid::parse_str(id).ok())
+            {
+                if store
+                    .latest_provider_status_for_turn(parent_id, turn)?
+                    .as_deref()
+                    == Some("running")
+                    && ProviderSessionLease::try_acquire(store.paths(), parent_id)?.is_none()
+                {
+                    snapshots.push(snapshot);
+                    continue;
                 }
             }
+            for event in recover_saved_agent(&store, &mut snapshot, &events)? {
+                let channel = if event.session_id == child.id {
+                    crate::app::limits::PROVIDER_APPROVAL_EVENT
+                } else {
+                    PROVIDER_CAPABILITY_EVENT
+                };
+                let _ = app.emit(channel, event);
+            }
         }
+        snapshots.push(snapshot);
     }
-    for entry in live
-        .values()
-        .filter(|entry| entry.snapshot.parent_session_id == parent)
-    {
-        snapshots.insert(entry.snapshot.agent_id.clone(), entry.snapshot.clone());
-    }
-    let mut result = snapshots.into_values().collect::<Vec<_>>();
-    result.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-    Ok(result)
+    snapshots.sort_by(|a, b| {
+        a.created_at
+            .cmp(&b.created_at)
+            .then_with(|| a.agent_id.cmp(&b.agent_id))
+    });
+    Ok(snapshots)
 }
 
 #[tauri::command]
@@ -1535,7 +1923,11 @@ pub(super) async fn stop_subagent(
     parent_session_id: String,
     agent_id: String,
 ) -> Result<AgentSnapshot, String> {
-    stop(&app, &parent_session_id, &agent_id).map_err(to_string)
+    tauri::async_runtime::spawn_blocking(move || {
+        stop(&app, &parent_session_id, &agent_id).map_err(to_string)
+    })
+    .await
+    .map_err(to_string)?
 }
 
 pub(super) fn execute(
@@ -1805,6 +2197,7 @@ mod tests {
                 run_id: "run".into(),
                 summary: None,
                 error: None,
+                queued_followups: 0,
             },
             request,
             ceiling: CapabilityPolicySnapshot::from_policy(
@@ -1812,10 +2205,18 @@ mod tests {
                 CapabilityRunMode::Plan,
             ),
             previous_tokens: None,
-            pending: Vec::new(),
+            pending: VecDeque::new(),
+            approval_waits: 0,
             continuations: 0,
             delivered: false,
         }
+    }
+
+    fn queue(entry: &mut AgentEntry, task: &str) {
+        entry
+            .pending
+            .push_back(Followup::new(task.into(), &entry.request, &entry.ceiling));
+        entry.snapshot.queued_followups = entry.pending.len();
     }
 
     fn child_response(message: &str, notice: Option<&str>) -> ProviderChatResponse {
@@ -1963,7 +2364,7 @@ mod tests {
         let mut entry = entry();
         entry.request.message = child_prompt("Implement parser", false);
         entry.snapshot.task = "Implement parser".into();
-        entry.pending.push("A separately assigned task".into());
+        queue(&mut entry, "A separately assigned task");
         for round in 0..=MAX_AUTOMATIC_CONTINUATIONS {
             settle(&mut entry, Ok(reported_response("continue", None)), false);
             assert_eq!(entry.snapshot.status, "interrupted");
@@ -2041,7 +2442,7 @@ mod tests {
     fn partial_child_reports_remain_available_and_do_not_start_queued_work() {
         for notice in [PROVIDER_TOOL_BUDGET_NOTICE, PROVIDER_CUT_OFF_NOTICE] {
             let mut entry = entry();
-            entry.pending.push("Continue the implementation".into());
+            queue(&mut entry, "Continue the implementation");
             settle(
                 &mut entry,
                 Ok(child_response(
@@ -2060,7 +2461,7 @@ mod tests {
             assert!(entry.snapshot.started_at.is_none());
         }
         let mut entry = entry();
-        entry.pending.push("A separately queued task".into());
+        queue(&mut entry, "A separately queued task");
         settle(
             &mut entry,
             Err("provider authentication failed".into()),
@@ -2079,7 +2480,7 @@ mod tests {
     #[test]
     fn completed_child_keeps_authorized_followups_ready_for_handoff() {
         let mut entry = entry();
-        entry.pending.push("Implement the next part".into());
+        queue(&mut entry, "Implement the next part");
         settle(
             &mut entry,
             Ok(child_response("Verified the first part", None)),
@@ -2196,6 +2597,191 @@ mod tests {
         );
         assert_eq!(latest.error.as_deref(), Some("provider refused new turn"));
     }
+
+    #[test]
+    fn simultaneous_approvals_wait_until_the_last_decision_and_do_not_override_stop() {
+        let mut child = entry();
+        let run = child.snapshot.run_id.clone();
+        assert_eq!(update_approval_wait(&mut child, &run, true), Some(true));
+        assert_eq!(child.snapshot.status, "waiting");
+        assert_eq!(update_approval_wait(&mut child, &run, true), Some(false));
+        assert_eq!(update_approval_wait(&mut child, &run, false), Some(false));
+        assert_eq!(child.snapshot.status, "waiting");
+        assert_eq!(update_approval_wait(&mut child, &run, false), Some(true));
+        assert_eq!(child.snapshot.status, "running");
+
+        update_approval_wait(&mut child, &run, true);
+        child.snapshot.status = "stopping".into();
+        assert_eq!(update_approval_wait(&mut child, &run, false), None);
+        assert_eq!(child.snapshot.status, "stopping");
+        settle(&mut child, Err("stopped".into()), true);
+        begin_followup(&mut child, "Try another approach".into());
+        assert_eq!(update_approval_wait(&mut child, &run, true), None);
+        assert_eq!(child.approval_waits, 0);
+        assert_eq!(child.snapshot.status, "running");
+    }
+
+    #[test]
+    fn restart_preserves_stop_and_failure_even_with_a_saved_response() {
+        for (saved_state, provider_state, reason, expected_state) in [
+            (
+                "waiting",
+                "failed",
+                PROVIDER_INTERRUPTED_MARKER,
+                "interrupted",
+            ),
+            ("running", "failed", "provider disconnected", "failed"),
+            ("running", "blocked", "sign-in required", "failed"),
+            ("running", "cancelled", "stopped by user", "cancelled"),
+            (
+                "stopping",
+                "failed",
+                PROVIDER_INTERRUPTED_MARKER,
+                "cancelled",
+            ),
+        ] {
+            let run = Uuid::new_v4();
+            let mut snapshot = entry().snapshot;
+            snapshot.run_id = run.to_string();
+            snapshot.status = saved_state.into();
+            snapshot.queued_followups = 2;
+            let mut response = child_response("Partial work", None).assistant_event;
+            response.turn_id = Some(run);
+            let mut task = SessionEvent::new(
+                response.session_id,
+                SessionEventKind::UserMessage,
+                child_prompt("Finish the test", true),
+                json!({}),
+            );
+            task.turn_id = Some(run);
+            let mut terminal = SessionEvent::new(
+                response.session_id,
+                SessionEventKind::SystemEvent,
+                "provider ended",
+                json!({"kind":"provider-status","status":provider_state,"error":reason}),
+            );
+            terminal.turn_id = Some(run);
+            reconcile_saved_snapshot(&mut snapshot, &[task, response, terminal]);
+            assert_eq!(snapshot.status, expected_state);
+            assert_eq!(snapshot.summary.as_deref(), Some("Partial work"));
+            assert!(snapshot.started_at.is_none());
+            assert_eq!(snapshot.queued_followups, 0);
+            assert!(snapshot
+                .error
+                .unwrap()
+                .contains("Queued follow-ups were cleared"));
+        }
+    }
+
+    #[test]
+    fn restart_recovery_closes_only_unresolved_approvals_and_saves_the_snapshot() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("data"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let parent = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "parent")
+            .unwrap();
+        let child = store
+            .create_subagent_session(
+                temp.path(),
+                SessionOrigin::Desktop,
+                "worker",
+                CreateSessionContext::default(),
+                parent.id,
+            )
+            .unwrap();
+        let mut snapshot = entry().snapshot;
+        let run = Uuid::new_v4();
+        snapshot.agent_id = child.id.to_string();
+        snapshot.parent_session_id = parent.id.to_string();
+        snapshot.parent_turn_id = Some(Uuid::new_v4().to_string());
+        snapshot.run_id = run.to_string();
+        snapshot.status = "waiting".into();
+        snapshot.queued_followups = 1;
+        persist_snapshot(&store, &snapshot).unwrap();
+        for (kind, id, event_kind, status) in [
+            (
+                "provider-tool-approval",
+                "shared",
+                SessionEventKind::ApprovalRequested,
+                "pending",
+            ),
+            (
+                "capability-approval",
+                "shared",
+                SessionEventKind::ApprovalRequested,
+                "waiting",
+            ),
+            (
+                "capability-approval",
+                "shared",
+                SessionEventKind::SystemEvent,
+                "approved",
+            ),
+        ] {
+            store
+                .append_event_with_turn_id(
+                    child.id,
+                    event_kind,
+                    "approval",
+                    json!({"kind":kind,"approvalId":id,"status":status}),
+                    Some(run),
+                )
+                .unwrap();
+        }
+        drop(store);
+
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let _lease = ProviderSessionLease::try_acquire(&paths, child.id)
+            .unwrap()
+            .unwrap();
+        let receipts =
+            recover_saved_agent(&store, &mut snapshot, &store.read_events(child.id).unwrap())
+                .unwrap();
+        assert_eq!(receipts.len(), 2);
+        assert_eq!(receipts[0].payload["kind"], "provider-tool-approval");
+        assert_eq!(receipts[0].payload["status"], "cancelled");
+        assert!(abandoned_approvals(&store.read_events(child.id).unwrap()).is_empty());
+        let restored = latest_saved_snapshots(
+            &parent.id.to_string(),
+            &store.read_events(parent.id).unwrap(),
+        );
+        let saved = &restored[&child.id.to_string()];
+        assert_eq!(saved.status, "interrupted");
+        assert!(!needs_recovery(saved));
+        assert!(saved
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("Queued follow-ups were cleared"));
+    }
+
+    #[test]
+    fn replaying_a_late_stopping_snapshot_cannot_reopen_a_settled_run() {
+        let mut child = entry().snapshot;
+        let first_revision = child.updated_at.clone();
+        child.touch(
+            chrono::DateTime::parse_from_rfc3339(&first_revision)
+                .unwrap()
+                .with_timezone(&Utc),
+        );
+        let event = |agent: &AgentSnapshot| {
+            SessionEvent::new(
+                Uuid::new_v4(),
+                SessionEventKind::SystemEvent,
+                "lifecycle",
+                json!({"kind":"subagent-state", "agent":agent}),
+            )
+        };
+        child.status = "cancelled".into();
+        let settled = event(&child);
+        child.status = "stopping".into();
+        child.updated_at = first_revision;
+        let late = event(&child);
+        let saved = latest_saved_snapshots("parent", &[settled, late]);
+        assert_eq!(saved["child"].status, "cancelled");
+    }
+
     #[test]
     fn auto_approval_allows_delegation_without_crossing_denials_or_council() {
         let mut config = GyroConfig::default();
@@ -2322,8 +2908,17 @@ mod tests {
             &ProjectCapabilityPolicy::defaults("workspace"),
             CapabilityRunMode::Normal,
         );
-        inherit_entry_permissions(&mut child, &parent, &policy);
-        begin_followup(&mut child, "Implement parser".into());
+        let followup = Followup::new("Implement parser".into(), &parent, &policy);
+        assert_eq!(child.ceiling.mode, CapabilityRunMode::Plan);
+        assert!(
+            child.snapshot.read_only,
+            "queuing cannot change the active run"
+        );
+        apply_followup(&mut child, followup, Some("next-parent-turn".into()));
+        assert_eq!(
+            child.snapshot.parent_turn_id.as_deref(),
+            Some("next-parent-turn")
+        );
         assert!(child.request.full_access);
         assert!(!child.request.require_command_approval);
         assert!(!child.request.require_file_edit_approval);
@@ -2339,8 +2934,12 @@ mod tests {
             &ProjectCapabilityPolicy::defaults("workspace"),
             CapabilityRunMode::Plan,
         );
-        inherit_entry_permissions(&mut child, &parent, &restricted);
-        begin_followup(&mut child, "Inspect parser".into());
+        let followup = Followup::new("Inspect parser".into(), &parent, &restricted);
+        assert!(
+            child.request.full_access,
+            "a queued Plan job cannot rewrite active permissions"
+        );
+        apply_followup(&mut child, followup, Some("plan-turn".into()));
         assert!(!child.request.full_access);
         assert!(child.request.require_command_approval);
         assert!(child.request.require_file_edit_approval);

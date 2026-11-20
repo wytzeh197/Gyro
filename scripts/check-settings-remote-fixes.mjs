@@ -275,12 +275,18 @@ const catalogPorts = {
   },
 };
 const exports = {};
+let catalogTick;
+let catalogClock = 1000;
 const context = {
   exports,
   require: (id) => (id === "react" ? hooks : { RemoteHostClient }),
   setTimeout,
   clearTimeout,
-  setInterval: () => 0,
+  Date: { now: () => catalogClock },
+  setInterval: (callback) => {
+    catalogTick = callback;
+    return 0;
+  },
   clearInterval() {},
 };
 vm.createContext(context);
@@ -310,13 +316,27 @@ assert.equal(catalogs[0].projects[0].sessions.length, 1);
 assert.match(catalogs[0].error, /Some projects/);
 
 const catalogInvoke = catalogPorts.invoke;
+const probeOperations = [];
+catalogPorts.invoke = (...args) => {
+  probeOperations.push(args[1].request.operation.op);
+  return catalogInvoke(...args);
+};
+catalogClock += 10_000;
+catalogTick();
+await sleep(0);
+assert.deepEqual(probeOperations, ["projects"], "Healthy host probes do not fan out into session reads");
+catalogClock += 50_000;
+catalogTick();
+await sleep(0);
+assert.equal(probeOperations.filter((op) => op === "sessions").length, 17, "Periodic reconciliation recovers missed host events");
+
 let releaseCatalog;
 const catalogGate = new Promise((resolve) => {
   releaseCatalog = resolve;
 });
 let catalogRefreshes = 0;
 catalogPorts.invoke = async (...args) => {
-  if (args[1].request.operation.op === "hello" && ++catalogRefreshes === 1)
+  if (args[1].request.operation.op === "projects" && ++catalogRefreshes === 1)
     await catalogGate;
   return catalogInvoke(...args);
 };
@@ -334,15 +354,33 @@ assert.equal(
   "Refreshes requested during an active catalog load coalesce into one follow-up",
 );
 
+const beforeEmptyCatalog = catalogTick;
+const emptyEffect = effects.length;
+const emptyCatalog = exports.useRemoteCatalog(catalogPorts, []);
+effects[emptyEffect]();
+assert.equal(catalogTick, beforeEmptyCatalog, "An empty catalog doesn't schedule discovery polling");
+await emptyCatalog.refresh();
+
 let catalogEvent;
 const eventCounts = new Map();
+let hostAOnline = true;
+let hostBProject = "project-b";
+let heldHandshake;
+let heldSessions;
 const eventPorts = {
-  async invoke(_command, { hostId, request: { operation } }) {
+  async invoke(_command, { hostId, catalog, request: { operation } }) {
+    assert.equal(catalog, true, "Background reads use the native discovery deadline");
+    if (hostId === "catalog-a" && !hostAOnline) throw Error("Host unavailable");
     if (operation.op === "hello") {
-      eventCounts.set(hostId, (eventCounts.get(hostId) ?? 0) + 1);
+      if (hostId === "catalog-a" && heldHandshake) await heldHandshake;
       return { protocol: 1 };
     }
-    return [];
+    if (operation.op === "projects") {
+      eventCounts.set(hostId, (eventCounts.get(hostId) ?? 0) + 1);
+      return [{ id: hostId === "catalog-a" ? "project-a" : hostBProject }];
+    }
+    if (hostId === "catalog-a" && heldSessions) await heldSessions;
+    return [{ id: `session-${operation.projectId}` }];
   },
   async listen(_event, handler) {
     catalogEvent = handler;
@@ -350,7 +388,7 @@ const eventPorts = {
   },
 };
 const eventEffect = effects.length;
-exports.useRemoteCatalog(eventPorts, [
+const eventController = exports.useRemoteCatalog(eventPorts, [
   { id: "catalog-a", name: "Mac A", role: "host" },
   { id: "catalog-b", name: "Mac B", role: "host" },
 ]);
@@ -370,6 +408,42 @@ assert.equal(
   1,
   "Debouncing must retain the second host's refresh",
 );
+
+let releaseSessions;
+heldSessions = new Promise((resolve) => { releaseSessions = resolve; });
+await eventController.refresh();
+hostAOnline = false;
+hostBProject = "new-project-b";
+await eventController.refresh();
+await sleep(0);
+assert.equal(catalogs[0].online, false, "A probe hides the host while its prior session read is still pending");
+assert.equal(catalogs[1].online, true, "Another host stays online");
+assert.equal(catalogs[1].projects[0].project.id, hostBProject, "A stalled host cannot block updates for another host");
+heldSessions = undefined;
+releaseSessions();
+await sleep(0);
+assert.equal(catalogs[0].online, false, "A late session response cannot bring an offline catalog back");
+hostAOnline = true;
+let releaseHandshake;
+heldHandshake = new Promise((resolve) => { releaseHandshake = resolve; });
+const reconnecting = eventController.refresh();
+hostBProject = "project-b-during-reconnect";
+await eventController.refresh();
+await sleep(0);
+assert.equal(catalogs[0].online, false, "Rows stay hidden during the reconnection handshake");
+assert.equal(catalogs[1].projects[0].project.id, hostBProject, "A slow handshake cannot delay another host's refresh");
+heldHandshake = undefined;
+releaseHandshake();
+await reconnecting;
+await sleep(0);
+assert.equal(catalogs[0].online, true, "The next successful check restores the host");
+assert.equal(catalogs[0].projects[0].sessions[0].id, "session-project-a");
+
+hostAOnline = false;
+catalogEvent({ payload: { hostId: "catalog-a", event: { topic: "resync", payload: { streamClosed: true } } } });
+await sleep(300);
+assert.equal(catalogs[0].online, false, "A closed chat stream triggers a fresh availability check");
+assert.equal(catalogs[1].online, true);
 cleanupEvents();
 
 const snapshot = (output, start, end, generation = "g") => ({

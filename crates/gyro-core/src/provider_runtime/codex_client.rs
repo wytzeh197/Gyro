@@ -20,15 +20,44 @@ pub const CODEX_APP_SERVER_STDERR_DETAIL_CHARS: usize = 600;
 /// Drains Codex stderr (so it can never block on a full pipe) and resolves to
 /// its bounded tail once the stream closes.
 pub fn spawn_codex_app_server_stderr_tail(stderr: ChildStderr) -> mpsc::Receiver<String> {
+    spawn_stderr_tail(stderr, None)
+}
+
+fn spawn_stderr_tail(
+    stderr: ChildStderr,
+    capacity: Option<mpsc::SyncSender<(String, CodexCapacityRetry)>>,
+) -> mpsc::Receiver<String> {
     let (sender, receiver) = mpsc::sync_channel(1);
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stderr);
         let mut tail = VecDeque::with_capacity(CODEX_APP_SERVER_STDERR_TAIL_BYTES);
+        let mut line = Some(Vec::new());
         let mut chunk = [0_u8; 1024];
         loop {
             match reader.read(&mut chunk) {
                 Ok(0) | Err(_) => break,
                 Ok(read) => {
+                    if let Some(capacity) = &capacity {
+                        for part in chunk[..read].split_inclusive(|byte| *byte == b'\n') {
+                            if let Some(buffer) = &mut line {
+                                if buffer.len() + part.len() <= 16 * 1024 {
+                                    buffer.extend_from_slice(part);
+                                } else {
+                                    line = None;
+                                }
+                            }
+                            if part.ends_with(b"\n") {
+                                if let Some(buffer) = &mut line {
+                                    if let Some(retry) = capacity_retry_from_stderr(buffer) {
+                                        let _ = capacity.try_send(retry);
+                                    }
+                                    buffer.clear();
+                                } else {
+                                    line = Some(Vec::new());
+                                }
+                            }
+                        }
+                    }
                     tail.extend(&chunk[..read]);
                     let excess = tail
                         .len()
@@ -41,6 +70,56 @@ pub fn spawn_codex_app_server_stderr_tail(stderr: ChildStderr) -> mpsc::Receiver
         let _ = sender.send(String::from_utf8_lossy(&bytes).into_owned());
     });
     receiver
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CodexCapacityRetry {
+    pub deadline: Option<Instant>,
+    pub attempt: u32,
+    pub max_attempts: u32,
+}
+
+const RESPONSE_RETRY_LOG_TARGET: &str = "codex_core::responses_retry";
+
+// Release Codex can omit the first WebSocket retry notification. Its scoped
+// warning carries the actual backoff, including the provider's Retry-After.
+fn capacity_retry_from_stderr(line: &[u8]) -> Option<(String, CodexCapacityRetry)> {
+    let event: serde_json::Value = serde_json::from_slice(line).ok()?;
+    let fields = &event["fields"];
+    if event["target"].as_str()? != RESPONSE_RETRY_LOG_TARGET
+        || !super::support::is_model_capacity_error(fields["sampling_error"].as_str()?)
+    {
+        return None;
+    }
+    let attempt = u32::try_from(fields["retries"].as_u64()?).ok()?;
+    let max_attempts = u32::try_from(fields["max_retries"].as_u64()?).ok()?;
+    if attempt == 0 || attempt > max_attempts {
+        return None;
+    }
+    let deadline = fields["message"]
+        .as_str()
+        .and_then(|message| {
+            message.strip_prefix("stream disconnected - retrying sampling request (")
+        })
+        .and_then(|message| message.strip_suffix(")..."))
+        .and_then(|message| message.split_once(" in "))
+        .and_then(|(_, delay)| parse_codex_log_delay(delay))
+        .and_then(|delay| Instant::now().checked_add(delay));
+    Some((
+        fields["turn_id"].as_str()?.to_owned(),
+        CodexCapacityRetry {
+            deadline,
+            attempt,
+            max_attempts,
+        },
+    ))
+}
+
+fn parse_codex_log_delay(delay: &str) -> Option<Duration> {
+    let (number, scale) = [("ms", 1e-3), ("µs", 1e-6), ("ns", 1e-9), ("s", 1.0)]
+        .into_iter()
+        .find_map(|(unit, scale)| delay.strip_suffix(unit).map(|number| (number, scale)))?;
+    Duration::try_from_secs_f64(number.parse::<f64>().ok()? * scale).ok()
 }
 
 pub fn codex_app_server_closed_message(stderr_tail: &str) -> String {
@@ -335,8 +414,36 @@ pub struct CodexClient {
 }
 impl CodexClient {
     pub fn spawn(
+        command: std::process::Command,
+        options: CodexClientOptions,
+    ) -> std::io::Result<Self> {
+        Self::spawn_inner(command, options, None)
+    }
+
+    pub(super) fn spawn_chat(
         mut command: std::process::Command,
         options: CodexClientOptions,
+    ) -> std::io::Result<(Self, mpsc::Receiver<(String, CodexCapacityRetry)>)> {
+        let (sender, receiver) = mpsc::sync_channel(8);
+        if matches!(options.wire_format, CodexWireFormat::Desktop) {
+            let filter = command
+                .get_envs()
+                .find(|(key, _)| *key == "RUST_LOG")
+                .map(|(_, value)| value.map(|value| value.to_string_lossy().into_owned()))
+                .unwrap_or_else(|| std::env::var("RUST_LOG").ok())
+                .unwrap_or_else(|| "error".into());
+            command.env("LOG_FORMAT", "json").env(
+                "RUST_LOG",
+                format!("{filter},{RESPONSE_RETRY_LOG_TARGET}=warn"),
+            );
+        }
+        Ok((Self::spawn_inner(command, options, Some(sender))?, receiver))
+    }
+
+    fn spawn_inner(
+        mut command: std::process::Command,
+        options: CodexClientOptions,
+        capacity: Option<mpsc::SyncSender<(String, CodexCapacityRetry)>>,
     ) -> std::io::Result<Self> {
         use std::process::Stdio;
         command
@@ -358,7 +465,7 @@ impl CodexClient {
         let stderr = child.stderr.take().ok_or_else(|| pipe("error output"))?;
         let stderr_output = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
         let stderr_tail = match options.wire_format {
-            CodexWireFormat::Desktop => Some(spawn_codex_app_server_stderr_tail(stderr)),
+            CodexWireFormat::Desktop => Some(spawn_stderr_tail(stderr, capacity)),
             CodexWireFormat::Cli => {
                 let output = stderr_output.clone();
                 std::thread::spawn(move || {
@@ -423,6 +530,46 @@ mod client_tests {
         let mut command = std::process::Command::new("/bin/sh");
         command.args(["-c", script]);
         command
+    }
+
+    #[test]
+    fn desktop_chat_reads_first_capacity_retry_from_stderr_before_exit() {
+        let log = serde_json::json!({
+            "target": RESPONSE_RETRY_LOG_TARGET,
+            "fields": {
+                "message": "stream disconnected - retrying sampling request (1/5 in 315.946643333s)...",
+                "turn_id": "provider-turn",
+                "retries": 1,
+                "max_retries": 5,
+                "sampling_error": "Selected model is at capacity. Please try a different model."
+            },
+        });
+        let mut command = peer("printf '%s\\n' \"$CAPACITY_FIXTURE\" >&2; IFS= read -r line");
+        command.env("CAPACITY_FIXTURE", log.to_string());
+        let (mut client, capacity) =
+            CodexClient::spawn_chat(command, CodexClientOptions::desktop()).unwrap();
+        let (turn_id, retry) = capacity.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(turn_id, "provider-turn");
+        assert_eq!((retry.attempt, retry.max_attempts), (1, 5));
+        let remaining = retry
+            .deadline
+            .unwrap()
+            .saturating_duration_since(Instant::now());
+        assert!((Duration::from_secs(313)..=Duration::from_secs(316)).contains(&remaining));
+        assert!(client.child_mut().try_wait().unwrap().is_none());
+
+        let mut network = log.clone();
+        network["fields"]["sampling_error"] = "stream closed by server".into();
+        assert!(capacity_retry_from_stderr(&serde_json::to_vec(&network).unwrap()).is_none());
+        let mut unknown_delay = log;
+        unknown_delay["fields"]["message"] = "retrying".into();
+        assert_eq!(
+            capacity_retry_from_stderr(&serde_json::to_vec(&unknown_delay).unwrap())
+                .unwrap()
+                .1
+                .deadline,
+            None
+        );
     }
 
     #[test]

@@ -17,10 +17,10 @@ async function productionAgents() {
       import React from "react";
       import { renderToStaticMarkup } from "react-dom/server";
       import { SubagentList } from "./packages/ui/src/subagents-view.tsx";
-      import { subagentActivitySummary } from "./packages/ui/src/subagents.ts";
+      import { subagentStatusCounts } from "./packages/ui/src/subagents.ts";
       export function renderAgents(statuses) {
         const agents = statuses.map((status, i) => ({ agentId:["parser","tests","review"][i], name:["Parser","Tests","Review"][i], status, task:"Verify", providerId:"fixture", readOnly:true, parentSessionId:"fixture", createdAt:"2026-11-16T10:00:00Z", updatedAt:"2026-11-16T10:00:00Z", elapsedMs:1000 }));
-        return renderToStaticMarkup(<main id="ready"><div id="agent-group"><SubagentList state={{agents, eventsByAgentId:{}, onSelect:()=>{}, onStop:()=>{}}} /></div><output id="summary">{subagentActivitySummary(agents).label}</output></main>);
+        return renderToStaticMarkup(<main id="ready"><div id="agent-group"><SubagentList agents={agents} state={{agents, eventsByAgentId:{}, onSelect:()=>{}}} /></div><output id="summary">{subagentStatusCounts(agents).map(({ count, label }) => count + " " + label).join(" · ")}</output></main>);
       }`, resolveDir: fileURLToPath(new URL("../../../", import.meta.url)), loader:"tsx" },
     bundle:true, write:false, format:"cjs", platform:"node", jsx:"automatic",
     external:["react", "react-dom", "react-dom/server", "lucide-react"],
@@ -117,7 +117,7 @@ export async function checkGeometryAndCompletion({
   await show(["completed", "waiting", "running"]);
   const rows = {};
   for (const name of ["Parser", "Tests", "Review"]) {
-    result = await read(`button[aria-label^="Open ${name} working process"]`, "height", "#agent-group");
+    result = await read(`button[aria-label^="Open ${name} ·"]`, "height", "#agent-group");
     assert.equal(result.ok, true);
     assert.ok(result.values.row > 0 && result.values.row < 90);
     rows[name] = result.values.row;
@@ -127,8 +127,8 @@ export async function checkGeometryAndCompletion({
   assert.match(await summary(), /approval.*working/);
   checks++;
   await show(["completed", "cancelled", "interrupted"]);
-  assert.match(await summary(), /attention/);
-  assert.equal(await evaluate("document.querySelector('[aria-label=\"Open Tests working process · Cancelled\"]') !== null"), true);
+  assert.match(await summary(), /interrupted/);
+  assert.equal(await evaluate("document.querySelector('[aria-label=\"Open Tests · Cancelled\"]') !== null"), true);
   assert.doesNotMatch(await summary(), /3 done|all checks.*complete/i);
   checks += 3;
   const screenshot = await send("Page.captureScreenshot", { format: "png" });

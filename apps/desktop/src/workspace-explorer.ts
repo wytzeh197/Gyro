@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { WorkspaceFile } from "@gyro-dev/ui";
 import { workspaceExplorerRootEntryGroup } from "@gyro-dev/ui/workspace-project";
 
@@ -76,7 +76,7 @@ export function useWorkspaceExplorerFiles(
   files: WorkspaceFile[],
   loadDirectory: ((path: string) => Promise<WorkspaceFile[]>) | undefined,
   onError: (path: string, error: unknown) => void,
-  changeRevision = 0,
+  watchMode: "event" | "polling" = "polling",
 ) {
   const [expanded, setExpanded] = useState<string[]>([]);
   const [listings, setListings] = useState<DirectoryListing[]>([]);
@@ -125,35 +125,47 @@ export function useWorkspaceExplorerFiles(
   onErrorRef.current = onError;
   const rootsRef = useRef(roots);
   rootsRef.current = roots;
-  const refreshRef = useRef<(() => void) | undefined>(undefined);
+  const refreshRef = useRef<
+    ((root: string, paths?: readonly string[]) => void) | undefined
+  >();
+  const refreshChangedDirectories = useCallback(
+    (root: string, paths?: readonly string[]) => {
+      refreshRef.current?.(root, paths);
+    },
+    [],
+  );
 
   useEffect(() => {
     // With no expanded directories there is nothing to poll. In particular the
-    // idle composer must not retain a two-second explorer timer.
+    // idle composer does not need an Explorer timer.
     if (!loadDirectoryRef.current || !directoryKey) return;
     let cancelled = false;
     let pending = false;
-    let refreshQueued = false;
+    const queued = new Set<string>();
     const failed = new Set<string>();
     const directories = directoryKey ? directoryKey.split("\n") : [];
-    const refresh = async () => {
+    const refresh = async (paths: readonly string[] = directories) => {
       const load = loadDirectoryRef.current;
-      // Native changes may arrive while hidden, too. Keep the cached listing
-      // until visibility returns, when the listener below catches up at once.
-      if (cancelled || document.visibilityState !== "visible" || !load) return;
-      if (pending) {
-        refreshQueued = true;
+      if (
+        cancelled ||
+        document.visibilityState !== "visible" ||
+        !document.hasFocus() ||
+        !load
+      )
         return;
-      }
+      for (const path of paths) queued.add(path);
+      if (pending || queued.size === 0) return;
+      const batch = [...queued];
+      queued.clear();
       pending = true;
       const results = await Promise.allSettled(
-        directories.map((path) => Promise.resolve().then(() => load(path))),
+        batch.map((path) => Promise.resolve().then(() => load(path))),
       );
       pending = false;
       if (cancelled) return;
       const updated: DirectoryListing[] = [];
       results.forEach((result, index) => {
-        const path = directories[index];
+        const path = batch[index];
         if (!path) return;
         if (result.status === "fulfilled") {
           failed.delete(path);
@@ -179,33 +191,46 @@ export function useWorkspaceExplorerFiles(
         const next = [...byPath.values()];
         return sameListings(current, next) ? current : next;
       });
-      if (refreshQueued) {
-        refreshQueued = false;
-        void refresh();
-      }
+      if (queued.size) void refresh([]);
     };
-    refreshRef.current = () => {
-      void refresh();
+    refreshRef.current = (root, paths) => {
+      const prefix = root.endsWith("/") ? root : `${root}/`;
+      void refresh(
+        directories.filter(
+          (directory) =>
+            (directory === root || directory.startsWith(prefix)) &&
+            (!paths ||
+              paths.some(
+                (path) =>
+                  path === directory ||
+                  (path.endsWith("/")
+                    ? directory.startsWith(path)
+                    : directory.startsWith(`${path}/`)) ||
+                  (path.slice(0, path.lastIndexOf("/")) || "/") === directory,
+              )),
+        ),
+      );
     };
     void refresh();
-    // Keep open folders current even when native file watching is unavailable.
-    // Skip ticks while the window is hidden and catch up when it returns.
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void refresh();
-    }, 2000);
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void refresh();
-    };
+    // Reconcile missed notifications and retain timely updates on polling-only roots.
+    const refreshWhenVisible = () => void refresh();
+    const timer = window.setInterval(
+      refreshWhenVisible,
+      watchMode === "event" ? 15_000 : 3_000,
+    );
+    window.addEventListener("focus", refreshWhenVisible);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       cancelled = true;
       refreshRef.current = undefined;
       window.clearInterval(timer);
+      window.removeEventListener("focus", refreshWhenVisible);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
-  }, [directoryKey, rootKey]);
-  useEffect(() => {
-    if (changeRevision > 0) refreshRef.current?.();
-  }, [changeRevision]);
-  return { explorerFiles, onExpandedDirectoriesChange: setExpanded };
+  }, [directoryKey, rootKey, watchMode]);
+  return {
+    explorerFiles,
+    onExpandedDirectoriesChange: setExpanded,
+    refreshChangedDirectories,
+  };
 }

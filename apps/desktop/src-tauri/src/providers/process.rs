@@ -57,4 +57,5 @@ pub(crate) fn build_grok_acp_program_args(
 #[cfg(test)]
 pub(crate) use gyro_core::provider_runtime::support::provider_stream_failure_detail;
 
+#[cfg(test)]
 pub(crate) use gyro_core::provider_runtime::support::is_stale_resume_error;

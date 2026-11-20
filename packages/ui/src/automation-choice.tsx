@@ -1,5 +1,5 @@
+import { SurfacePresence } from "./surface-presence";
 import { Check, ChevronDown } from "lucide-react";
-import { createPortal } from "react-dom";
 import {
   useEffect,
   useId,
@@ -216,60 +216,59 @@ export function AutomationChoice({
         <span>{selected?.label ?? "Choose " + label.toLowerCase()}</span>
         <ChevronDown size={14} aria-hidden="true" />
       </button>
-      {open && position
-        ? createPortal(
+      <SurfacePresence portal="body">
+        {open && position ? (
+          <div
+            ref={menuRef}
+            className="gyro-automation-choice-menu"
+            style={position}
+            onKeyDown={onMenuKeyDown}
+          >
+            {searchable ? (
+              <input
+                ref={searchRef}
+                className="gyro-automation-choice-search"
+                type="search"
+                aria-label={"Search " + label.toLowerCase()}
+                placeholder={"Search " + label.toLowerCase()}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            ) : null}
             <div
-              ref={menuRef}
-              className="gyro-automation-choice-menu"
-              style={position}
-              onKeyDown={onMenuKeyDown}
+              id={listId}
+              className="gyro-automation-choice-list"
+              role="listbox"
+              aria-label={label}
             >
-              {searchable ? (
-                <input
-                  ref={searchRef}
-                  className="gyro-automation-choice-search"
-                  type="search"
-                  aria-label={"Search " + label.toLowerCase()}
-                  placeholder={"Search " + label.toLowerCase()}
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                />
+              {visible.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="option"
+                  aria-selected={option.value === value}
+                  className={
+                    "gyro-automation-choice-option" +
+                    (option.value === value ? " is-selected" : "")
+                  }
+                  onClick={() => choose(option.value)}
+                >
+                  <span>
+                    <strong>{option.label}</strong>
+                    {option.detail ? <small>{option.detail}</small> : null}
+                  </span>
+                  {option.value === value ? (
+                    <Check size={14} aria-hidden="true" />
+                  ) : null}
+                </button>
+              ))}
+              {visible.length === 0 ? (
+                <p className="gyro-automation-choice-empty">No matches</p>
               ) : null}
-              <div
-                id={listId}
-                className="gyro-automation-choice-list"
-                role="listbox"
-                aria-label={label}
-              >
-                {visible.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    role="option"
-                    aria-selected={option.value === value}
-                    className={
-                      "gyro-automation-choice-option" +
-                      (option.value === value ? " is-selected" : "")
-                    }
-                    onClick={() => choose(option.value)}
-                  >
-                    <span>
-                      <strong>{option.label}</strong>
-                      {option.detail ? <small>{option.detail}</small> : null}
-                    </span>
-                    {option.value === value ? (
-                      <Check size={14} aria-hidden="true" />
-                    ) : null}
-                  </button>
-                ))}
-                {visible.length === 0 ? (
-                  <p className="gyro-automation-choice-empty">No matches</p>
-                ) : null}
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
+            </div>
+          </div>
+        ) : null}
+      </SurfacePresence>
     </div>
   );
 }

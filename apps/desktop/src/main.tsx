@@ -43,7 +43,7 @@ document.documentElement.dataset.theme = initialTheme;
 syncNativeAppearance(initialTheme);
 document
   .querySelector('meta[name="theme-color"]')
-  ?.setAttribute("content", initialTheme === "light" ? "#f7f7f7" : "#181818");
+  ?.setAttribute("content", initialTheme === "light" ? "#f9f8f7" : "#1e1e1d");
 
 class AppErrorBoundary extends React.Component<
   { children: React.ReactNode },

@@ -258,7 +258,11 @@ async function request(
     }
   }
   if (domain === "run") {
-    if (action === "projects") return [project];
+    if (action === "projects")
+      return [
+        project,
+        { ...project, sessionId: "other-chat", title: "Other project chat" },
+      ];
     if (action === "project") return project;
     if (action === "jobs") return jobs;
     if (action === "runs")
@@ -317,6 +321,7 @@ async function request(
           status: "current",
           updatedAt: "2026-11-10T12:00:00Z",
           lastResult: "",
+          nextRunAt: action === "schedule" ? "2026-11-18T16:00:00Z" : undefined,
           runHistory: [],
           execution: {
             workspacePath: project.path,
@@ -450,10 +455,10 @@ if (import.meta.env.DEV)
         runtime={runtime}
         initialSessionId={project.sessionId}
         onOpenSession={(id) => (window as any).workflowFixture.opened.push(id)}
-      >
-        {params.has("integrated") ? (
+        renderSchedules={(renderScheduleIndex) => (
           <AutomationsSurface
             embedded
+            renderScheduleIndex={renderScheduleIndex}
             automations={[
               {
                 id: "readme",
@@ -492,13 +497,7 @@ if (import.meta.env.DEV)
             creationWorkspace={project.path}
             onCreateAutomation={async () => true}
           />
-        ) : (
-          <section aria-label="Legacy schedules">
-            <h2>Existing prompt schedules</h2>
-            <p>Legacy scheduled prompts stay available.</p>
-            <button>New prompt schedule</button>
-          </section>
         )}
-      </WorkflowDestination>
+      />
     </main>,
   );

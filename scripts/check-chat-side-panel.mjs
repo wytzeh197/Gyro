@@ -44,6 +44,7 @@ const surfaces = read("packages/ui/src/surfaces.tsx");
 const styles =
   read("packages/ui/src/styles.css") + "\n" + read("packages/ui/src/chat.css");
 const app = read("apps/desktop/src/App.tsx");
+const terminalLaunch = read("apps/desktop/src/use-terminal-launch.ts");
 const liveTerminal = read("apps/desktop/src/live-terminal-pane.tsx");
 
 // --- The rail column itself -------------------------------------------------
@@ -291,7 +292,7 @@ expect(
 
 expect(
   /const addTerminalPane = useCallback\([\s\S]{0,1800}?const started = await launchTerminalPane\(\{[\s\S]{0,320}?reveal: options\?\.reveal/.test(
-    app,
+    terminalLaunch,
   ) &&
     /const runCommandProfile = useCallback\([\s\S]{0,900}?launchTerminalPane\(\{ profile, reveal: options\?\.reveal, select: true \}\)/.test(
       app,

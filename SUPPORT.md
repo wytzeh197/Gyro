@@ -11,6 +11,8 @@ Community reports are still valuable and help make the first release safer.
   provider-readiness checks.
 - Search [existing issues](https://github.com/wytzeh197/Gyro/issues) before
   opening a new one.
+- If you got stuck setting up Gyro or trying your first task, use the
+  [first-run feedback form](https://github.com/wytzeh197/Gyro/issues/new?template=first_run.yml).
 - Open a [bug report](https://github.com/wytzeh197/Gyro/issues/new?template=bug_report.yml)
   for reproducible defects or a
   [feature request](https://github.com/wytzeh197/Gyro/issues/new?template=feature_request.yml)

@@ -1,3 +1,4 @@
+import { SurfacePresence } from "./surface-presence";
 import { MoreHorizontal } from "lucide-react";
 import {
   useId,
@@ -6,7 +7,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { createPortal } from "react-dom";
 import { useOutsidePointerDismiss } from "./menu-dismiss";
 
 /** A toolbar's secondary actions, using the shared dismissal/keyboard contract. */
@@ -56,24 +56,23 @@ export function ToolbarOverflow({
       >
         <MoreHorizontal size={13} />
       </button>
-      {open
-        ? createPortal(
-            <div
-              className="gyro-explorer-context-menu gyro-toolbar-overflow-menu"
-              id={id}
-              ref={menu}
-              role="menu"
-              aria-label={label}
-              onClick={(event) => {
-                const action = (event.target as Element).closest("button");
-                if (action && !action.disabled) setOpen(false);
-              }}
-            >
-              {children}
-            </div>,
-            document.body,
-          )
-        : null}
+      <SurfacePresence portal="body">
+        {open ? (
+          <div
+            className="gyro-explorer-context-menu gyro-toolbar-overflow-menu"
+            id={id}
+            ref={menu}
+            role="menu"
+            aria-label={label}
+            onClick={(event) => {
+              const action = (event.target as Element).closest("button");
+              if (action && !action.disabled) setOpen(false);
+            }}
+          >
+            {children}
+          </div>
+        ) : null}
+      </SurfacePresence>
     </>
   );
 }

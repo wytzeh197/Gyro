@@ -22,9 +22,48 @@ use uuid::Uuid;
 pub(crate) async fn run_provider_chat(
     app: tauri::AppHandle,
     request: ProviderChatRequest,
+    second_opinion: Option<crate::features::code_reviews::commands::TurnReviewer>,
+    retry_second_opinion: Option<bool>,
 ) -> Result<ProviderChatResponse, String> {
     crate::features::remote_access::require_local_control(&app, &request.session_id)?;
-    run_goal_chat(app, request, None).await
+    if second_opinion.is_none() && retry_second_opinion != Some(true) {
+        return run_goal_chat(app, request, None).await;
+    }
+    let turn = parse_uuid(
+        request
+            .turn_id
+            .as_deref()
+            .ok_or("Second opinion needs a turn ID")?,
+    )?;
+    let session = parse_uuid(&request.session_id)?;
+    let selection = if let Some(reviewer) = second_opinion {
+        let root = reviewer
+            .bind(&request.session_id, turn)
+            .map_err(|error| error.to_string())?;
+        Some((reviewer, root))
+    } else {
+        crate::features::code_reviews::commands::TurnReviewer::retry(session, turn)
+            .map_err(|error| error.to_string())?
+    };
+    let mut response = run_goal_chat(app.clone(), request, None).await?;
+    let Some((reviewer, root)) = selection else {
+        return Ok(response);
+    };
+    if response.status_event.payload["status"] != "done"
+        || response.status_event.payload["error"].is_string()
+    {
+        return Ok(response);
+    }
+    // A reviewer failure is independent of the completed builder response.
+    let event = tauri::async_runtime::spawn_blocking(move || {
+        reviewer.after_turn(&app, session, turn, &root)
+    })
+    .await;
+    match event {
+        Ok(Ok(event)) => response.activity_events.push(event),
+        failure => eprintln!("Could not record second opinion: {failure:?}"),
+    }
+    Ok(response)
 }
 
 pub(crate) async fn run_goal_chat(

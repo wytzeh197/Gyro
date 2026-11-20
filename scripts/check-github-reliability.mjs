@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createGithubRefreshController } from "../apps/desktop/src/github-refresh.ts";
+import { githubSetupScript } from "../apps/desktop/src/github-setup-profile.ts";
+import { githubSetupStep } from "../packages/ui/src/github-setup.ts";
 import {
   createInitialWorkbenchState,
   workbenchReducer,
@@ -140,6 +146,55 @@ for (const failing of ["github_workflow_runs", "github_pull_requests"]) {
   await recovered;
   assert.equal(h.github.error, undefined);
   assert.deepEqual(h.github.runs, [run(3)]);
+}
+
+// The fast CI tick reuses availability and leaves an independent PR failure
+// visible. The slower full tick refreshes PRs and eventually rechecks auth.
+{
+  const originalNow = Date.now;
+  let now = 1000;
+  Date.now = () => now;
+  try {
+    const h = harness();
+    h.setWorkspace("/a");
+    const initial = h.controller.refresh("/a");
+    await h.status("/a");
+    h.request("github_workflow_runs", "/a").resolve([run(1)]);
+    h.request("github_pull_requests", "/a").reject(new Error("PRs unavailable"));
+    await initial;
+
+    now += 15_000;
+    const fast = h.controller.refresh("/a", { background: "runs" });
+    await settle();
+    assert.equal(h.github.loading, false);
+    assert.deepEqual(h.requests.slice(3).map((request) => request.command), ["github_workflow_runs"]);
+    h.request("github_workflow_runs", "/a").resolve([run(2)]);
+    await fast;
+    assert.deepEqual(h.github.runs, [run(2)]);
+    assert.match(h.github.error, /Pull requests: PRs unavailable/);
+
+    now += 45_000;
+    const slow = h.controller.refresh("/a", { background: "all" });
+    await settle();
+    assert.equal(h.github.loading, false);
+    assert.equal(h.controller.refresh("/a"), slow, "A manual refresh should reuse an in-flight full read");
+    assert.equal(h.github.loading, true, "A manual refresh gives feedback while joined to the automatic read");
+    h.request("github_workflow_runs", "/a").resolve([run(3)]);
+    h.request("github_pull_requests", "/a").resolve([pullRequest(3)]);
+    await slow;
+    assert.equal(h.requests.filter((request) => request.command === "github_status").length, 1);
+    assert.deepEqual(h.github.pullRequests, [pullRequest(3)]);
+    assert.equal(h.github.error, undefined);
+    assert.equal(h.github.loading, false);
+
+    now += 4 * 60_000;
+    const expired = h.controller.refresh("/a", { background: "all" });
+    await h.status("/a", { ...availability("/a"), available: false });
+    await expired;
+    assert.equal(h.github.availability.available, false);
+  } finally {
+    Date.now = originalNow;
+  }
 }
 
 // A slow status response from a previous workspace must not publish data,
@@ -369,4 +424,56 @@ for (const failing of ["github_workflow_runs", "github_pull_requests"]) {
   assert.deepEqual(actions.at(-1), { type: "github-loading", loading: false });
 }
 
-console.log("GitHub reliability checks passed.");
+// Use real local Git state and stub gh so no GitHub repository is created.
+{
+  const workspace = mkdtempSync(join(tmpdir(), "gyro-github-setup-"));
+  const missingRemote = {
+    ...availability(undefined),
+    available: false,
+    error: "no git remotes found",
+  };
+  const sourceControl = { available: true, detailsLoaded: true, history: [] };
+  const runSetup = (hasCommits) => {
+    const script = githubSetupScript("publish", undefined, hasCommits);
+    return spawnSync("sh", ["-c", `gh() { printf '%s\\n' "$@"; }; ${script}`], {
+      cwd: workspace,
+      encoding: "utf8",
+    });
+  };
+  try {
+    const empty = githubSetupStep(missingRemote, sourceControl);
+    assert.equal(empty.label, "Create repo");
+    const created = runSetup(empty.hasCommits);
+    assert.equal(created.status, 0, created.stderr);
+    assert.match(created.stdout, /^create$/m);
+    assert.doesNotMatch(created.stdout, /--push/);
+
+    const committed = githubSetupStep(missingRemote, {
+      ...sourceControl,
+      history: [{ hash: "fixture" }],
+    });
+    assert.equal(committed.label, "Create & push");
+    assert.equal(runSetup(committed.hasCommits).status, 1);
+
+    execFileSync("git", [
+      "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+      "-c", "core.hooksPath=/dev/null",
+      "commit", "--quiet", "--allow-empty", "--no-gpg-sign", "-m", "First commit",
+    ], { cwd: workspace });
+    const published = runSetup(committed.hasCommits);
+    assert.equal(published.status, 0, published.stderr);
+    assert.match(published.stdout, /^--push$/m);
+    const stale = runSetup(empty.hasCommits);
+    assert.equal(stale.status, 1, stale.stderr);
+    assert.match(stale.stdout, /Local commits changed/);
+    assert.doesNotMatch(stale.stdout, /^create$/m);
+    assert.equal(
+      githubSetupStep(missingRemote, { ...sourceControl, stale: true }).hasCommits,
+      undefined,
+    );
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+}
+
+console.log("GitHub reliability and setup checks passed.");

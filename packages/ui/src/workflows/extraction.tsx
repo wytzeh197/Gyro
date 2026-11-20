@@ -10,6 +10,8 @@ import type {
 export function WorkflowExtractionPanel({
   runtime,
   project,
+  chats,
+  onSelectChat,
   turnId,
   onEdit,
   onClose,
@@ -17,6 +19,8 @@ export function WorkflowExtractionPanel({
 }: {
   runtime: WorkflowRuntime;
   project: WorkflowProject;
+  chats?: WorkflowProject[];
+  onSelectChat?: (id: string) => void;
   turnId?: string;
   onEdit: (definition: WorkflowDefinition) => void;
   onClose: () => void;
@@ -136,9 +140,24 @@ export function WorkflowExtractionPanel({
   return (
     <section aria-label="Extract workflow">
       <h2>Save a workflow from this chat</h2>
-      <p>
-        {project.title} · {project.path}
-      </p>
+      {chats && chats.length > 1 && !draft ? (
+        <label>
+          Source chat
+          <select
+            value={project.sessionId}
+            disabled={busy}
+            onChange={(event) => onSelectChat?.(event.target.value)}
+          >
+            {chats.map((chat) => (
+              <option key={chat.sessionId} value={chat.sessionId}>
+                {chat.title}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <p>Source chat · {project.title}</p>
+      )}
       <p>
         Choose a task to turn into reusable steps. Creating a draft uses your
         selected provider; you can edit it before saving.

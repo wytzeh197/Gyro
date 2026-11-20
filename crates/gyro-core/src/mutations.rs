@@ -152,6 +152,113 @@ pub struct ProviderMutationRecoveryReport {
     pub skipped: bool,
 }
 
+#[derive(Deserialize, Serialize)]
+pub(crate) struct RecordedEditEntry {
+    path: String,
+    before: Option<Vec<u8>>,
+    after_hash: String,
+}
+
+pub(crate) struct RecordedEdit {
+    pub(crate) id: Uuid,
+    pub(crate) session_id: Uuid,
+    pub(crate) turn_id: Uuid,
+    pub(crate) workspace: PathBuf,
+    pub(crate) entries: Vec<RecordedEditEntry>,
+}
+
+/// Restore a recorded transaction under the same path and hash checks as a
+/// provider write. The caller validates editor state and reserves the chat.
+pub fn undo_recorded_edit(
+    store: &SessionStore,
+    session_id: Uuid,
+    turn_id: Uuid,
+    edit_id: Uuid,
+    mut check_editor: impl FnMut(&Path, &[String]) -> Result<()>,
+) -> Result<SessionEvent> {
+    let edit = store
+        .recorded_edit(session_id, turn_id, edit_id)?
+        .context("This recorded edit is unavailable or was already undone.")?;
+    let session = store
+        .get_session(session_id)?
+        .context("The chat was removed.")?;
+    anyhow::ensure!(
+        session
+            .workspace_identity
+            .roots
+            .iter()
+            .any(|root| root.path == edit.workspace),
+        "The recorded workspace is no longer attached to this chat."
+    );
+    anyhow::ensure!(
+        edit.workspace.canonicalize()? == edit.workspace,
+        "The recorded workspace moved."
+    );
+    let paths = edit
+        .entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .collect::<Vec<_>>();
+    check_editor(&edit.workspace, &paths)?;
+    let changes = edit
+        .entries
+        .into_iter()
+        .map(|entry| {
+            Ok(PreparedProviderMutation {
+                target: provider_mutation_target(&edit.workspace, &entry.path)?,
+                relative_path: entry.path,
+                expected_hash: Some(entry.after_hash),
+                desired_content: entry.before,
+                line_counts: (0, 0),
+                patch: None,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let mut editor_error = None;
+    let applied = begin_provider_mutation_transaction_with_cancellation(
+        &PreparedProviderMutationTransaction {
+            workspace_path: edit.workspace.clone(),
+            changes,
+        },
+        &store.paths().mutation_journals_dir,
+        ProviderMutationJournalContext {
+            session_id,
+            approval_id: edit_id,
+        },
+        || {
+            if let Err(error) = check_editor(&edit.workspace, &paths) {
+                editor_error = Some(error);
+                true
+            } else {
+                false
+            }
+        },
+    );
+    if let Some(error) = editor_error {
+        return Err(error);
+    }
+    let commit = applied?;
+    let event = match store.append_event_with_turn_id(
+        session_id,
+        SessionEventKind::SystemEvent,
+        "Undid recorded edits",
+        serde_json::json!({"kind":"recorded-edit-undone","undoId":edit_id,"paths":paths}),
+        Some(turn_id),
+    ) {
+        Ok(event) => event,
+        Err(error) => {
+            commit.rollback()?;
+            return Err(error);
+        }
+    };
+    // The undo event also acts as recovery evidence if the applied marker
+    // or journal cleanup cannot be written immediately.
+    let _ = commit.mark_applied();
+    let _ = commit.finalize();
+    let _ = store.remove_recorded_edit(edit_id);
+    Ok(event)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProviderMutationJournalContext {
     pub session_id: Uuid,
@@ -170,6 +277,51 @@ pub struct PendingProviderMutationCommit {
 impl PendingProviderMutationCommit {
     pub fn result(&self) -> &ProviderMutationResult {
         &self.result
+    }
+
+    pub fn record_undo(&self, store: &SessionStore, turn_id: Uuid) -> Result<Option<Uuid>> {
+        // Deletions and moves need additional metadata to restore safely.
+        if self
+            .journal
+            .entries
+            .iter()
+            .any(|entry| entry.desired_hash.is_none())
+        {
+            return Ok(None);
+        }
+        let entries = self
+            .journal
+            .entries
+            .iter()
+            .map(|entry| {
+                let before = entry
+                    .backup
+                    .as_ref()
+                    .map(|backup| {
+                        read_workspace_mutation_file(
+                            &self.journal.workspace_path,
+                            backup,
+                            MAX_PROVIDER_MUTATION_FILE_BYTES,
+                            "edit backup",
+                        )
+                    })
+                    .transpose()?;
+                Ok(RecordedEditEntry {
+                    path: entry.relative_path.clone(),
+                    before,
+                    after_hash: entry.desired_hash.clone().unwrap(),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let id = self.journal.id;
+        store.save_recorded_edit(&RecordedEdit {
+            id,
+            session_id: self.journal.session_id,
+            turn_id,
+            workspace: self.journal.workspace_path.clone(),
+            entries,
+        })?;
+        Ok(Some(id))
     }
 
     /// Record that the applied decision was durably logged so recovery can
@@ -380,17 +532,35 @@ where
                 None => applied,
             };
             match applied {
-                Ok((changed_path, counts)) => {
+                Ok((changed_path, counts, before)) => {
                     let proposal = store.finish_claimed_mutation_proposal(
                         proposal_id,
                         MutationProposalStatus::Applied,
                         None,
                     )?;
+                    let undo_id = before.and_then(|before| {
+                        let turn_id = proposal.turn_id?;
+                        store
+                            .save_recorded_edit(&RecordedEdit {
+                                id: proposal.id,
+                                session_id: proposal.session_id,
+                                turn_id,
+                                workspace: proposal.workspace_path.clone(),
+                                entries: vec![RecordedEditEntry {
+                                    path: proposal.path.clone(),
+                                    before,
+                                    after_hash: content_hash(proposal.content.as_bytes()),
+                                }],
+                            })
+                            .ok()
+                            .map(|()| proposal.id)
+                    });
                     let event = append_mutation_decision_event_with_counts(
                         store,
                         &proposal,
                         None,
                         Some(counts),
+                        undo_id,
                     )?;
                     Ok(MutationDecisionResult {
                         proposal,
@@ -416,6 +586,28 @@ where
             }
         }
     }
+}
+
+/// Resolve pending edit cards for a turn that actually stopped.
+pub fn expire_stopped_turn_edits(
+    store: &SessionStore,
+    session_id: Uuid,
+    turn_id: Uuid,
+) -> Result<()> {
+    let _lock = acquire_provider_mutation_lock_blocking(&store.paths().mutation_journals_dir)?;
+    for proposal in store.list_pending_mutation_proposals(session_id)? {
+        if proposal.turn_id != Some(turn_id) {
+            continue;
+        }
+        let reason = "The response stopped. Request a new edit to review it again.";
+        let expired = store.resolve_mutation_proposal_status(
+            proposal.id,
+            MutationProposalStatus::Failed,
+            Some(reason.into()),
+        )?;
+        append_mutation_decision_event(store, &expired, Some(reason.into()))?;
+    }
+    Ok(())
 }
 
 pub fn mutation_decision_was_cancelled(error: &anyhow::Error) -> bool {
@@ -454,7 +646,7 @@ fn append_mutation_decision_event(
     proposal: &MutationProposal,
     error: Option<String>,
 ) -> Result<SessionEvent> {
-    append_mutation_decision_event_with_counts(store, proposal, error, None)
+    append_mutation_decision_event_with_counts(store, proposal, error, None, None)
 }
 
 fn append_mutation_decision_event_with_counts(
@@ -462,8 +654,12 @@ fn append_mutation_decision_event_with_counts(
     proposal: &MutationProposal,
     error: Option<String>,
     counts: Option<(usize, usize, Option<String>)>,
+    undo_id: Option<Uuid>,
 ) -> Result<SessionEvent> {
     let mut payload = mutation_approval_payload(proposal, error);
+    if let Some(undo_id) = undo_id {
+        payload["undoId"] = serde_json::json!(undo_id);
+    }
     if let Some((additions, deletions, patch)) = counts {
         payload["fileChanges"] = serde_json::json!([{
             "path": proposal.path, "additions": additions, "deletions": deletions, "patch": patch
@@ -549,7 +745,11 @@ fn recover_claimed_mutation_proposals(store: &SessionStore) -> Result<usize> {
 fn apply_mutation_proposal<F>(
     proposal: &MutationProposal,
     is_cancelled: &mut F,
-) -> Result<(PathBuf, (usize, usize, Option<String>))>
+) -> Result<(
+    PathBuf,
+    (usize, usize, Option<String>),
+    Option<Option<Vec<u8>>>,
+)>
 where
     F: FnMut() -> bool,
 {
@@ -573,7 +773,7 @@ where
         let current_hash = content_hash(&current);
         if current_hash == desired_hash {
             ensure_mutation_not_cancelled(is_cancelled)?;
-            return Ok((candidate, (0, 0, None)));
+            return Ok((candidate, (0, 0, None), None));
         }
         if !proposal.base_exists {
             return Err(anyhow!("a file now exists at the approved create path"));
@@ -598,7 +798,11 @@ where
         proposal.content.as_bytes(),
         is_cancelled,
     )?;
-    Ok((candidate, (counts.0, counts.1, patch)))
+    Ok((
+        candidate,
+        (counts.0, counts.1, patch),
+        Some(proposal.base_exists.then_some(original)),
+    ))
 }
 
 fn ensure_mutation_not_cancelled<F>(is_cancelled: &mut F) -> Result<()>
@@ -1855,22 +2059,25 @@ fn provider_mutation_approval_was_applied(
         .read_events(journal.session_id)?
         .into_iter()
         .any(|event| {
+            let recorded_undo = event.payload["kind"].as_str() == Some("recorded-edit-undone")
+                && event.payload["undoId"].as_str() == Some(approval_id.as_str());
             event.kind == SessionEventKind::SystemEvent
-                && event
-                    .payload
-                    .get("kind")
-                    .and_then(serde_json::Value::as_str)
-                    == Some("provider-tool-approval")
-                && event
-                    .payload
-                    .get("approvalId")
-                    .and_then(serde_json::Value::as_str)
-                    == Some(approval_id.as_str())
-                && event
-                    .payload
-                    .get("status")
-                    .and_then(serde_json::Value::as_str)
-                    == Some("applied")
+                && (recorded_undo
+                    || (event
+                        .payload
+                        .get("kind")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("provider-tool-approval")
+                        && event
+                            .payload
+                            .get("approvalId")
+                            .and_then(serde_json::Value::as_str)
+                            == Some(approval_id.as_str())
+                        && event
+                            .payload
+                            .get("status")
+                            .and_then(serde_json::Value::as_str)
+                            == Some("applied")))
         }))
 }
 
@@ -2100,6 +2307,54 @@ mod tests {
             .create_session(temp.path(), SessionOrigin::Cli, "mutation")
             .unwrap();
         (store, session.id)
+    }
+
+    #[test]
+    fn recorded_edit_undo_preserves_existing_changes_and_refuses_conflicts() {
+        let temp = tempfile::tempdir().unwrap();
+        let (store, session_id) = proposal_store(&temp);
+        let turn_id = Uuid::new_v4();
+        let file = temp.path().join("edited.txt");
+        let other = temp.path().join("unrelated.txt");
+        fs::write(&file, "user’s existing edit\n").unwrap();
+        fs::write(&other, "unrelated edit\n").unwrap();
+        let proposal = store
+            .create_mutation_proposal(
+                session_id,
+                Some(turn_id),
+                "edited.txt",
+                "agent edit\n",
+                Some(content_hash("user’s existing edit\n".as_bytes())),
+                true,
+            )
+            .unwrap();
+        let result =
+            decide_mutation_proposal(&store, proposal.id, MutationDecision::Approve).unwrap();
+        assert_eq!(result.event.payload["undoId"], proposal.id.to_string());
+
+        fs::write(&file, "later edit\n").unwrap();
+        assert!(
+            undo_recorded_edit(&store, session_id, turn_id, proposal.id, |_, _| Ok(())).is_err()
+        );
+        assert_eq!(fs::read_to_string(&file).unwrap(), "later edit\n");
+
+        fs::write(&file, "agent edit\n").unwrap();
+        assert!(undo_recorded_edit(
+            &store,
+            session_id,
+            turn_id,
+            proposal.id,
+            |_, _| anyhow::bail!("dirty buffer")
+        )
+        .is_err());
+        let undone =
+            undo_recorded_edit(&store, session_id, turn_id, proposal.id, |_, _| Ok(())).unwrap();
+        assert_eq!(undone.payload["kind"], "recorded-edit-undone");
+        assert_eq!(fs::read_to_string(&file).unwrap(), "user’s existing edit\n");
+        assert_eq!(fs::read_to_string(&other).unwrap(), "unrelated edit\n");
+        assert!(
+            undo_recorded_edit(&store, session_id, turn_id, proposal.id, |_, _| Ok(())).is_err()
+        );
     }
 
     #[test]

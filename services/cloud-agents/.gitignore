@@ -1,0 +1,8 @@
+node_modules/
+.wrangler/
+.dev.vars*
+.env*
+!.dev.vars.example
+worker-configuration.d.ts
+__pycache__/
+supabase/.temp/

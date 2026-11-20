@@ -168,6 +168,163 @@ fn owned_run(store: &SessionStore, source: Uuid, id: Uuid) -> Result<CodeReviewR
     Ok(run)
 }
 
+fn queue_snapshot(
+    store: &SessionStore,
+    snapshot: &ReviewSnapshot,
+    provider: &str,
+    model: &str,
+    operation: Uuid,
+    previous: Option<Uuid>,
+    accept_captured: bool,
+) -> Result<CodeReviewRun> {
+    super::execution::validate_reviewer(&GyroConfig::load(store.paths())?, provider, model)?;
+    let budget = crate::provider_context::provider_model_context_window(provider, Some(model))
+        .map(|tokens| (tokens.saturating_mul(3) / 2).min(192 * 1024) as usize)
+        .unwrap_or(48 * 1024);
+    pack_review_input(snapshot, budget)?;
+    let (current, _) = freshness(store, snapshot);
+    ensure!(
+        current != "source-unavailable",
+        "review source is unavailable"
+    );
+    ensure!(
+        current == "current"
+            || matches!(snapshot.scope, ReviewScope::Turn { .. })
+            || accept_captured,
+        "Source changed since capture; capture again or explicitly review the captured revision"
+    );
+    store.create_code_review_with_operation(
+        operation,
+        snapshot,
+        provider,
+        model,
+        previous,
+        UsageOrigin::CodeReview,
+        None,
+    )
+}
+
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TurnReviewer {
+    pub provider_id: String,
+    pub model_id: String,
+}
+
+impl TurnReviewer {
+    pub(crate) fn bind(&self, session: &str, turn: Uuid) -> Result<String> {
+        let store = open_store().map_err(anyhow::Error::msg)?;
+        super::execution::validate_reviewer(
+            &GyroConfig::load(store.paths())?,
+            &self.provider_id,
+            &self.model_id,
+        )?;
+        let (session, root, _) = root_scope(&store, session, None)?;
+        store.append_event_with_turn_id(
+            session.id,
+            gyro_core::SessionEventKind::SystemEvent,
+            "Second opinion selected",
+            json!({"kind":"turn-review-selection","rootId":root,
+            "providerId":self.provider_id,"modelId":self.model_id}),
+            Some(turn),
+        )?;
+        Ok(root)
+    }
+
+    pub(crate) fn retry(session: Uuid, turn: Uuid) -> Result<Option<(Self, String)>> {
+        let store = open_store().map_err(anyhow::Error::msg)?;
+        let events = store.read_events(session)?;
+        for event in events.iter().rev().filter(|event| {
+            event.turn_id == Some(turn) && event.kind == gyro_core::SessionEventKind::SystemEvent
+        }) {
+            if event.payload["kind"] == "turn-second-opinion"
+                && event.payload["reviewId"].is_string()
+            {
+                return Ok(None);
+            }
+            if event.payload["kind"] == "turn-review-selection" {
+                let reviewer: Self = serde_json::from_value(event.payload.clone())?;
+                let root = event.payload["rootId"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("Missing second opinion root"))?;
+                return Ok(Some((reviewer, root.to_owned())));
+            }
+        }
+        Ok(None)
+    }
+
+    fn queue(
+        &self,
+        store: &SessionStore,
+        session: Uuid,
+        turn: Uuid,
+        root: &str,
+    ) -> Result<CodeReviewRun> {
+        if let Some(run) = store.code_review_for_operation(turn)? {
+            ensure!(
+                run.source_session_id == session
+                    && run.root_id == root
+                    && run.provider_id == self.provider_id
+                    && run.model_id == self.model_id,
+                "The turn already has a different second opinion"
+            );
+            return Ok(run);
+        }
+        let window = crate::provider_context::provider_model_context_window(
+            &self.provider_id,
+            Some(&self.model_id),
+        );
+        let snapshot = super::capture::capture(
+            store,
+            &session.to_string(),
+            Some(root),
+            ReviewScope::Turn { turn_id: turn },
+            Vec::new(),
+            None,
+            window,
+            None,
+        )?;
+        ensure!(
+            !snapshot.files.is_empty(),
+            "No recorded file changes could be reviewed for this task"
+        );
+        queue_snapshot(
+            store,
+            &snapshot,
+            &self.provider_id,
+            &self.model_id,
+            turn,
+            None,
+            false,
+        )
+    }
+
+    pub(crate) fn after_turn(
+        &self,
+        app: &tauri::AppHandle,
+        session: Uuid,
+        turn: Uuid,
+        root: &str,
+    ) -> Result<gyro_core::SessionEvent> {
+        let store = open_store().map_err(anyhow::Error::msg)?;
+        let (message, review_id) = match self.queue(&store, session, turn, root) {
+            Ok(run) => {
+                super::execution::notify(app, &run);
+                if run.status == ReviewStatus::Queued {
+                    super::execution::start(app.clone(), run.id);
+                }
+                (
+                    format!("Second opinion requested from {}", self.model_id),
+                    Some(run.id),
+                )
+            }
+            Err(error) => (format!("Second opinion could not start: {error}"), None),
+        };
+        store.append_event_with_turn_id(session, gyro_core::SessionEventKind::SystemEvent, message,
+            json!({"kind":"turn-second-opinion","reviewId":review_id,"providerId":self.provider_id,"modelId":self.model_id}), Some(turn))
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn code_review_request(
     app: tauri::AppHandle,
@@ -238,8 +395,8 @@ fn request(
             Ok(
                 json!({"rootId":root_id,"roots":session.workspace_identity.roots.iter().map(|root|json!({"id":root.id,"path":root.path})).collect::<Vec<_>>(),"reviewers":config.model_providers.iter().map(|provider|{
                 let kind=provider_adapter_with_kind(&provider.id,provider.kind.as_deref()).kind;
-                let supported=matches!(kind,ProviderAdapterKind::Ollama|ProviderAdapterKind::OpenAiCompatible);
-                json!({"id":provider.id,"label":provider.display_name,"available":supported&&provider.enabled,"reason":if !supported{Some("No-tool review unavailable for this adapter")}else if !provider.enabled{Some("Enable in Providers")}else{None},"transport":if kind==ProviderAdapterKind::Ollama{"local"}else{"API"},"modelIds":provider.model_ids,"defaultModelId":provider.default_model_id})
+                let supported=gyro_core::provider_runtime::advisory::supports_code_review(kind);
+                json!({"id":provider.id,"label":provider.display_name,"available":supported&&provider.enabled,"reason":if !supported{Some("No-tool review unavailable for this adapter")}else if !provider.enabled{Some("Enable in Providers")}else{None},"transport":match kind {ProviderAdapterKind::Ollama=>"local",ProviderAdapterKind::AnthropicClaude=>"cli",_=>"API"},"modelIds":provider.model_ids,"defaultModelId":provider.default_model_id})
             }).collect::<Vec<_>>()}),
             )
         }
@@ -273,6 +430,10 @@ fn request(
             )?;
             Ok(snapshot_summary(&snapshot))
         }
+        "turn-progress" => {
+            let turns: Vec<Uuid> = serde_json::from_value(payload["turnIds"].clone())?;
+            Ok(json!(store.turn_review_progress(source, &turns)?))
+        }
         "list" => Ok(json!(store.code_reviews(Some(source))?)),
         "discard-previews" => {
             let (_, root_id, _) = root_scope(&store, session_id, root_id)?;
@@ -302,35 +463,20 @@ fn request(
             let model = payload["modelId"]
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("Choose a reviewer model"))?;
-            super::execution::validate_reviewer(
-                &GyroConfig::load(store.paths())?,
-                provider,
-                model,
-            )?;
-            let budget =
-                crate::provider_context::provider_model_context_window(provider, Some(model))
-                    .map(|tokens| (tokens.saturating_mul(3) / 2).min(192 * 1024) as usize)
-                    .unwrap_or(48 * 1024);
-            pack_review_input(&snapshot, budget)?;
-            let (current, _) = freshness(&store, &snapshot);
-            ensure!(
-                current != "source-unavailable",
-                "review source is unavailable"
-            );
-            ensure!(current=="current"||matches!(snapshot.scope,ReviewScope::Turn{..})||payload["reviewCapturedRevision"].as_bool()==Some(true),"Source changed since capture; capture again or explicitly review the captured revision");
-            let operation: Uuid = serde_json::from_value(payload["operationId"].clone())?;
-            let previous: Option<Uuid> = match payload.get("previousReviewId") {
-                Some(value) if !value.is_null() => Some(serde_json::from_value(value.clone())?),
-                _ => None,
-            };
-            let run = store.create_code_review_with_operation(
-                operation,
+            let operation = serde_json::from_value(payload["operationId"].clone())?;
+            let previous = payload
+                .get("previousReviewId")
+                .filter(|v| !v.is_null())
+                .map(|v| serde_json::from_value(v.clone()))
+                .transpose()?;
+            let run = queue_snapshot(
+                &store,
                 &snapshot,
                 provider,
                 model,
+                operation,
                 previous,
-                UsageOrigin::CodeReview,
-                None,
+                payload["reviewCapturedRevision"].as_bool() == Some(true),
             )?;
             super::execution::notify(app, &run);
             super::execution::start(app.clone(), run.id);
@@ -527,5 +673,99 @@ fn request(
             }
         }
         _ => anyhow::bail!("unknown code-review action"),
+    }
+}
+
+#[cfg(test)]
+mod turn_review_tests {
+    use super::*;
+    use gyro_core::{GyroPaths, MutationDecision, SessionEventKind, SessionOrigin};
+    #[test]
+    fn second_opinion_queues_once_and_reads_only_the_builders_recorded_turn() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let project = temp.path().join("project");
+        std::fs::create_dir(&project)?;
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("private")))?;
+        let mut config = GyroConfig::load(store.paths())?;
+        config
+            .model_providers
+            .iter_mut()
+            .find(|p| p.id == "anthropic")
+            .unwrap()
+            .enabled = true;
+        config.save(store.paths())?;
+        let session = store.create_session(&project, SessionOrigin::Desktop, "Fixture")?;
+        let root = &session.workspace_identity.active_root_id;
+        let turn = Uuid::new_v4();
+        let reviewer = TurnReviewer {
+            provider_id: "anthropic".into(),
+            model_id: "claude-opus-5-5".into(),
+        };
+        store.append_event_with_turn_id(
+            session.id,
+            SessionEventKind::UserMessage,
+            "Fix duplicate saves",
+            json!({}),
+            Some(turn),
+        )?;
+        std::fs::write(project.join("unrelated.txt"), "unrelated work")?;
+        assert!(reviewer.queue(&store, session.id, turn, root).is_err());
+        assert!(store.code_reviews(Some(session.id))?.is_empty());
+        let proposal = store.create_mutation_proposal(
+            session.id,
+            Some(turn),
+            "save.ts",
+            "export const once = true;\n",
+            None,
+            false,
+        )?;
+        gyro_core::decide_mutation_proposal(&store, proposal.id, MutationDecision::Approve)?;
+        let run = reviewer.queue(&store, session.id, turn, root)?;
+        assert_eq!(run.id, reviewer.queue(&store, session.id, turn, root)?.id);
+        let snapshot = read_snapshot(store.paths(), run.snapshot_id.unwrap())?;
+        assert_eq!(snapshot.source_turn_id, Some(turn));
+        assert_eq!(snapshot.request, "Fix duplicate saves");
+        assert_eq!(snapshot.files.len(), 1);
+        assert_eq!(snapshot.files[0].path, "save.ts");
+        assert_eq!(run.model_id, "claude-opus-5-5");
+        assert!(store
+            .turn_review_progress(Uuid::new_v4(), &[turn])?
+            .is_empty());
+        assert!(store
+            .turn_review_progress(session.id, &[Uuid::new_v4()])?
+            .is_empty());
+        let progress =
+            || -> Result<Value> { Ok(store.turn_review_progress(session.id, &[turn])?.remove(0)) };
+        assert_eq!(
+            progress()?,
+            json!({"turnId":turn, "reviewId":run.id, "status":"queued",
+            "started":false, "providerId":"anthropic", "modelId":"claude-opus-5-5", "fileCount":1})
+        );
+        let capturing = store.transition_code_review(
+            run.id,
+            run.revision,
+            ReviewStatus::Capturing,
+            None,
+            None,
+        )?;
+        let running = store.transition_code_review(
+            run.id,
+            capturing.revision,
+            ReviewStatus::Running,
+            None,
+            None,
+        )?;
+        assert_eq!(progress()?["status"], "running");
+        assert_eq!(progress()?["started"], true);
+        store.transition_code_review(
+            run.id,
+            running.revision,
+            ReviewStatus::Cancelled,
+            None,
+            None,
+        )?;
+        assert_eq!(progress()?["status"], "cancelled");
+        assert_eq!(progress()?["started"], true);
+        Ok(())
     }
 }

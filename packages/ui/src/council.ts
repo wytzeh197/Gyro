@@ -1,3 +1,4 @@
+import { humanModelName } from "./model-name.ts";
 import {
   getProviderModel,
   isProviderRuntimeUsable,
@@ -21,46 +22,64 @@ import type {
  * itself, so Council cannot become reachable again by accident. Flip this to
  * `false` to unfreeze; nothing else needs to change.
  */
-export const COUNCIL_COMING_SOON: boolean = true;
+export const COUNCIL_COMING_SOON: boolean = false;
 
 /** Shown wherever a frozen Council entry point is still visible. */
 export const COUNCIL_COMING_SOON_LABEL = "Coming soon";
 
+function rolePreset(
+  id: string,
+  name: string,
+  description: string,
+  seatProviderIds: string[],
+  synthesizerProviderId = "anthropic",
+): CouncilPreset {
+  return {
+    id,
+    name,
+    description,
+    seatProviderIds,
+    synthesizerProviderId,
+    toolPolicy: "none",
+    builtIn: true,
+  };
+}
+
+/**
+ * One built-in preset per kind of work. Each picks its seats by provider and
+ * starts on the provider's default model; the user sets the standard model for
+ * a role in Settings → Model Council.
+ */
 export const DEFAULT_COUNCIL_PRESETS: CouncilPreset[] = [
-  {
-    id: "code-focused",
-    name: "Code-focused council",
-    description:
-      "Strong coding providers in parallel; best available synthesizer.",
-    seatProviderIds: ["anthropic", "openai"],
-    synthesizerProviderId: "anthropic",
-    toolPolicy: "none",
-    builtIn: true,
-  },
-  {
-    id: "strong-reasoning",
-    name: "Strong reasoning council",
-    description:
-      "Prefer deep-reasoning providers for architecture and hard bugs.",
-    seatProviderIds: ["anthropic", "openai", "xai"],
-    synthesizerProviderId: "anthropic",
-    toolPolicy: "none",
-    builtIn: true,
-  },
-  {
-    id: "cheap-local",
-    name: "Cheap + local council",
-    description: "Lower-cost and local-capable seats when available.",
-    seatProviderIds: ["kimi", "antigravity"],
-    synthesizerProviderId: "kimi",
-    toolPolicy: "none",
-    builtIn: true,
-  },
+  rolePreset("backend", "Backend", "APIs, data, services and infrastructure.", ["anthropic", "openai"]),
+  rolePreset("frontend", "Frontend", "UI, components, styling and accessibility.", ["anthropic", "google"]),
+  rolePreset("debugging", "Debugging", "Find the cause of a bug or failing test.", ["openai", "anthropic", "xai"], "openai"),
+  rolePreset("review", "Review", "Second opinions on a diff or a design.", ["openai", "anthropic"]),
+  rolePreset("planning", "Planning", "Architecture, trade-offs and plans.", ["anthropic", "openai", "google"]),
 ];
+
+/** Built-ins from before the role presets; dropped unless the user edited them. */
+const LEGACY_COUNCIL_PRESETS: Record<string, string[]> = {
+  "code-focused": ["anthropic", "openai"],
+  "strong-reasoning": ["anthropic", "openai", "xai"],
+  "cheap-local": ["kimi", "antigravity"],
+};
+
+function isUntouchedLegacyPreset(preset: CouncilPreset) {
+  const seats = LEGACY_COUNCIL_PRESETS[preset.id];
+  return (
+    Boolean(seats) &&
+    preset.builtIn !== false &&
+    seats!.join() === preset.seatProviderIds.join() &&
+    !Object.values(preset.seatModelIds ?? {}).some(Boolean) &&
+    !preset.synthesizerModelId
+  );
+}
 
 export function defaultCouncilConfig(): CouncilConfig {
   return {
-    defaultPresetId: "code-focused",
+    defaultPresetId: "backend",
+    activePresetIds: ["backend"],
     presets: DEFAULT_COUNCIL_PRESETS.map((preset) => ({ ...preset })),
     maxSeats: 4,
     seatTimeoutSeconds: 300,
@@ -80,10 +99,13 @@ export function normalizedCouncilConfig(
   }
   const byId = new Map(defaults.presets.map((preset) => [preset.id, preset]));
   for (const preset of council.presets ?? []) {
-    if (!preset?.id) continue;
+    if (!preset?.id || isUntouchedLegacyPreset(preset)) continue;
+    const builtIn = byId.get(preset.id);
     byId.set(preset.id, {
-      ...byId.get(preset.id),
+      ...builtIn,
       ...preset,
+      // An edited legacy built-in has nothing to reset to any more.
+      builtIn: Boolean(builtIn),
       toolPolicy: preset.toolPolicy ?? "none",
     });
   }
@@ -98,8 +120,14 @@ export function normalizedCouncilConfig(
   )
     ? council.defaultPresetId
     : defaults.defaultPresetId;
+  const known = new Set(presets.map((preset) => preset.id));
+  const activePresetIds = [
+    ...new Set((council.activePresetIds ?? []).filter((id) => known.has(id))),
+  ];
   return {
-    defaultPresetId,
+    defaultPresetId: activePresetIds[0] ?? defaultPresetId,
+    activePresetIds: activePresetIds.length ? activePresetIds : [defaultPresetId],
+    synthesizer: council.synthesizer?.providerId ? council.synthesizer : null,
     presets,
     maxSeats: Math.min(4, Math.max(2, council.maxSeats || 4)),
     seatTimeoutSeconds: council.seatTimeoutSeconds || 300,
@@ -108,6 +136,125 @@ export function normalizedCouncilConfig(
     // The freeze outranks whatever was persisted: an install that enabled
     // Council before it was frozen must not stay enabled after upgrading.
     enabled: COUNCIL_COMING_SOON ? false : council.enabled !== false,
+  };
+}
+
+/** Most seats a preset can hold; the backend and the composer clamp to it. */
+export const COUNCIL_MAX_SEATS = 4;
+export const COUNCIL_MIN_SEATS = 2;
+
+export function builtInCouncilPreset(id: string): CouncilPreset | undefined {
+  const preset = DEFAULT_COUNCIL_PRESETS.find((item) => item.id === id);
+  return preset ? { ...preset } : undefined;
+}
+
+function presetShape(preset: CouncilPreset) {
+  return JSON.stringify({
+    name: preset.name.trim(),
+    description: (preset.description ?? "").trim(),
+    seats: preset.seatProviderIds,
+    models: preset.seatProviderIds.map((id) => preset.seatModelIds?.[id] ?? null),
+    synth: preset.synthesizerProviderId,
+    synthModel: preset.synthesizerModelId ?? null,
+  });
+}
+
+/** A built-in preset the user has changed, so Reset has something to undo. */
+export function isEditedBuiltInCouncilPreset(preset: CouncilPreset): boolean {
+  const original = builtInCouncilPreset(preset.id);
+  return Boolean(original) && presetShape(original!) !== presetShape(preset);
+}
+
+/** Why a preset cannot be saved, or undefined when it can. */
+export function councilPresetProblem(preset: CouncilPreset): string | undefined {
+  if (!preset.name.trim()) return "Give the preset a name.";
+  if (preset.seatProviderIds.length < COUNCIL_MIN_SEATS) {
+    return `A council needs at least ${COUNCIL_MIN_SEATS} seats.`;
+  }
+  if (preset.seatProviderIds.length > COUNCIL_MAX_SEATS) {
+    return `A council holds at most ${COUNCIL_MAX_SEATS} seats.`;
+  }
+  if (new Set(preset.seatProviderIds).size !== preset.seatProviderIds.length) {
+    return "Each seat needs a different provider.";
+  }
+  if (!preset.synthesizerProviderId) return "Pick who writes the final answer.";
+  return undefined;
+}
+
+/** An id no preset in the list already uses, derived from the name. */
+export function newCouncilPresetId(name: string, presets: CouncilPreset[]) {
+  const base =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "council";
+  const taken = new Set(presets.map((preset) => preset.id));
+  let id = `custom-${base}`;
+  for (let n = 2; taken.has(id); n += 1) id = `custom-${base}-${n}`;
+  return id;
+}
+
+/** Keep only the model choices of providers that still have a seat. */
+export function cleanCouncilPreset(preset: CouncilPreset): CouncilPreset {
+  const seatModelIds: Record<string, string | null> = {};
+  for (const id of preset.seatProviderIds) {
+    const model = preset.seatModelIds?.[id];
+    if (model) seatModelIds[id] = model;
+  }
+  return {
+    ...preset,
+    name: preset.name.trim(),
+    description: preset.description?.trim() || undefined,
+    seatModelIds,
+    synthesizerModelId: preset.synthesizerModelId || null,
+    toolPolicy: "none",
+  };
+}
+
+export function upsertCouncilPreset(
+  council: CouncilConfig,
+  preset: CouncilPreset,
+): CouncilConfig {
+  const clean = cleanCouncilPreset(preset);
+  const exists = council.presets.some((item) => item.id === clean.id);
+  return {
+    ...council,
+    presets: exists
+      ? council.presets.map((item) => (item.id === clean.id ? clean : item))
+      : [...council.presets, clean],
+  };
+}
+
+/** Removes a custom preset, or puts a built-in back the way it shipped. */
+export function removeCouncilPreset(
+  council: CouncilConfig,
+  presetId: string,
+): CouncilConfig {
+  const original = builtInCouncilPreset(presetId);
+  if (original) {
+    return {
+      ...council,
+      presets: council.presets.map((item) =>
+        item.id === presetId ? original : item,
+      ),
+    };
+  }
+  const presets = council.presets.filter((item) => item.id !== presetId);
+  const activePresetIds = (council.activePresetIds ?? []).filter(
+    (id) => id !== presetId,
+  );
+  return {
+    ...council,
+    presets,
+    activePresetIds: activePresetIds.length
+      ? activePresetIds
+      : presets[0]
+        ? [presets[0].id]
+        : [],
+    defaultPresetId:
+      council.defaultPresetId === presetId
+        ? (presets[0]?.id ?? DEFAULT_COUNCIL_PRESETS[0]!.id)
+        : council.defaultPresetId,
   };
 }
 
@@ -148,87 +295,125 @@ export function readyCouncilProviders(
   });
 }
 
+/** The presets a council chat runs, in the order they were loaded. */
+export function activeCouncilPresets(config: GyroConfig): CouncilPreset[] {
+  const council = normalizedCouncilConfig(config.council);
+  const loaded = (council.activePresetIds ?? [])
+    .map((id) => council.presets.find((preset) => preset.id === id))
+    .filter((preset): preset is CouncilPreset => Boolean(preset));
+  return loaded.length ? loaded : [defaultCouncilPreset({ ...config, council })];
+}
+
+/** Loads or unloads a preset for council chats; at least one stays loaded. */
+export function toggleCouncilActivePreset(
+  council: CouncilConfig,
+  presetId: string,
+): CouncilConfig {
+  const normalized = normalizedCouncilConfig(council);
+  const current = normalized.activePresetIds ?? [];
+  const next = current.includes(presetId)
+    ? current.filter((id) => id !== presetId)
+    : [...current, presetId];
+  if (!next.length) return normalized;
+  return { ...normalized, activePresetIds: next, defaultPresetId: next[0]! };
+}
+
+function seatRequest(
+  provider: ModelProviderConfig,
+  preferredModelId?: string | null,
+): CouncilSeatRequest {
+  const modelId =
+    preferredModelId ??
+    provider.defaultModelId ??
+    providerDefaultModelId(provider);
+  const model = getProviderModel(provider, modelId ?? undefined);
+  return {
+    providerId: provider.id,
+    providerLabel: provider.displayName,
+    modelId: modelId ?? null,
+    modelLabel: model?.displayName ?? humanModelName(modelId) ?? null,
+  };
+}
+
 export function resolveCouncilSeatRequests(
   config: GyroConfig,
   readyProviders: ModelProviderConfig[],
 ): CouncilSeatResolution {
   const council = normalizedCouncilConfig(config.council);
-  const preset = defaultCouncilPreset({ ...config, council });
+  const presets = activeCouncilPresets({ ...config, council });
+  const lead = presets[0]!;
+  const presetId = presets.map((preset) => preset.id).join("+");
+  const presetName = presets.map((preset) => preset.name).join(" + ");
   const readyById = new Map(
     readyProviders.map((provider) => [provider.id, provider] as const),
   );
   const maxSeats = council.maxSeats;
-  const seatProviders = preset.seatProviderIds
-    .map((id) => readyById.get(id as ProviderId) ?? readyById.get(id as never))
-    .filter((provider): provider is ModelProviderConfig => Boolean(provider))
-    .slice(0, maxSeats)
-    .map((provider) => {
-      const modelId =
-        preset.seatModelIds?.[provider.id] ??
-        provider.defaultModelId ??
-        providerDefaultModelId(provider);
-      const model = getProviderModel(provider, modelId ?? undefined);
-      return {
-        providerId: provider.id,
-        providerLabel: provider.displayName,
-        modelId: modelId ?? null,
-        modelLabel: model?.displayName ?? modelId ?? null,
-      };
-    });
+  // Loaded presets merge in order. A provider sits once, with the model of the
+  // first preset that seats it, because one run cannot hold a provider twice.
+  const seatProviders: CouncilSeatRequest[] = [];
+  for (const preset of presets) {
+    for (const id of preset.seatProviderIds) {
+      const provider = readyById.get(id as ProviderId);
+      if (!provider || seatProviders.some((seat) => seat.providerId === id)) {
+        continue;
+      }
+      if (seatProviders.length >= maxSeats) break;
+      seatProviders.push(seatRequest(provider, preset.seatModelIds?.[id]));
+    }
+  }
 
   const seats =
     seatProviders.length >= 2
       ? seatProviders
-      : readyProviders.slice(0, maxSeats).map((provider) => {
-          const modelId =
-            provider.defaultModelId ?? providerDefaultModelId(provider);
-          const model = getProviderModel(provider, modelId ?? undefined);
-          return {
-            providerId: provider.id,
-            providerLabel: provider.displayName,
-            modelId: modelId ?? null,
-            modelLabel: model?.displayName ?? modelId ?? null,
-          };
-        });
+      : readyProviders
+          .slice(0, maxSeats)
+          .map((provider) => seatRequest(provider));
 
   if (seats.length < 2) {
     return {
       seats,
-      synthesizerProviderId: preset.synthesizerProviderId,
-      presetId: preset.id,
-      presetName: preset.name,
+      synthesizerProviderId: lead.synthesizerProviderId,
+      presetId,
+      presetName,
       error:
         "Council needs at least two ready providers. Connect more providers or pick a different preset.",
     };
   }
 
+  const chosen = council.synthesizer
+    ? readyById.get(council.synthesizer.providerId as ProviderId)
+    : undefined;
   const synthProvider =
-    readyById.get(preset.synthesizerProviderId as ProviderId) ??
+    chosen ??
+    readyById.get(lead.synthesizerProviderId as ProviderId) ??
     readyProviders.find((provider) => provider.id === seats[0]?.providerId) ??
     readyProviders[0];
   if (!synthProvider) {
     return {
       seats,
-      synthesizerProviderId: preset.synthesizerProviderId,
-      presetId: preset.id,
-      presetName: preset.name,
+      synthesizerProviderId: lead.synthesizerProviderId,
+      presetId,
+      presetName,
       error: "Council synthesizer provider is not ready.",
     };
   }
-  const synthModelId =
-    preset.synthesizerModelId ??
-    synthProvider.defaultModelId ??
-    providerDefaultModelId(synthProvider);
-  const synthModel = getProviderModel(synthProvider, synthModelId ?? undefined);
+  const synth = seatRequest(
+    synthProvider,
+    chosen
+      ? council.synthesizer?.modelId
+      : synthProvider.id === lead.synthesizerProviderId
+        ? lead.synthesizerModelId
+        : undefined,
+  );
 
   return {
     seats,
     synthesizerProviderId: synthProvider.id,
     synthesizerProviderLabel: synthProvider.displayName,
-    synthesizerModelId: synthModelId ?? null,
-    synthesizerModelLabel: synthModel?.displayName ?? synthModelId ?? null,
-    presetId: preset.id,
-    presetName: preset.name,
+    synthesizerModelId: synth.modelId,
+    synthesizerModelLabel: synth.modelLabel,
+    presetId,
+    presetName,
   };
 }
 

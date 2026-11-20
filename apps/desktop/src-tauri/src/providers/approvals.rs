@@ -1,6 +1,7 @@
 use crate::{
     app::limits::{PROVIDER_APPROVAL_EVENT, PROVIDER_APPROVAL_TIMEOUT},
     capabilities::{bridge::provider_run_approval_matches, types::ProviderApprovalDecisionRequest},
+    delegated_agents::ApprovalWait,
     desktop_notifications::notify_provider_approval_question,
     providers::{
         chat_types::ProviderChatRequest,
@@ -17,7 +18,8 @@ use crate::{
 };
 use anyhow::Context;
 use gyro_core::{
-    apply_provider_mutation_transaction_with_cancellation, begin_provider_mutation_transaction,
+    apply_provider_mutation_transaction_with_cancellation,
+    begin_provider_mutation_transaction_with_cancellation,
     ipc::{
         versions_compatible, DesktopProviderApprovalRequest, DesktopProviderApprovalResponse,
         DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
@@ -79,20 +81,58 @@ pub(crate) fn resolve_provider_approval_blocking(
         .map_err(|_| "provider approval state is unavailable".to_string())?
         .remove(&request.approval_id)
         .ok_or_else(|| "this provider approval is no longer pending".to_string())?;
+    let session_id = pending.session_id.to_string();
+    let control = app
+        .state::<ProviderCancellationManager>()
+        .flags
+        .lock()
+        .map_err(|_| "provider run state is unavailable".to_string())?
+        .get(&session_id)
+        .cloned();
+    let expected_turn = pending.turn_id.map(|id| id.to_string());
+    let stale_turn = control.as_ref().is_some_and(|control| {
+        control
+            .request
+            .lock()
+            .ok()
+            .and_then(|request| request.as_ref()?.turn_id.clone())
+            .zip(expected_turn)
+            .is_some_and(|(actual, expected)| actual != expected)
+    });
+    let cancelled = || {
+        stale_turn
+            || control
+                .as_ref()
+                .is_some_and(|control| control.cancellation.is_cancelled())
+    };
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     let store = open_store()?;
+    if cancelled() {
+        record_provider_approval_terminal_event(
+            &app,
+            &store,
+            pending.session_id,
+            pending.turn_id,
+            pending.payload,
+            "cancelled",
+            "Provider approval cancelled",
+        )
+        .map_err(to_string)?;
+        return Err("the provider turn was stopped".into());
+    }
     let mut payload = pending.payload;
     let mut provider_decision = decision;
     let mut pending_mutation: Option<PendingProviderMutationCommit> = None;
     if decision == ProviderApprovalDecision::Approve {
         if let Some(transaction) = pending.file_transaction.as_ref() {
-            match begin_provider_mutation_transaction(
+            match begin_provider_mutation_transaction_with_cancellation(
                 transaction,
                 &paths.mutation_journals_dir,
                 ProviderMutationJournalContext {
                     session_id: pending.session_id,
                     approval_id: pending.approval_id,
                 },
+                cancelled,
             ) {
                 Ok(commit) => {
                     payload["changedPaths"] =
@@ -104,7 +144,8 @@ pub(crate) fn resolve_provider_approval_blocking(
                     pending_mutation = Some(commit);
                 }
                 Err(error) => {
-                    payload["status"] = serde_json::Value::String("failed".into());
+                    let status = if cancelled() { "cancelled" } else { "failed" };
+                    payload["status"] = serde_json::Value::String(status.into());
                     payload["error"] = serde_json::Value::String(error.to_string());
                     payload["decidedAt"] =
                         serde_json::Value::String(chrono::Utc::now().to_rfc3339());
@@ -123,6 +164,22 @@ pub(crate) fn resolve_provider_approval_blocking(
             }
         }
     }
+    if cancelled() {
+        if let Some(commit) = pending_mutation {
+            commit.rollback().map_err(to_string)?;
+        }
+        record_provider_approval_terminal_event(
+            &app,
+            &store,
+            pending.session_id,
+            pending.turn_id,
+            payload,
+            "cancelled",
+            "Provider approval cancelled",
+        )
+        .map_err(to_string)?;
+        return Err("the provider turn was stopped".into());
+    }
     payload["status"] = serde_json::Value::String(
         match provider_decision {
             ProviderApprovalDecision::Approve => "approved",
@@ -132,6 +189,13 @@ pub(crate) fn resolve_provider_approval_blocking(
         .into(),
     );
     payload["decidedAt"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
+    if let (Some(commit), Some(turn_id)) = (&pending_mutation, pending.turn_id) {
+        match commit.record_undo(&store, turn_id) {
+            Ok(Some(id)) => payload["undoId"] = serde_json::json!(id),
+            Ok(None) => {}
+            Err(error) => eprintln!("Could not record undo for a provider edit: {error}"),
+        }
+    }
     let event = match store.append_event_with_turn_id(
         pending.session_id,
         SessionEventKind::SystemEvent,
@@ -202,6 +266,15 @@ pub(crate) fn wait_for_provider_approval(
             .workspace_path
             .as_deref()
             .ok_or_else(|| anyhow::anyhow!("provider file approval has no selected workspace"))?;
+        let policy = open_store()
+            .map_err(anyhow::Error::msg)?
+            .get_project_capability_policy(workspace_path)?;
+        if !request.full_access
+            && policy.access_for(gyro_core::CapabilityClass::WorkspaceWrite)
+                == gyro_core::CapabilityAccess::Deny
+        {
+            return Ok(ProviderApprovalDecision::Reject);
+        }
         let changes = details
             .pointer("/patch/changes")
             .or_else(|| details.pointer("/change/changes"))
@@ -299,63 +372,66 @@ pub(crate) fn wait_for_provider_approval_with_transaction(
             },
         );
     let _ = app.emit(PROVIDER_APPROVAL_EVENT, event);
+    let _agent_wait = ApprovalWait::start(app, session_id, turn_id);
     notify_provider_approval_question(app, context, approval_id, approval_type);
     let approval_key = approval_id.to_string();
     let started_at = Instant::now();
     loop {
         match receiver.recv_timeout(Duration::from_millis(250)) {
             Ok(decision) => {
-                remove_pending_provider_approval(app, &approval_key);
+                if provider_chat_cancelled(app, &context.session_id)
+                    && decision != ProviderApprovalDecision::AppliedByGyro
+                {
+                    anyhow::bail!("{}", provider_stop_message(app, &context.session_id));
+                }
                 return Ok(decision);
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                remove_pending_provider_approval(app, &approval_key);
+                if provider_chat_cancelled(app, &context.session_id) {
+                    anyhow::bail!("{}", provider_stop_message(app, &context.session_id));
+                }
+                anyhow::bail!("provider approval channel closed")
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        if provider_chat_cancelled(app, &context.session_id) {
+            // Taking the pending entry owns the terminal receipt. If the
+            // resolver took it already, its transaction observes the stop.
+            if remove_pending_provider_approval(app, &approval_key) {
                 record_provider_approval_terminal_event(
                     app,
                     &store,
                     session_id,
                     turn_id,
                     payload,
-                    "failed",
-                    "Provider approval channel closed",
+                    "cancelled",
+                    "Provider approval cancelled",
                 )?;
-                anyhow::bail!("provider approval channel closed")
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            anyhow::bail!("{}", provider_stop_message(app, &context.session_id));
         }
-        if started_at.elapsed() >= PROVIDER_APPROVAL_TIMEOUT {
-            remove_pending_provider_approval(app, &approval_key);
+        if started_at.elapsed() >= PROVIDER_APPROVAL_TIMEOUT
+            && remove_pending_provider_approval(app, &approval_key)
+        {
             record_provider_approval_terminal_event(
                 app,
                 &store,
                 session_id,
                 turn_id,
                 payload,
-                "expired",
+                "failed",
                 "Provider approval expired",
             )?;
             anyhow::bail!("provider approval expired after 15 minutes");
         }
-        if provider_chat_cancelled(app, &context.session_id) {
-            remove_pending_provider_approval(app, &approval_key);
-            record_provider_approval_terminal_event(
-                app,
-                &store,
-                session_id,
-                turn_id,
-                payload,
-                "cancelled",
-                "Provider approval cancelled",
-            )?;
-            anyhow::bail!("{}", provider_stop_message(app, &context.session_id));
-        }
     }
 }
 
-pub(crate) fn remove_pending_provider_approval(app: &tauri::AppHandle, approval_key: &str) {
-    if let Ok(mut pending) = app.state::<ProviderApprovalManager>().pending.lock() {
-        pending.remove(approval_key);
-    }
+fn remove_pending_provider_approval(app: &tauri::AppHandle, approval_key: &str) -> bool {
+    app.state::<ProviderApprovalManager>()
+        .pending
+        .lock()
+        .is_ok_and(|mut pending| pending.remove(approval_key).is_some())
 }
 
 pub(crate) fn record_provider_approval_terminal_event(
@@ -586,6 +662,7 @@ pub(crate) fn handle_desktop_provider_approval_request(
             "Gyro rejected an approval request that was not issued by the active provider run.",
         );
     }
+    let config = crate::chat_permissions::for_active_turn(app, &request.session_id, config);
     let approval_type = desktop_claude_approval_type(&request.tool_name);
     let posture = gyro_core::approval_posture(
         config.full_access,

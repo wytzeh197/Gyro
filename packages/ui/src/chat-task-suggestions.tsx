@@ -1,3 +1,4 @@
+import { humanModelName } from "./model-name";
 import {
   ArrowUpRight,
   Check,
@@ -342,7 +343,7 @@ function TaskCard({
     efforts.findIndex((item) => item.value === effort),
   );
   const effortLabel = efforts[effortIndex]?.label;
-  const modelLabel = model?.displayName ?? choice.modelId;
+  const modelLabel = model?.displayName ?? humanModelName(choice.modelId);
   const promptChanged = prompt.trim() !== task.prompt.trim();
 
   return (

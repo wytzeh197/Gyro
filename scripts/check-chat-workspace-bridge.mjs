@@ -54,6 +54,23 @@ const before = buffer("/project/a.ts", "agent edit", "new");
 const protectedState = workbenchReducer(state, { type: "ide-refresh-buffer", before, buffer: buffer(before.path, "late disk read", "late") });
 assert.equal(protectedState, state, "reducer also rejects a late refresh");
 
+const restoredPath = "/project/b.ts";
+state = workbenchReducer(state, {
+  type: "ide-mark-buffer-error", path: restoredPath, error: "File is missing from disk.",
+});
+await refreshOpenEditorBuffers({
+  paths: [restoredPath],
+  getBuffer: (path) => state.ide.buffers[path],
+  cancelled: () => false,
+  stat: async () => ({ contentHash: "old" }),
+  read: async (path) => buffer(path),
+  apply: (before, next) => {
+    state = workbenchReducer(state, { type: "ide-refresh-buffer", before, buffer: next });
+  },
+  conflict: () => assert.fail("a restored clean buffer must recover even with identical content"),
+});
+assert.equal(state.ide.buffers[restoredPath].status, "ready");
+
 state = workbenchReducer(state, { type: "sync-diff-event", path: "a.ts", message: "preview", lines: [{ number: 1, kind: "added", content: "+exact proposed edit" }] });
 assert.equal(state.diffReview.files.find(file => file.path === "a.ts").lines.length, 1);
 state = workbenchReducer(state, { type: "sync-diff-event", path: "a.ts", message: "new proposal" });

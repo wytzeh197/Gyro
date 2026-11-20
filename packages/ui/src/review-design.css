@@ -51,10 +51,27 @@
 .gyro-comparison-review .gyro-review-identity > span {
   display: flex;
   align-items: center;
-  gap: 5px;
+  flex-wrap: wrap;
+  gap: var(--gyro-space-compact);
   color: var(--gyro-muted);
   font-size: var(--gyro-font-caption);
   white-space: nowrap;
+}
+.gyro-comparison-review .gyro-review-scope-meta > span:first-child {
+  color: var(--gyro-text);
+}
+@container gyro-review (max-width: 480px) {
+  .gyro-comparison-review > .gyro-review-scope.has-check-action {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 3px;
+  }
+  .gyro-review-scope.has-check-action .gyro-review-identity {
+    display: contents;
+  }
+  .gyro-review-scope.has-check-action .gyro-review-identity > strong {
+    grid-column: 1 / -1;
+  }
 }
 .gyro-comparison-review.gyro-git-comparison-review:not(.is-empty)
   > .gyro-diff-file-list {
@@ -214,10 +231,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.gyro-comparison-review .gyro-review-file-meta {
-  text-align: right;
-  flex-shrink: 0;
 }
 .gyro-plain-diff:not(.is-empty) {
   display: flex;

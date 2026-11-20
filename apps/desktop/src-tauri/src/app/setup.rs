@@ -126,6 +126,7 @@ pub fn run() {
         .manage(language_server::LanguageServerManager::default())
         .manage(DebugAdapterManager::default())
         .manage(ProviderCancellationManager::default())
+        .manage(crate::chat_permissions::ChatFullAccess::default())
         .manage(local_check::LocalCheckManager::default())
         .manage(cloud_connection::CloudConnection::default())
         .manage(crate::cloud_v3::CloudV3::default())
@@ -406,6 +407,7 @@ pub fn run() {
             crate::terminal::panes::resize_terminal_pane,
             crate::terminal::panes::terminal_pane_working_directory,
             crate::workspace::files::resolve_file_mutation_proposal,
+            crate::workspace::files::undo_recorded_chat_edit,
             crate::workspace::files::preview_file_mutation_proposal,
             crate::providers::approvals::resolve_provider_approval,
             crate::capabilities::execute::resolve_capability_approval,
@@ -419,6 +421,7 @@ pub fn run() {
             crate::providers::commands::run_provider_chat,
             crate::providers::commands::compact_provider_chat,
             crate::app::config::save_config,
+            crate::chat_permissions::set_chat_full_access,
             crate::app::config::recover_config,
             crate::capabilities::commands::save_project_capability_policy,
             crate::workspace::paths::search_workspace,

@@ -1,50 +1,42 @@
-import type { AppDestination, SettingsSectionId } from "./types";
 import { popoverViewportRect } from "./composer-popover-bounds";
 
 /**
- * The first-run tour is a versioned catalog, not a scripted walkthrough.
+ * The first-run tour is a short, versioned catalog that ends in an action.
  *
- * Bump TOUR_VERSION whenever the catalog changes shape. A stored record for an
- * older version no longer suppresses the tour, so a UI change that invalidates
- * the copy re-runs the new tour once instead of leaving a stale one behind.
+ * Each step carries its own revision. Change a step's copy or target in a way
+ * that existing users should see, and bump that step's revision: only steps
+ * whose revision is newer than the stored one run again, never the whole tour.
+ * TOUR_VERSION is the record schema version, not a replay switch.
  */
-export const TOUR_VERSION = 1;
+export const TOUR_VERSION = 2;
 
-/** Versioned so a re-release of the tour can supersede the old record. */
 /** Editable first task; choosing it never submits a prompt or approves an edit. */
 export const FIRST_TASK_PROMPT =
   "Help me make one small, useful change in this project. First inspect the project instructions and existing tests, then propose a specific change and how to verify it. Wait for my approval before editing. After the approved change, run the relevant checks, show the diff, and report any failed or unrun checks.";
 
 export const TOUR_STORAGE_KEY = "gyro.first-run-tour";
 
-export type TourAnchorId =
-  | "composer.project"
-  | "composer.input"
-  | "settings.providers"
-  | "sidebar.ide"
-  | "panel.tabs";
+export type TourAnchorId = "composer.project" | "composer.input" | "composer.model";
 
 export type TourPlacement = "top" | "bottom" | "left" | "right";
 
-export type TourStepId =
-  "project" | "composer" | "models" | "workspace" | "panel";
+export type TourStepId = "project" | "composer" | "model";
 
 export type TourContext = {
   providerConfigured: boolean;
+  /** The step's primary button starts the first task. */
+  offersFirstTask: boolean;
 };
 
 export type TourStep = {
   id: TourStepId;
+  /** Bump to show this one step again to people who already saw it. */
+  revision: number;
   anchor: TourAnchorId;
   placement: TourPlacement;
-  title: string;
+  title: (context: TourContext) => string;
   /** Copy is a function so provider state can change the same step, not add one. */
   body: (context: TourContext) => string;
-  /** When set, the tour navigates before it looks for the anchor. */
-  navigate?: {
-    destination: AppDestination;
-    section?: SettingsSectionId;
-  };
 };
 
 /**
@@ -55,68 +47,61 @@ export type TourStep = {
 export const TOUR_ANCHOR_SELECTORS: Record<TourAnchorId, string> = {
   "composer.project": '[data-tour="composer.project"]',
   "composer.input": '[data-tour="composer.input"]',
-  "settings.providers": '[data-tour="settings.providers"]',
-  "sidebar.ide": '[data-tour="sidebar.ide"]',
-  "panel.tabs": '[data-tour="panel.tabs"], [data-tour="panel.launcher"]',
+  "composer.model": '[data-tour="composer.model"]',
 };
 
 /**
- * The five steps, in the order a new user needs the mental model:
- * what the agent can see, how to ask, where models live, where the IDE lives,
- * and where review/panels live.
+ * Three steps, all on the composer a new user is looking at: what Gyro can
+ * see, how to ask, and which model answers. The model step comes last because
+ * it ends in the action that gets a user to a first result: set up a model,
+ * or prepare a first task once a model is available. Code view, panels
+ * and Review are taught where they become relevant, not before a first message.
  */
 export const TOUR_STEPS: readonly TourStep[] = Object.freeze([
   {
     id: "project",
+    revision: 1,
     anchor: "composer.project",
     placement: "top",
-    title: "Your project folder",
+    title: () => "Your project folder",
     body: () =>
-      "Gyro reads and edits files in this folder. Check the project before starting a task, or use this control to switch folders.",
+      "Gyro reads and edits files in this folder. Click it to switch to another project.",
   },
   {
     id: "composer",
+    revision: 1,
     anchor: "composer.input",
     placement: "top",
-    title: "Start with a task",
+    title: () => "Describe a task",
     body: () =>
-      "Describe what you want to change. Use @ to include files, or attach images for context. Your approval mode controls when Gyro asks before acting.",
+      "Say what you want changed. Type @ to include files, or attach images. Your permission settings control when Gyro asks before running commands or editing files.",
   },
   {
-    id: "models",
-    anchor: "settings.providers",
-    placement: "right",
-    title: "Accounts and models",
-    body: ({ providerConfigured }) =>
+    id: "model",
+    revision: 1,
+    anchor: "composer.model",
+    placement: "top",
+    title: ({ providerConfigured }) =>
+      providerConfigured ? "Choose a model" : "Set up a model",
+    body: ({ providerConfigured, offersFirstTask }) =>
       providerConfigured
-        ? "Your provider is connected. Come here to connect another account, choose default models, and check usage limits."
-        : "Connect a provider here, then choose a model to start chatting. You can return to these settings to manage accounts and usage limits.",
-    navigate: { destination: "settings", section: "providers" },
-  },
-  {
-    id: "workspace",
-    anchor: "sidebar.ide",
-    placement: "right",
-    title: "Switch to your workspace",
-    body: () =>
-      "Use code view to explore files, search your project, and review source control. Your conversations stay available in chat view.",
-  },
-  {
-    id: "panel",
-    anchor: "panel.tabs",
-    placement: "bottom",
-    title: "Tools beside your chat",
-    body: () =>
-      "Open Review, Files, Browser, Terminal, and more alongside your conversation. Review shows the changes made during a turn.",
+        ? offersFirstTask
+          ? "Pick the model for this chat here. Ready to try it? A first task prepares a prompt you can edit before sending."
+          : "Pick the model for this chat here. You can change it at any time."
+        : "Connect an existing account, add an API key, or use a local model. Then choose a model for your chat.",
   },
 ]);
 
 export type TourRecordStatus = "complete" | "dismissed";
 
+/** Step id to the revision last shown (or skipped past). */
+export type TourSeenSteps = Partial<Record<TourStepId, number>>;
+
 export type TourRecord = {
   version: number;
   status: TourRecordStatus;
   recordedAt: string;
+  seen: TourSeenSteps;
 };
 
 export type TourStorage = Pick<Storage, "getItem" | "setItem">;
@@ -130,18 +115,43 @@ function defaultTourStorage(): TourStorage | null {
   }
 }
 
-function isTourRecord(value: unknown): value is TourRecord {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<TourRecord>;
-  return (
-    typeof candidate.version === "number" &&
-    (candidate.status === "complete" || candidate.status === "dismissed") &&
-    typeof candidate.recordedAt === "string"
-  );
+function allStepsSeen(): TourSeenSteps {
+  return Object.fromEntries(TOUR_STEPS.map((step) => [step.id, step.revision]));
 }
 
 /**
- * A corrupt or unreadable record must never crash first-run. Worse case the
+ * Accepts the current record and the version 1 record (no per-step map). A
+ * version 1 user already saw the project, composer and model guidance, so the
+ * migration counts every current step as seen instead of replaying the tour.
+ */
+function toTourRecord(value: unknown): TourRecord | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<TourRecord>;
+  if (
+    typeof candidate.version !== "number" ||
+    (candidate.status !== "complete" && candidate.status !== "dismissed") ||
+    typeof candidate.recordedAt !== "string"
+  )
+    return null;
+  if (candidate.version < 2) {
+    return {
+      version: TOUR_VERSION,
+      status: candidate.status,
+      recordedAt: candidate.recordedAt,
+      seen: allStepsSeen(),
+    };
+  }
+  const seen: TourSeenSteps = {};
+  if (candidate.seen && typeof candidate.seen === "object") {
+    for (const [id, revision] of Object.entries(candidate.seen)) {
+      if (typeof revision === "number") seen[id as TourStepId] = revision;
+    }
+  }
+  return { ...(candidate as TourRecord), seen };
+}
+
+/**
+ * A corrupt or unreadable record must never crash first-run. Worst case the
  * tour runs once; the next completion writes a clean record.
  */
 export function readTourRecord(
@@ -151,22 +161,31 @@ export function readTourRecord(
   try {
     const raw = storage.getItem(TOUR_STORAGE_KEY);
     if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    return isTourRecord(parsed) ? parsed : null;
+    return toTourRecord(JSON.parse(raw));
   } catch {
     return null;
   }
 }
 
+/**
+ * Records the given steps as seen, merged into whatever was seen before.
+ * Without a list, every current step counts as seen (skip, dismiss, or a
+ * capture fixture that wants the tour out of the way).
+ */
 export function writeTourRecord(
   storage: TourStorage | null,
   status: TourRecordStatus,
+  steps: readonly Pick<TourStep, "id" | "revision">[] = TOUR_STEPS,
 ): void {
   if (!storage) return;
+  const previous = readTourRecord(storage);
+  const seen: TourSeenSteps = { ...previous?.seen };
+  for (const step of steps) seen[step.id] = step.revision;
   const record: TourRecord = {
     version: TOUR_VERSION,
     status,
     recordedAt: new Date().toISOString(),
+    seen,
   };
   try {
     storage.setItem(TOUR_STORAGE_KEY, JSON.stringify(record));
@@ -175,18 +194,21 @@ export function writeTourRecord(
   }
 }
 
-/**
- * Only a record for the current catalog version suppresses the tour. An old
- * version means the UI changed under the old copy, so the new tour runs once.
- */
+/** Steps that are new, or revised since this person last saw them. */
+export function pendingTourSteps(record: TourRecord | null): TourStep[] {
+  return TOUR_STEPS.filter(
+    (step) => (record?.seen[step.id] ?? 0) < step.revision,
+  );
+}
+
 export function shouldRunTour(record: TourRecord | null): boolean {
-  return record?.version !== TOUR_VERSION;
+  return pendingTourSteps(record).length > 0;
 }
 
 /**
- * Resolves the first visible element carrying the anchor. A closed companion
- * dock still has its tab header in the DOM, so visibility is part of the test,
- * not just presence.
+ * Resolves the first visible element carrying the anchor, preferring the
+ * focused split chat. Hidden copies stay in the DOM, so visibility is part of
+ * the test, not just presence.
  */
 export function resolveTourAnchor(
   anchor: TourAnchorId,
@@ -205,15 +227,7 @@ export function resolveTourAnchor(
     doc.querySelector(
       ".gyro-chat-grid-slot.is-occupied.is-pane-maximized:not(.is-hidden-by-maximize)",
     ) ?? doc.querySelector(".gyro-chat-grid-slot.is-current-pane");
-  // An open companion is the actual tool navigation. Its launcher can still
-  // exist earlier in the document (including in another split chat).
-  const candidates = Array.from(nodes).sort((a, b) =>
-    anchor === "panel.tabs"
-      ? Number(b.dataset.tour === "panel.tabs") -
-        Number(a.dataset.tour === "panel.tabs")
-      : 0,
-  );
-  for (const node of candidates) {
+  for (const node of Array.from(nodes)) {
     if (!node.isConnected) continue;
     const pane = node.closest(".gyro-chat-grid-slot");
     if (focusedPane && pane && pane !== focusedPane) continue;

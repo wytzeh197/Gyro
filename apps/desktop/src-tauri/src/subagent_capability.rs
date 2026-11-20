@@ -87,11 +87,14 @@ pub(super) fn execute(
         );
     }
     let store = open_store().map_err(anyhow::Error::msg)?;
+    let run_id = (!agent.run_id.is_empty())
+        .then(|| Uuid::parse_str(&agent.run_id))
+        .transpose()?;
     let response = store
         .read_events(Uuid::parse_str(&agent.agent_id)?)?
         .into_iter()
         .rev()
-        .find(|event| event.kind == SessionEventKind::AssistantMessage);
+        .find(|event| event.kind == SessionEventKind::AssistantMessage && event.turn_id == run_id);
     let summary = response
         .as_ref()
         .map(|event| event.message.as_str())
@@ -279,6 +282,7 @@ pub(super) struct ChildRunControl {
     app: tauri::AppHandle,
     session_id: String,
     control: Arc<ProviderRunControl>,
+    parent_control: Arc<ProviderRunControl>,
     /// Held until teardown; each new task gets a fresh watcher and control.
     watcher: Option<ParentStopWatcher>,
     deadline: Option<Instant>,
@@ -289,14 +293,7 @@ impl ChildRunControl {
         app: &tauri::AppHandle,
         session_id: &str,
         parent_session_id: &str,
-    ) -> anyhow::Result<Self> {
-        Self::claim_with_runtime(app, session_id, parent_session_id, None)
-    }
-
-    pub(super) fn claim_with_runtime(
-        app: &tauri::AppHandle,
-        session_id: &str,
-        parent_session_id: &str,
+        expected_parent: &Arc<ProviderRunControl>,
         runtime: Option<Duration>,
     ) -> anyhow::Result<Self> {
         let manager = app.state::<ProviderCancellationManager>();
@@ -304,18 +301,21 @@ impl ChildRunControl {
             .flags
             .lock()
             .map_err(|_| anyhow::anyhow!("provider run state is unavailable"))?;
+        ensure_parent_control(&flags, parent_session_id, expected_parent)?;
         let control = claim_child_run_control(&mut flags, session_id, parent_session_id)?;
-        let parent = flags.get(parent_session_id).unwrap().cancellation.clone();
+        let parent = &expected_parent.cancellation;
         let deadline = runtime.map(|runtime| Instant::now() + runtime);
-        let watcher =
-            match ParentStopWatcher::start_until_deadline(&parent, &control.cancellation, deadline)
-            {
-                Ok(watcher) => watcher,
-                Err(error) => {
-                    release_child_run_control(&mut flags, session_id, &control);
-                    return Err(error.context("could not start the sub-agent stop watcher"));
-                }
-            };
+        let watcher = match ParentStopWatcher::start_until_deadline(
+            parent,
+            &control.cancellation,
+            deadline,
+        ) {
+            Ok(watcher) => watcher,
+            Err(error) => {
+                release_child_run_control(&mut flags, session_id, &control);
+                return Err(error.context("could not start the sub-agent stop watcher"));
+            }
+        };
         drop(flags);
         Ok(Self {
             app: app.clone(),
@@ -323,6 +323,7 @@ impl ChildRunControl {
             watcher: Some(watcher),
             deadline,
             control,
+            parent_control: Arc::clone(expected_parent),
         })
     }
 
@@ -340,15 +341,18 @@ impl ChildRunControl {
             .flags
             .lock()
             .map_err(|_| anyhow::anyhow!("provider run state is unavailable"))?;
+        if let Err(error) = ensure_parent_control(&flags, parent_session_id, &self.parent_control) {
+            self.control.cancellation.cancel();
+            return Err(error);
+        }
         let next = renew_child_run_control(
             &mut flags,
             &self.session_id,
             parent_session_id,
             &self.control,
         )?;
-        let parent = flags.get(parent_session_id).unwrap().cancellation.clone();
         let watcher = match ParentStopWatcher::start_until_deadline(
-            &parent,
+            &self.parent_control.cancellation,
             &next.cancellation,
             self.deadline,
         ) {
@@ -363,6 +367,20 @@ impl ChildRunControl {
         self.watcher = Some(watcher);
         Ok(())
     }
+}
+
+fn ensure_parent_control(
+    flags: &HashMap<String, Arc<ProviderRunControl>>,
+    session_id: &str,
+    expected_parent: &Arc<ProviderRunControl>,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        flags
+            .get(session_id)
+            .is_some_and(|control| Arc::ptr_eq(control, expected_parent)),
+        "the parent turn changed before the sub-agent could start"
+    );
+    Ok(())
 }
 
 fn remaining_child_runtime(
@@ -610,6 +628,15 @@ mod tests {
         let mut flags = HashMap::new();
         assert!(claim_child_run_control(&mut flags, "child", "missing").is_err());
         assert!(flags.is_empty());
+    }
+
+    #[test]
+    fn a_replacement_parent_control_cannot_inherit_old_work() {
+        let mut flags = provider_run_flags();
+        let original = Arc::clone(&flags["parent"]);
+        assert!(ensure_parent_control(&flags, "parent", &original).is_ok());
+        flags.insert("parent".into(), Arc::new(ProviderRunControl::default()));
+        assert!(ensure_parent_control(&flags, "parent", &original).is_err());
     }
 
     #[test]

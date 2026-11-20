@@ -10,7 +10,7 @@ import {
   subagentElapsedMs,
   subagentTokensLabel,
   subagentStatusLabel,
-  subagentActivitySummary,
+  subagentStatusCounts,
   subagentHue,
   type SubagentSnapshot,
   type SubagentSurfaceState,
@@ -36,38 +36,36 @@ export function SubagentStrip({
         isSubagentLive(agent),
     ),
   );
-  if (!agents.length)
-    return state.error ? <SubagentNotice state={state} /> : null;
-  const status = subagentActivitySummary(agents);
+  if (!agents.length && !state.error && !state.isRefreshing) return null;
   return (
     <div className="gyro-subagent-dock">
-      <details className="gyro-subagent-strip">
-        <summary
-          aria-label={`${agents.length} ${agents.length === 1 ? "sub-agent" : "sub-agents"} · ${status.label}`}
-        >
-          <ChevronRight
-            className="gyro-subagent-strip-chevron"
-            size={12}
-            aria-hidden="true"
-          />
-          <SubagentMarks agents={agents} />
-          <span>
-            {agents.length} {agents.length === 1 ? "sub-agent" : "sub-agents"}
-          </span>
-          <span
-            className={
-              status.needsAttention
-                ? "gyro-subagent-strip-status is-attention"
-                : "gyro-subagent-strip-status"
-            }
-            role="status"
-          >
-            {status.label}
-          </span>
-        </summary>
-        <SubagentList state={{ ...state, agents, error: undefined }} />
-      </details>
-      <SubagentNotice state={state} />
+      {agents.length ? (
+        <details className="gyro-subagent-strip">
+          <summary>
+            <ChevronRight
+              className="gyro-subagent-strip-chevron"
+              size={12}
+              aria-hidden="true"
+            />
+            <SubagentMarks agents={agents} />
+            <span>
+              {agents.length} {agents.length === 1 ? "sub-agent" : "sub-agents"}
+            </span>
+            <span className="gyro-subagent-strip-status" role="status">
+              {subagentStatusCounts(agents).map(({ status, count, label }) => (
+                <span
+                  className={`gyro-subagent-status is-${status}`}
+                  key={status}
+                >
+                  {count} {label}
+                </span>
+              ))}
+            </span>
+          </summary>
+          <SubagentList agents={agents} state={state} />
+        </details>
+      ) : null}
+      <SubagentRefreshNotice state={state} />
     </div>
   );
 }
@@ -95,58 +93,79 @@ export function SubagentMarks({ agents }: { agents: SubagentSnapshot[] }) {
   );
 }
 
-export function SubagentNotice({ state }: { state: SubagentSurfaceState }) {
-  if (!state.error) return null;
+export function SubagentRefreshNotice({
+  state,
+}: {
+  state: SubagentSurfaceState;
+}) {
+  if (state.isRefreshing) {
+    return (
+      <p className="gyro-subagent-empty" role="status">
+        Loading sub-agents…
+      </p>
+    );
+  }
+  return state.error ? (
+    <SubagentNotice
+      message={state.error}
+      detail={state.errorDetail}
+      onRetry={state.onRefresh}
+    />
+  ) : null;
+}
+
+function SubagentNotice({
+  message,
+  detail,
+  onRetry,
+  retryLabel = "Retry",
+}: {
+  message: string;
+  detail?: string;
+  onRetry?: () => void;
+  retryLabel?: string;
+}) {
   return (
     <div className="gyro-subagent-notice">
-      <p role="alert">
-        {state.error}{" "}
-        {state.agents.length ? "Known agents are still shown." : null}
-      </p>
-      {state.onRefresh ? (
-        <button
-          type="button"
-          onClick={state.onRefresh}
-          disabled={state.isRefreshing}
-        >
-          {state.isRefreshing ? "Refreshing…" : "Retry"}
+      <p role="alert">{message}</p>
+      {onRetry ? (
+        <button type="button" onClick={onRetry}>
+          {retryLabel}
         </button>
       ) : null}
-      {state.errorDetail ? (
+      {detail ? (
         <details>
           <summary>Details</summary>
-          <p>{state.errorDetail}</p>
+          <p>{detail}</p>
         </details>
       ) : null}
     </div>
   );
 }
 
-function useAgentClock(agents: SubagentSnapshot[]) {
-  const [, setNow] = useState(Date.now);
-  const live = agents.some(isSubagentLive);
+function SubagentElapsed({ agent }: { agent: SubagentSnapshot }) {
+  const live = isSubagentLive(agent);
+  const [now, setNow] = useState(Date.now);
   useEffect(() => {
     setNow(Date.now());
     if (!live) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, [live]);
-  return Date.now();
+  return (
+    <span title="Total elapsed time across runs">
+      {formatRunDuration(Math.floor(subagentElapsedMs(agent, now) / 1_000))}
+    </span>
+  );
 }
 
 export function SubagentList({
+  agents,
   state,
-  turnId,
-  renderApproval,
 }: {
+  agents: SubagentSnapshot[];
   state: SubagentSurfaceState;
-  turnId?: string;
-  renderApproval?: (agentId: string) => ReactNode;
 }) {
-  const agents = sortedSubagents(
-    state.agents.filter((agent) => !turnId || agent.parentTurnId === turnId),
-  );
-  if (!agents.length) return turnId ? null : <SubagentNotice state={state} />;
   return (
     <section className="gyro-subagents" aria-label="Sub-agents">
       <ul>
@@ -155,7 +174,10 @@ export function SubagentList({
             <button
               type="button"
               onClick={() => state.onSelect(agent.agentId)}
-              aria-label={`Open ${agent.name} working process · ${subagentStatusLabel(agent.status)}`}
+              aria-label={`Open ${agent.name} · ${subagentStatusLabel(agent.status)}`}
+              aria-current={
+                state.selectedAgentId === agent.agentId || undefined
+              }
               title={`${agent.name} · ${subagentStatusLabel(agent.status)}`}
               className={
                 state.selectedAgentId === agent.agentId ? "is-selected" : ""
@@ -172,11 +194,9 @@ export function SubagentList({
                 aria-hidden="true"
               />
             </button>
-            {renderApproval?.(agent.agentId)}
           </li>
         ))}
       </ul>
-      {!turnId ? <SubagentNotice state={state} /> : null}
     </section>
   );
 }
@@ -195,7 +215,7 @@ export function SubagentPanel({
   const agent = state?.agents.find(
     (item) => item.agentId === state.selectedAgentId,
   );
-  const now = useAgentClock(agent ? [agent] : []);
+  const live = agent ? isSubagentLive(agent) : false;
   const events =
     (agent && state?.eventsByAgentId[agent.agentId]) ?? EMPTY_EVENTS;
   const scroll = useChatTranscriptScroll({
@@ -208,136 +228,204 @@ export function SubagentPanel({
   if (!state || !agent)
     return (
       <div className="gyro-companion-empty">
-        <strong>No agent selected</strong>
-        <span>Select an agent from Environment or the composer to follow its work here.</span>
+        <strong>
+          {state?.isRefreshing ? "Loading sub-agents…" : "No agent selected"}
+        </strong>
+        {state?.error ? <SubagentRefreshNotice state={state} /> : null}
+        {!state?.isRefreshing && !state?.error ? (
+          <span>
+            Select a sub-agent from Environment or above the composer.
+          </span>
+        ) : null}
       </div>
     );
-  const runIds = [
-    ...new Set(
-      events
-        .map((event) => event.turnId)
-        .filter((id): id is string => Boolean(id)),
-    ),
-  ];
-  if (!runIds.includes(agent.runId)) runIds.push(agent.runId);
+  const byRun = new Map<string, SessionEvent[]>();
+  for (const event of events) {
+    if (!event.turnId) continue;
+    const run = byRun.get(event.turnId);
+    if (run) run.push(event);
+    else byRun.set(event.turnId, [event]);
+  }
+  const currentRun = byRun.get(agent.runId) ?? EMPTY_EVENTS;
+  byRun.delete(agent.runId);
+  const stop = state.onStop;
+  const stopping = agent.status === "stopping";
+  const requestingStop = Boolean(state.stopRequest?.pending);
+  const canStop = Boolean(stop && live && !stopping && !requestingStop);
   return (
-    <div
-      className="gyro-subagent-panel"
-      ref={scroll.transcriptRef}
-      onScroll={scroll.onTranscriptScroll}
-      onWheel={scroll.onTranscriptWheel}
-      onTouchStart={scroll.onTranscriptTouchStart}
-      onTouchMove={scroll.onTranscriptTouchMove}
-      onKeyDown={scroll.onTranscriptKeyDown}
-      onPointerDown={scroll.onTranscriptPointerDown}
-    >
-      {state.history?.hasMoreBefore ? (
-        <button
-          className="gyro-chat-load-earlier"
-          type="button"
-          disabled={state.history.isLoadingEarlier}
-          onClick={() =>
-            scroll.isLoadedChatClipped
-              ? scroll.requestEarlierMessages(true)
-              : state.history?.onLoadEarlier()
-          }
-        >
-          {state.history.isLoadingEarlier
-            ? "Loading earlier work…"
-            : "Load earlier work"}
-        </button>
-      ) : null}
-      <details className="gyro-subagent-task">
-        <summary>Task</summary>
-        <p>{agent.task}</p>
-      </details>
-      <SubagentNotice state={state} />
-      {runIds.map((runId) => {
-        const rawEvents = events.filter((event) => event.turnId === runId);
-        const runEvents = subagentProcessEvents(rawEvents);
-        const recorded = [...rawEvents]
-          .reverse()
-          .find((event) =>
-            [
-              "provider-status",
-              "provider-run",
-              "provider-diagnostics",
-            ].includes(
-              String((event.payload as Record<string, unknown>)?.kind),
-            ),
-          )?.payload as
-          | { status?: string; startedAt?: string; durationMs?: number }
-          | undefined;
-        const current = runId === agent.runId;
-        const model = buildRunModel(runEvents, {
-          isRunning: current && isSubagentLive(agent),
-          startedAt:
-            recorded?.startedAt ??
-            (current ? agent.startedAt : undefined) ??
-            rawEvents[0]?.createdAt ??
-            agent.createdAt,
-          durationMs:
-            recorded?.durationMs ??
-            (current && !isSubagentLive(agent) ? agent.elapsedMs : undefined),
-          status: current
-            ? {
-                status: agent.status === "completed" ? "done" : agent.status,
-                error: agent.error ?? undefined,
-              }
-            : recorded?.status
-              ? { status: recorded.status }
-              : undefined,
-        });
-        return (
-          <div className="gyro-chat-run gyro-subagent-run" key={runId}>
-            <ChatRun
-              model={model}
-              renderAsk={renderAsk}
-              renderSay={renderSay}
-              headerActions={
-                current ? (
-                  <>
-                    <span
-                      className="gyro-run-token-count"
-                      title={`Cumulative usage · ${formatRunDuration(Math.floor(subagentElapsedMs(agent, now) / 1_000))}`}
-                    >
-                      {subagentTokensLabel(agent)}
-                    </span>
-                    {isSubagentLive(agent) ? (
-                      <button
-                        className="gyro-subagent-stop"
-                        type="button"
-                        aria-label={`Stop ${agent.name}`}
-                        title="Stop agent"
-                        disabled={agent.status === "stopping"}
-                        onClick={() => state.onStop(agent.agentId)}
-                      >
-                        <Square size={11} aria-hidden="true" />
-                      </button>
-                    ) : null}
-                  </>
-                ) : undefined
-              }
-              statusLabel={
-                current && agent.status === "waiting"
-                  ? "Waiting for approval"
-                  : undefined
-              }
-            />
-            {model.response ? (
-              <article className="gyro-subagent-result gyro-response-body">
-                {renderResponse(model.response.message)}
-              </article>
-            ) : null}
-          </div>
-        );
-      })}
-      {agent.summary &&
-      !events.some((event) => event.kind === "assistant-message") ? (
-        <article className="gyro-subagent-result gyro-response-body">
-          {renderResponse(agent.summary)}
-        </article>
-      ) : null}
+    <div className="gyro-subagent-panel">
+      <header className="gyro-subagent-overview">
+        <div className="gyro-subagent-heading">
+          <SubagentMark agentId={agent.agentId} />
+          <h2>{agent.name}</h2>
+          {stop && live ? (
+            <button
+              className="gyro-subagent-stop"
+              type="button"
+              aria-label={`Stop ${agent.name}`}
+              title={`Stop ${agent.name}`}
+              disabled={!canStop}
+              onClick={() => stop(agent.agentId)}
+            >
+              <Square size={11} aria-hidden="true" />
+            </button>
+          ) : null}
+        </div>
+        <div className="gyro-subagent-metadata">
+          <span
+            className={`gyro-subagent-status is-${agent.status}`}
+            role="status"
+          >
+            {requestingStop && !stopping && live
+              ? "Requesting stop…"
+              : subagentStatusLabel(agent.status)}
+          </span>
+          <SubagentElapsed agent={agent} />
+          <span title="Cumulative usage across runs">
+            {subagentTokensLabel(agent)}
+          </span>
+          {agent.readOnly ? <span>Read-only</span> : null}
+        </div>
+        {live && !stopping && state.stopRequest?.error ? (
+          <SubagentNotice
+            message="Could not stop the sub-agent."
+            detail={state.stopRequest.error}
+            onRetry={canStop && stop ? () => stop(agent.agentId) : undefined}
+            retryLabel="Retry stop"
+          />
+        ) : null}
+      </header>
+      <div
+        className="gyro-subagent-history"
+        ref={scroll.transcriptRef}
+        onScroll={scroll.onTranscriptScroll}
+        onWheel={scroll.onTranscriptWheel}
+        onTouchStart={scroll.onTranscriptTouchStart}
+        onTouchMove={scroll.onTranscriptTouchMove}
+        onKeyDown={scroll.onTranscriptKeyDown}
+        onPointerDown={scroll.onTranscriptPointerDown}
+      >
+        {agent.task ? (
+          <details className="gyro-subagent-task">
+            <summary>Task</summary>
+            <p>{agent.task}</p>
+          </details>
+        ) : null}
+        {state.history?.hasMoreBefore ? (
+          <button
+            className="gyro-chat-load-earlier"
+            type="button"
+            disabled={state.history.isLoadingEarlier}
+            onClick={() =>
+              scroll.isLoadedChatClipped
+                ? scroll.requestEarlierMessages(true)
+                : state.history?.onLoadEarlier()
+            }
+          >
+            {state.history.isLoadingEarlier
+              ? "Loading earlier work…"
+              : "Load earlier work"}
+          </button>
+        ) : null}
+        {state.history?.isLoading ? (
+          <p className="gyro-subagent-empty" role="status">
+            Loading agent history…
+          </p>
+        ) : state.history?.error ? (
+          <SubagentNotice
+            message="Could not load agent history."
+            detail={state.history.error}
+            onRetry={state.history.onRetry}
+          />
+        ) : null}
+        {[...byRun, [agent.runId, currentRun] as const].map(
+          ([runId, rawEvents]) => {
+            const current = runId === agent.runId;
+            const runEvents = subagentProcessEvents(
+              rawEvents,
+              current &&
+                (agent.status === "running" || agent.status === "waiting"),
+            );
+            const recorded = rawEvents.findLast((event) => {
+              const payload = event.payload as
+                { kind?: string; status?: string } | undefined;
+              return payload?.kind === "provider-status" && payload.status;
+            })?.payload as
+              | {
+                  status: string;
+                  startedAt?: string;
+                  durationMs?: number;
+                  error?: string;
+                }
+              | undefined;
+            const model = buildRunModel(runEvents, {
+              isRunning: current && live,
+              startedAt:
+                recorded?.startedAt ??
+                (current ? agent.startedAt : undefined) ??
+                rawEvents[0]?.createdAt ??
+                agent.createdAt,
+              durationMs: recorded?.durationMs,
+              status: current
+                ? {
+                    status:
+                      agent.status === "completed" ? "done" : agent.status,
+                    error: agent.error ?? undefined,
+                  }
+                : recorded,
+            });
+            const result =
+              model.response?.message ?? (current ? agent.summary : undefined);
+            const showRun = Boolean(
+              model.steps.length ||
+              recorded ||
+              (current && (live || agent.error)),
+            );
+            if (!showRun && !result) return null;
+            const previousTask =
+              !current &&
+              rawEvents.find((event) => event.kind === "user-message");
+            return (
+              <div className="gyro-chat-run gyro-subagent-run" key={runId}>
+                {previousTask ? (
+                  <details className="gyro-subagent-task">
+                    <summary>Earlier task</summary>
+                    <p>{previousTask.message}</p>
+                  </details>
+                ) : null}
+                {showRun ? (
+                  <ChatRun
+                    model={model}
+                    renderAsk={renderAsk}
+                    renderSay={renderSay}
+                    suppressThinkingIndicator={
+                      current && agent.status !== "running"
+                    }
+                    statusLabel={
+                      current && (stopping || agent.status === "waiting")
+                        ? subagentStatusLabel(agent.status)
+                        : undefined
+                    }
+                  />
+                ) : null}
+                {result ? (
+                  <article className="gyro-subagent-result gyro-response-body">
+                    {renderResponse(result)}
+                  </article>
+                ) : null}
+              </div>
+            );
+          },
+        )}
+        {!live &&
+        !events.some((event) => event.turnId) &&
+        !agent.summary &&
+        !agent.error &&
+        !state.history?.isLoading &&
+        !state.history?.error ? (
+          <p className="gyro-subagent-empty">No work history recorded.</p>
+        ) : null}
+      </div>
     </div>
   );
 }

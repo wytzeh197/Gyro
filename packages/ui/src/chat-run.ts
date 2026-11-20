@@ -619,7 +619,7 @@ export type RunPhase =
       recoveryMessage?: string;
       retryNotBefore?: number;
     }
-  | { name: "interrupted" };
+  | { name: "interrupted"; detail?: string };
 
 /** A file the run touched, available while it is still running. */
 export type FileChange = {
@@ -695,7 +695,7 @@ export type BuildRunModelOptions = {
   retry?: { attempt?: number; reason?: string };
 };
 
-const INFLIGHT_STATUSES = ["queued", "running", "waiting"];
+const INFLIGHT_STATUSES = ["queued", "running", "waiting", "stopping"];
 const PROBLEM_STATUSES = ["failed", "blocked", "cancelled"];
 
 export function buildRunModel(
@@ -825,7 +825,7 @@ export function buildRunModel(
   const isRunning = options.isRunning ?? false;
   const unfinishedStatus: WorkStatus =
     options.status &&
-    [...PROBLEM_STATUSES, ...INFLIGHT_STATUSES].includes(options.status.status)
+    [...PROBLEM_STATUSES, ...INFLIGHT_STATUSES, "interrupted"].includes(options.status.status)
       ? "interrupted"
       : "done";
   const settledSteps = isRunning
@@ -1156,6 +1156,12 @@ function runPhase(
   const isRunning = options.isRunning ?? false;
   // A turn left in flight by a restart is not still running, and reporting it as
   // "working" would spin a timer nothing is driving.
+  if (!isRunning && status?.status === "interrupted") {
+    return {
+      name: "interrupted",
+      ...(status.error?.trim() ? { detail: status.error.trim() } : {}),
+    };
+  }
   if (!isRunning && status && INFLIGHT_STATUSES.includes(status.status)) {
     return { name: "interrupted" };
   }
@@ -1753,7 +1759,7 @@ function workItemFromCapabilityCall(
           : status === "failed"
             ? "Could not start sub-agent"
             : "Started sub-agent",
-      note: resourceLabel,
+      note: status === "failed" ? summary ?? resourceLabel : resourceLabel,
     };
   }
 

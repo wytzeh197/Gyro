@@ -57,7 +57,11 @@ pub(super) fn execute(
         let policy = open_store()
             .map_err(anyhow::Error::msg)?
             .get_project_capability_policy(&bound.workspace_key)?;
-        let config = load_config_blocking().map_err(anyhow::Error::msg)?;
+        let config = crate::chat_permissions::for_active_turn(
+            app,
+            &bound.session_id,
+            load_config_blocking().map_err(anyhow::Error::msg)?,
+        );
         let origin = next.origin().ascii_serialization();
         let access = capability_access_with_full_access(
             bound,

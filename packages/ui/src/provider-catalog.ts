@@ -1,3 +1,4 @@
+import { humanModelName } from "./model-name.ts";
 import { retiredModelReplacement } from "./model-retirements.ts";
 import { getLiveModelContext, liveModelContextTokens } from "./live-model-context.ts";
 import type {
@@ -896,7 +897,7 @@ export function getProviderModel(
 export function selectedModelLabel(provider: ModelProviderConfig) {
   return (
     getProviderModel(provider)?.displayName ??
-    provider.selectedModelId ??
+    humanModelName(provider.selectedModelId) ??
     provider.models[0]?.displayName ??
     "Choose model"
   );
@@ -933,7 +934,7 @@ export function providerDefaultModel(
 export function defaultModelLabel(provider: ModelProviderConfig) {
   return (
     providerDefaultModel(provider)?.displayName ??
-    providerDefaultModelId(provider) ??
+    humanModelName(providerDefaultModelId(provider)) ??
     "Choose model"
   );
 }

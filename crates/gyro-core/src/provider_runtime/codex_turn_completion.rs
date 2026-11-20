@@ -1,5 +1,18 @@
 use serde_json::Value;
 
+fn is_capacity_error(error: &Value) -> bool {
+    error["codexErrorInfo"].as_str() == Some("serverOverloaded")
+        || ["message", "additionalDetails"].into_iter().any(|field| {
+            error[field]
+                .as_str()
+                .is_some_and(super::support::is_model_capacity_error)
+        })
+}
+
+pub(super) fn reports_capacity_retry(params: &Value) -> bool {
+    params["willRetry"].as_bool() == Some(true) && is_capacity_error(&params["error"])
+}
+
 /// Keep the structured category: a friendly message alone may omit the cause.
 pub fn failure_message(params: &Value) -> String {
     let error = &params["turn"]["error"];
@@ -7,9 +20,14 @@ pub fn failure_message(params: &Value) -> String {
         .get("message")
         .and_then(Value::as_str)
         .unwrap_or("Codex turn did not complete");
+    let message = if is_capacity_error(error) && !super::support::is_model_capacity_error(message) {
+        format!("Selected model is at capacity. {message}")
+    } else {
+        message.to_owned()
+    };
     match error.get("codexErrorInfo").filter(|info| !info.is_null()) {
         Some(info) => format!("{message} [Codex error: {info}]"),
-        None => message.to_string(),
+        None => message,
     }
 }
 
@@ -51,6 +69,22 @@ pub fn completion_status<'a>(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn live_capacity_requires_a_provider_retry_and_terminal_capacity_is_recoverable() {
+        let error = json!({"message":"Reconnecting...", "codexErrorInfo":"serverOverloaded"});
+        assert!(reports_capacity_retry(
+            &json!({"error":error,"willRetry":true})
+        ));
+        assert!(!reports_capacity_retry(
+            &json!({"error":error,"willRetry":false})
+        ));
+        assert!(!reports_capacity_retry(
+            &json!({"error":{"message":"Network disconnected"},"willRetry":true})
+        ));
+        let terminal = failure_message(&json!({"turn":{"error":error}}));
+        assert!(super::super::support::is_model_capacity_error(&terminal));
+    }
 
     #[test]
     fn failure_preserves_structured_quota_category_even_with_generic_copy() {

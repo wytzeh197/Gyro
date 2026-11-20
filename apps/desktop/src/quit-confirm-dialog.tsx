@@ -4,8 +4,10 @@ import { createPortal } from "react-dom";
 
 export function QuitConfirmDialog({
   onResolve,
+  willInstallUpdate,
 }: {
   onResolve: (quit: boolean) => Promise<void>;
+  willInstallUpdate?: boolean;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -60,7 +62,11 @@ export function QuitConfirmDialog({
     >
       <div className="gyro-quit-dialog-body">
         <h2 id="gyro-quit-title">Quit Gyro?</h2>
-        <p id="gyro-quit-description">Gyro will close.</p>
+        <p id="gyro-quit-description">
+          {willInstallUpdate
+            ? "Gyro will install the downloaded update before closing."
+            : "Gyro will close."}
+        </p>
         {error ? (
           <p className="gyro-quit-error" role="alert">
             {error}

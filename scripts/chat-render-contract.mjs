@@ -245,21 +245,24 @@ export function measureChatContract() {
             }),
         };
       }),
-      inkActions: [
+      primaryActions: [
         ...surface.querySelectorAll(
           ".gyro-send-button:not(:disabled):not(.is-stop), .gyro-chat-environment-popover-actions button.is-primary",
         ),
-      ].map((node) => ({
-        isSend: node.classList.contains("gyro-send-button"),
-        background: getComputedStyle(node).backgroundColor,
-        color: getComputedStyle(node).color,
-        expectedBackground: color("--gyro-ink-bg"),
-        expectedHoverBackground: color("--gyro-ink-hover"),
-        expectedColor: color("--gyro-ink-text"),
-        childColors: [...node.querySelectorAll("span, small")].map(
-          (child) => getComputedStyle(child).color,
-        ),
-      })),
+      ].map((node) => {
+        const isSend = node.classList.contains("gyro-send-button");
+        return {
+          isSend,
+          background: getComputedStyle(node).backgroundColor,
+          color: getComputedStyle(node).color,
+          expectedBackground: color(isSend ? "--gyro-hero-send" : "--gyro-ink-bg"),
+          expectedHoverBackground: color(isSend ? "--gyro-hero-send-hover" : "--gyro-ink-hover"),
+          expectedColor: color(isSend ? "--gyro-hero-send-text" : "--gyro-ink-text"),
+          childColors: [...node.querySelectorAll("span, small")].map(
+            (child) => getComputedStyle(child).color,
+          ),
+        };
+      }),
       decoratedRunHeaders: [
         ...surface.querySelectorAll(".gyro-run-header"),
       ].filter((node) => {
@@ -475,7 +478,7 @@ export function checkChatContract(state, panes) {
         pane.composerFocus.shellFilter !== "none")
     )
       failures.push(`${label}: keyboard focus must lift the input border without a shell filter`);
-    for (const action of pane.inkActions)
+    for (const action of pane.primaryActions)
       if (
         action.background !==
           (action.isSend && state.includes("interaction-send-hover")
@@ -484,7 +487,7 @@ export function checkChatContract(state, panes) {
         action.color !== action.expectedColor ||
         action.childColors.some((value) => value !== action.expectedColor)
       )
-        failures.push(`${label}: primary action must use readable neutral ink`);
+        failures.push(`${label}: ${action.isSend ? "Send" : "Environment action"} has the wrong theme colors`);
     if (pane.composerOverflow || pane.pageOverflow)
       failures.push(`${label}: horizontal overflow`);
     if (pane.emptyComposerClips)

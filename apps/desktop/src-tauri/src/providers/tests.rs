@@ -2650,6 +2650,17 @@ fn strips_control_markers_glued_mid_line_after_tool_preambles() {
 }
 
 #[test]
+fn keeps_image_destinations_intact_in_the_saved_reply() {
+    let image = "![Gyro composer · Fixture](/workspace/artifacts/remote-workspace-composer.Bx8OfB/composer.png)";
+    let nested = "[Preview](</workspace/Design (2)/App.Capture.png>)";
+    let raw = format!("Done.Next step\n\n{image}\n\n{nested}\n\nDone.Next result");
+    assert_eq!(
+        strip_hidden_control_markers(&raw).message,
+        format!("Done.\n\nNext step\n\n{image}\n\n{nested}\n\nDone.\n\nNext result")
+    );
+}
+
+#[test]
 fn repairs_glued_blocks_when_the_next_block_is_markdown_bold() {
     let repaired = repair_glued_assistant_blocks(
         "matches what Gyro actually is.**Gyro is a local-first workspace.**",
