@@ -43,15 +43,13 @@
   /* Fixed media contrast: captions sit on photographed pixels in both themes. */
   --gyro-chat-media-text: #fff;
   --gyro-chat-media-shade: #000;
+  /* The card's review action is a quiet secondary in both themes: a soft
+     control fill, never an ink pill that reads as the screen's primary. */
+  --gyro-chat-review-action-bg: var(--gyro-control-bg);
+  --gyro-chat-review-action-text: var(--gyro-text);
 }
 :root[data-theme="light"] {
   --gyro-chat-raised: var(--gyro-surface-soft);
-}
-/* The card's review action is a quiet secondary in both themes: a soft
-   control fill, never an ink pill that reads as the screen's primary. */
-:root[data-theme] {
-  --gyro-chat-review-action-bg: var(--gyro-control-bg);
-  --gyro-chat-review-action-text: var(--gyro-text);
 }
 /* Shared block decisions. Pane rules below own geometry and state, not new design values. */
 .gyro-composer-shell {
@@ -19558,11 +19556,11 @@ button.gyro-response-changed-files:hover {
 }
 @container gyro-browser (max-width: 380px) {
   :root[data-theme] .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-browser-preview-toolbar {
-    column-gap: 4px;
-    padding-inline: 6px;
+    column-gap: var(--gyro-space-compact);
+    padding-inline: calc(var(--gyro-space-compact) * 1.5);
   }
   :root[data-theme] .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-url-bar {
-    padding-inline: 6px 2px;
+    padding-inline: calc(var(--gyro-space-compact) * 1.5) calc(var(--gyro-space-compact) / 2);
   }
   .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-url-bar > .gyro-browser-address-external {
     display: none;

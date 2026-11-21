@@ -7,14 +7,14 @@
   padding: 16px;
   overflow: auto;
   color: var(--gyro-text);
-  font-size: 13px;
+  font-size: var(--gyro-font-support);
 }
 .gyro-trace-panel :is(h3, h4, p, ul, pre) {
   margin: 0;
   overflow-wrap: anywhere;
 }
 .gyro-trace-panel h3 {
-  font-size: 15px;
+  font-size: var(--gyro-font-lead);
 }
 .gyro-trace-panel section {
   display: grid;
@@ -46,7 +46,7 @@
   color: inherit;
   background: var(--gyro-control);
   border: 1px solid var(--gyro-border);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
   font: inherit;
 }
 .gyro-trace-panel input[type="checkbox"] {
@@ -67,7 +67,7 @@
   overflow: auto;
   white-space: pre-wrap;
   border: 1px solid var(--gyro-border);
-  border-radius: 6px;
+  border-radius: var(--gyro-radius-sm);
 }
 .gyro-trace-models,
 .gyro-trace-actions {
@@ -84,7 +84,8 @@
   width: 14px;
   height: 14px;
 }
-.gyro-trace-picker .gyro-composer-slash-menu {
+/* The picker's completion menu sits inline in the panel, not as a popover. */
+.gyro-trace-picker > [role="dialog"] {
   position: static;
   width: 100%;
   max-width: 100%;
@@ -110,7 +111,7 @@
   margin: 0;
   padding: 5px 10px;
   border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-control, 6px);
+  border-radius: var(--gyro-radius-sm);
   background: var(--gyro-control);
   color: var(--gyro-text);
   font: inherit;

@@ -5047,7 +5047,7 @@ expect(
     coreSessionsSource.includes("MAX_SESSION_EVENT_MESSAGE_CHARS") &&
     coreSessionsSource.includes("MAX_SESSION_EVENTS_READ") &&
     coreSessionsSource.includes("read_recent_events") &&
-    coreSessionsSource.includes("read_recent_event_lines") &&
+    coreSessionsSource.includes("fn read_recent_event_tail(") &&
     sourceIncludes(tauriSource, "MAX_DESKTOP_SESSION_EVENTS_READ") &&
     sourceIncludes(tauriSource, "async fn read_session_events") &&
     sourceIncludes(tauriSource, "read_session_events_blocking") &&
@@ -8869,7 +8869,7 @@ expect(
   tauriSource.includes("next_provider_event_sequence") &&
     typeSource.includes("sequence: number") &&
     appSource.includes("providerStreamOrderRef") &&
-    coreSessionsSource.includes("read_recent_event_lines") &&
+    coreSessionsSource.includes("fn read_recent_event_tail(") &&
     coreSessionsSource.includes("file.sync_data()"),
   "Reliability contract should cover ordered IPC, durable writes, and tail-based recovery.",
 );
