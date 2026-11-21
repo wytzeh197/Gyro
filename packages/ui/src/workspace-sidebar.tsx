@@ -4827,9 +4827,14 @@ export function SessionSidebarRow({
  * hand-kept list has nothing left to protect against.
  *
  * The guard stays for the case it actually answers: a chat saved against a
- * provider that has since left the catalog has an id nothing can draw.
+ * provider that has since left the catalog has an id nothing can draw. Gemini
+ * left the catalog but is still a `ProviderId` and keeps its mark, so its old
+ * chats keep the logo instead of an empty slot.
  */
 export function providerIdForSession(session: Session): ProviderId | undefined {
+  if (session.providerId === "gemini") {
+    return session.providerId;
+  }
   return isProviderId(session.providerId) ? session.providerId : undefined;
 }
 

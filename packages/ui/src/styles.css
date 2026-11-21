@@ -2924,11 +2924,12 @@ button.gyro-account-menu-row:hover {
   padding: 0 3px;
 }
 
+/* Quiet secondary: Commit is the panel's one primary action. */
 .gyro-sidebar-github-setup-primary {
-  background: var(--gyro-accent);
+  background: var(--gyro-control-bg);
   border: 0;
   border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-app);
+  color: var(--gyro-text);
   font-size: var(--gyro-font-micro);
   font-weight: 600;
   justify-self: start;
@@ -2937,7 +2938,7 @@ button.gyro-account-menu-row:hover {
 }
 
 .gyro-sidebar-github-setup-primary:not(:disabled):hover {
-  filter: brightness(1.08);
+  background: var(--gyro-control-hover);
 }
 
 .gyro-sidebar-github-publish-actions .gyro-sidebar-github-account-switch {
@@ -20284,7 +20285,11 @@ button.gyro-account-menu-row:hover,
   color: var(--gyro-text);
 }
 
-:root[data-theme="light"] .gyro-scm-panel .gyro-sidebar-scm-repository,
+/* The head already carries the 4% tint; the repository chip inside it stays
+   clear so it doesn't read as a selected half of the pair. */
+:root[data-theme="light"]
+  .gyro-scm-panel
+  .gyro-sidebar-scm-repository:not(.gyro-sidebar-scm-head > *),
 :root[data-theme="light"] .gyro-scm-panel .gyro-sidebar-github-row.is-active,
 :root[data-theme="light"] .gyro-scm-panel .gyro-sidebar-github-row:hover,
 :root[data-theme="light"] .gyro-scm-panel .gyro-sidebar-scm-row:hover {
@@ -23732,6 +23737,10 @@ textarea:focus-visible,
   padding-block: 3px;
   text-transform: none;
   letter-spacing: 0;
+}
+/* A beat of air so the review shortcut doesn't crowd the Repository label. */
+.gyro-sidebar-section .gyro-scm-panel > .gyro-sidebar-action {
+  margin-bottom: var(--gyro-space-compact);
 }
 .gyro-sidebar-section .gyro-scm-panel .gyro-sidebar-scm-row {
   min-height: 23px;

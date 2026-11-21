@@ -118,8 +118,7 @@ fn the_model_title_replaces_the_provisional_title() {
         streamed_title_replacement(
             &mut state,
             "We Drew Our Own Traffic Lights",
-            "GYRO_SESSION_TITLE: Traffic Light Bug\nLet me find the drawing code.",
-            true,
+            "Traffic Light Bug".into(),
         )
         .as_deref(),
         Some("Traffic Light Bug")
@@ -129,10 +128,7 @@ fn the_model_title_replaces_the_provisional_title() {
 #[test]
 fn a_closed_title_control_ignores_later_markers() {
     let mut state = (Some("Kept".to_string()), true);
-    assert!(
-        streamed_title_replacement(&mut state, "Kept", "GYRO_SESSION_TITLE: Late\n", true)
-            .is_none()
-    );
+    assert!(streamed_title_replacement(&mut state, "Kept", "Late".into()).is_none());
 }
 
 /// Every provider is asked for a title on the turn that opens the chat, so

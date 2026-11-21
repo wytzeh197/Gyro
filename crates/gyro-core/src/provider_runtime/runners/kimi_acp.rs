@@ -15,9 +15,9 @@ use crate::provider_runtime::{
     },
 };
 use crate::{
-    apply_provider_mutation_transaction_with_cancellation, run_kimi_acp, CredentialPolicy,
-    HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpMode, KimiAcpRequest,
-    PreparedProviderMutationTransaction, ProviderSessionBinding,
+    apply_provider_mutation_transaction_with_cancellation, kimi_acp::run_kimi_acp_with_context,
+    CredentialPolicy, HarnessRunStatus, KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpMode,
+    KimiAcpRequest, PreparedProviderMutationTransaction, ProviderSessionBinding,
 };
 use anyhow::Context;
 use base64::Engine;
@@ -255,10 +255,7 @@ pub fn run_kimi_acp_chat(
     let provider_label = request.provider_label.as_deref().unwrap_or(runtime.label);
     let workspace = provider_chat_cwd(request.workspace_path.as_deref())?;
     let cancellation = host.cancellation(&request.session_id)?;
-    let mut prompt = vec![serde_json::json!({
-        "type": "text",
-        "text": host.context_message(request, None, PromptTurn::default()),
-    })];
+    let mut prompt = Vec::new();
     for attachment in &request.attachments {
         if attachment.kind == "image" {
             let bytes = super::super::attachments::image(attachment)
@@ -290,23 +287,6 @@ pub fn run_kimi_acp_chat(
     let resume_session_id = resume_cursor
         .filter(|cursor| cursor.kind == runtime.cursor_kind)
         .map(|cursor| cursor.session_id.clone());
-    // ACP may reject a saved cursor and open a fresh session. Pass both prompt
-    // forms so the adapter can choose after it knows whether reopen succeeded.
-    let resumed_prompt = resume_session_id.as_ref().map(|_| {
-        host.context_message(
-            request,
-            None,
-            PromptTurn {
-                resumed: true,
-                approvals_sent_separately: false,
-            },
-        )
-    });
-    // Always load the local transcript. Grok often cannot resume; model handoffs
-    // also start a fresh agent session. Either way the local Gyro session is the
-    // source of truth and must travel with the prompt when resume is unavailable.
-    let conversation_history_text = host.acp_conversation_history(&request.session_id);
-
     let launched_model = if request.provider_id == "xai" {
         let speed_config = host.config()?;
         crate::fast_mode::launch_model_id(&speed_config, "xai", request.model_id.as_deref())
@@ -350,7 +330,7 @@ pub fn run_kimi_acp_chat(
         heartbeat_stop.clone(),
     );
     let opened_session = Arc::new(Mutex::new(None::<String>));
-    let output = run_kimi_acp(
+    let output = run_kimi_acp_with_context(
         KimiAcpRequest {
             opened_session: Some(opened_session.clone()),
             credentials: CredentialPolicy::for_provider(&request.provider_id),
@@ -360,8 +340,8 @@ pub fn run_kimi_acp_chat(
             auth_method_ids: acp_auth_methods(runtime),
             workspace: workspace.clone(),
             prompt,
-            resumed_prompt,
-            conversation_history_text,
+            resumed_prompt: None,
+            conversation_history_text: None,
             mcp_servers,
             model: request
                 .model_id
@@ -395,6 +375,24 @@ pub fn run_kimi_acp_chat(
             inactivity_timeout: Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS),
             cancellation: cancellation.clone(),
         },
+        Some(&mut |resumed| {
+            let prompt = host.context_message(
+                request,
+                None,
+                PromptTurn {
+                    resumed,
+                    approvals_sent_separately: false,
+                },
+            );
+            // A successful resume already holds this conversation. Read the
+            // local transcript only for a fresh session or failed reopen.
+            let history = if resumed {
+                None
+            } else {
+                host.acp_conversation_history(&request.session_id)
+            };
+            (prompt, history)
+        }),
         |delta| {
             emit_provider_chat_event(
                 host,

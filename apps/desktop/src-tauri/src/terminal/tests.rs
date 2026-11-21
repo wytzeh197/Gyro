@@ -183,7 +183,7 @@ fn governed_pane_launch_args_route_approvals_through_gyro() {
             &ProjectCapabilityPolicy::defaults("/tmp/workspace"),
             CapabilityRunMode::Normal,
         ),
-        workspace_context: WorkspaceContextSnapshot::empty("/tmp/workspace"),
+        workspace_context: WorkspaceContextSnapshot::empty("/tmp/workspace").into(),
         workspace_check: WorkspaceCheckReport::placeholder("/tmp/workspace"),
     };
     let config = desktop_claude_permission_mcp_config_for(

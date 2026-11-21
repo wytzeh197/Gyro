@@ -427,7 +427,11 @@ pub(crate) fn redact_json_strings(mut value: serde_json::Value) -> serde_json::V
     fn redact(value: &mut serde_json::Value) {
         match value {
             serde_json::Value::String(text) => {
-                *text = gyro_core::security::redact_secrets(text);
+                if let std::borrow::Cow::Owned(redacted) =
+                    gyro_core::security::redact_secrets_cow(text)
+                {
+                    *text = redacted;
+                }
             }
             serde_json::Value::Array(items) => items.iter_mut().for_each(redact),
             serde_json::Value::Object(map) => map.values_mut().for_each(redact),

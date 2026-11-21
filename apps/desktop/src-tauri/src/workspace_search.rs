@@ -311,7 +311,7 @@ fn model_search_preview(result: WorkspaceSearchResult) -> anyhow::Result<serde_j
     const MAX_PREVIEW_RANGES: usize = 50;
     // Mask the full line first: a snippet beginning within a credential must
     // not disclose its suffix, and match ranges keep their source coordinates.
-    let line = gyro_core::security::redact_secrets_preserving_positions(&result.line);
+    let line = gyro_core::security::redact_secrets_preserving_positions_cow(&result.line);
     let first_match = result
         .ranges
         .first()

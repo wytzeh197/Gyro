@@ -44,8 +44,40 @@ fn anchor(file: &mut File, offset: u64) -> Result<String> {
 
 impl SessionStore {
     pub(super) fn ensure_turn_index(&self, session: Uuid) -> Result<()> {
+        self.with_current_turn_index(session, |_| Ok(()))
+            .map(|_| ())
+    }
+
+    /// Returns the durable status for retry preparation and whether an
+    /// unfinished attempt should block a new dispatch.
+    pub fn provider_turn_status_for_dispatch(
+        &self,
+        session: Uuid,
+        turn: Uuid,
+    ) -> Result<(Option<String>, bool)> {
+        self.with_current_turn_index(session, |file| {
+            let status = self.indexed_provider_status_for_turn(session, turn)?;
+            let tail_status = if status.is_none() {
+                self.unterminated_provider_status(file, session, turn)?
+            } else {
+                None
+            };
+            let unfinished = matches!(
+                status.as_deref().or(tail_status.as_deref()),
+                Some("running" | "waiting" | "queued")
+            );
+            Ok((status, unfinished))
+        })?
+        .with_context(|| format!("unknown session {session}"))
+    }
+
+    fn with_current_turn_index<T>(
+        &self,
+        session: Uuid,
+        read: impl FnOnce(&mut File) -> Result<T>,
+    ) -> Result<Option<T>> {
         if !self.turn_index_session_exists(session)? {
-            return Ok(());
+            return Ok(None);
         }
         let path = self.session_events_path(session)?;
         let mut file = match open_session_event_log_for_read(&path) {
@@ -65,7 +97,40 @@ impl SessionStore {
         // also prevents two readers from advancing a watermark out of order.
         let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Exclusive)?;
         self.catch_up_turn_index_locked(session, &path, &mut file)?;
-        Ok(())
+        read(&mut file).map(Some)
+    }
+
+    // The catch-up covers every complete record. On an index miss only the
+    // unfinished final record could contain older dispatch evidence. A
+    // complete JSON object there can block replay but is not durable status.
+    fn unterminated_provider_status(
+        &self,
+        file: &mut File,
+        session: Uuid,
+        turn: Uuid,
+    ) -> Result<Option<String>> {
+        let offset: Option<u64> = self
+            .conn
+            .query_row(
+                "select indexed_bytes from session_turn_index where session_id = ?1",
+                [session.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(offset) = offset else {
+            anyhow::bail!("session {session} was deleted during turn status lookup");
+        };
+        let bytes = file.metadata()?.len().saturating_sub(offset);
+        if bytes == 0 || bytes > MAX_SESSION_EVENT_LINE_BYTES as u64 {
+            return Ok(None);
+        }
+        file.seek(SeekFrom::Start(offset))?;
+        let mut record = vec![0; bytes as usize];
+        file.read_exact(&mut record)?;
+        Ok(serde_json::from_slice::<SessionEvent>(&record)
+            .ok()
+            .filter(|event| event.session_id == session && event.turn_id == Some(turn))
+            .and_then(|event| provider_status_from_payload(&event.payload)))
     }
 
     fn clear_turn_index(&self, session: Uuid) -> Result<()> {

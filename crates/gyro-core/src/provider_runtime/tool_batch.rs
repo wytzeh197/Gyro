@@ -9,6 +9,7 @@ use crate::{
     CapabilityRunMode, CapabilityStatus,
 };
 use serde::Serialize;
+use std::borrow::Cow;
 use uuid::Uuid;
 // Explicit allowlist: these observe disk state without changing the workspace,
 // opening an editor, running a command, or driving a shared browser session.
@@ -406,6 +407,7 @@ pub fn inline_tool_schema(id: CapabilityId) -> bool {
             | CapabilityId::TerminalRead
             | CapabilityId::TerminalWait
             | CapabilityId::WebFetch
+            | CapabilityId::WebSearch
             | CapabilityId::ToolCatalog
     )
 }
@@ -468,9 +470,9 @@ pub fn advertised_tool_parameters(
     catalog: &dyn ToolCatalog,
     id: CapabilityId,
 ) -> serde_json::Value {
-    let schema = catalog.schema(id);
+    let schema = catalog.schema_ref(id);
     if inline_tool_schema(id) {
-        schema
+        schema.into_owned()
     } else {
         // Keep concise argument guidance (reference sources, units, defaults)
         // so deferred tools are callable without a discovery round. The catalog
@@ -534,6 +536,39 @@ pub fn compact_parameter_schema(value: &serde_json::Value) -> serde_json::Value 
 
 pub const SPILL_TEXT_FIELDS: &[&str] = &["content", "stdout", "stderr", "output", "text"];
 
+fn spill_minimum(window: Option<usize>) -> usize {
+    use crate::efficiency::spill;
+    window.map_or(spill::SPILL_MIN_BYTES, |bytes| {
+        bytes.clamp(spill::FRESH_READ_MIN_BYTES, spill::FRESH_READ_MAX_BYTES) + 1
+    })
+}
+
+fn is_paged_spill_read(capability: &str, data: &serde_json::Value) -> bool {
+    matches!(
+        capability,
+        "workspace.read" | "workspace.read_range" | "workspace.read_editor"
+    ) && data["source"] == "spill"
+}
+
+fn spills_terminal_pane(capability: &str) -> bool {
+    matches!(
+        capability,
+        "terminal.open" | "terminal.read" | "terminal.wait" | "terminal.input" | "terminal.stop"
+    )
+}
+
+fn may_spill_result(capability: &str, data: &serde_json::Value, minimum: usize) -> bool {
+    !is_paged_spill_read(capability, data)
+        && (SPILL_TEXT_FIELDS.iter().any(|field| {
+            data[*field]
+                .as_str()
+                .is_some_and(|text| text.len() >= minimum)
+        }) || (spills_terminal_pane(capability)
+            && data
+                .get("pane")
+                .is_some_and(|pane| may_spill_result(capability, pane, minimum))))
+}
+
 /// Replace oversized string fields with a head/tail preview and a spill:// address.
 /// A failed persist keeps the original text. Errors and image bytes are not passed here.
 pub fn spill_result_data(capability: &str, tool: &str, data: &mut serde_json::Value) {
@@ -552,57 +587,42 @@ pub fn spill_result_data_within(
     // A recovery read is already paged at the tool boundary. Re-spilling it
     // hides the requested middle and leaves offsets describing bytes the model
     // never received, causing recursive recovery calls or skipped evidence.
-    if matches!(
-        capability,
-        "workspace.read" | "workspace.read_range" | "workspace.read_editor"
-    ) && data["source"] == "spill"
-    {
+    if is_paged_spill_read(capability, data) {
         return;
     }
     // Terminal snapshots nest their output under pane, unlike command results.
     // Apply the same recoverable preview there; keep status, paging and revision
     // fields intact. Do not recurse into arbitrary tool data or user documents.
-    if matches!(
-        capability,
-        "terminal.open" | "terminal.read" | "terminal.wait" | "terminal.input" | "terminal.stop"
-    ) {
+    if spills_terminal_pane(capability) {
         if let Some(pane) = data.get_mut("pane").filter(|pane| pane.is_object()) {
             spill_result_data_within(capability, tool, pane, window);
         }
     }
-    let Some(object) = data.as_object() else {
+    let Some(object) = data.as_object_mut() else {
         return;
     };
-    let min_bytes = window.map_or(spill::SPILL_MIN_BYTES, |bytes| {
-        bytes.clamp(spill::FRESH_READ_MIN_BYTES, spill::FRESH_READ_MAX_BYTES) + 1
-    });
-    let pending: Vec<(String, String)> = SPILL_TEXT_FIELDS
-        .iter()
-        .filter_map(|field| {
-            let text = object.get(*field).and_then(serde_json::Value::as_str)?;
-            if text.len() < min_bytes {
-                return None;
-            }
-            Some(((*field).to_string(), text.to_string()))
-        })
-        .collect();
-    for (field, text) in pending {
+    let min_bytes = spill_minimum(window);
+    for &field in SPILL_TEXT_FIELDS {
+        let Some(slot) = object.get_mut(field) else {
+            continue;
+        };
+        let Some(text) = slot.as_str().filter(|text| text.len() >= min_bytes) else {
+            continue;
+        };
         let preview = match window {
-            Some(bytes) => spill::preview_within(capability, tool, &text, bytes),
-            None => spill::preview(capability, tool, &text),
+            Some(bytes) => spill::preview_within(capability, tool, text, bytes),
+            None => spill::preview(capability, tool, text),
         };
         if preview.address.is_empty() {
             continue;
         }
-        if !crate::efficiency::spill::persist(&preview.address, &text) {
+        if !spill::persist(&preview.address, text) {
             crate::provider_observation::efficiency_event(|e| {
                 e.spill_failures = e.spill_failures.saturating_add(1)
             });
             continue;
         }
-        if let Some(object) = data.as_object_mut() {
-            object.insert(field, serde_json::Value::String(preview.text));
-        }
+        *slot = serde_json::Value::String(preview.text);
     }
 }
 
@@ -633,7 +653,7 @@ pub fn model_response_text(response: &CapabilityResponse) -> anyhow::Result<Stri
     struct Evidence<'a> {
         capability_id: CapabilityId,
         summary: &'a str,
-        data: serde_json::Value,
+        data: Cow<'a, serde_json::Value>,
         #[serde(skip_serializing_if = "Option::is_none")]
         resource: Option<&'a CapabilityResourceRef>,
     }
@@ -658,12 +678,20 @@ pub fn model_response_text(response: &CapabilityResponse) -> anyhow::Result<Stri
         status: response.status,
         call_id: response.call_id,
         result: response.result.as_ref().map(|result| {
-            let mut data = result.data.clone();
-            spill_result_data(
-                result.capability_id.as_str(),
-                result.capability_id.provider_tool_name(),
-                &mut data,
-            );
+            let capability = result.capability_id.as_str();
+            let window = efficiency_config().fresh_read_window(capability);
+            let data = if may_spill_result(capability, &result.data, spill_minimum(window)) {
+                let mut data = result.data.clone();
+                spill_result_data_within(
+                    capability,
+                    result.capability_id.provider_tool_name(),
+                    &mut data,
+                    window,
+                );
+                Cow::Owned(data)
+            } else {
+                Cow::Borrowed(&result.data)
+            };
             Evidence {
                 capability_id: result.capability_id,
                 summary: &result.summary,

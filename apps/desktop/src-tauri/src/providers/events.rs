@@ -198,41 +198,6 @@ pub(crate) fn append_provider_status_event(
     )
 }
 
-pub(crate) fn provider_turn_has_unfinished_attempt(
-    store: &SessionStore,
-    session_id: Uuid,
-    turn_id: Uuid,
-) -> anyhow::Result<bool> {
-    // Prefer the durable turn-status index so a long session cannot hide a
-    // still-running attempt behind the recent-event read window.
-    if let Some(status) = store.latest_provider_status_for_turn(session_id, turn_id)? {
-        return Ok(matches!(status.as_str(), "running" | "waiting" | "queued"));
-    }
-    let last_status = store
-        .read_recent_events(session_id, MAX_DESKTOP_SESSION_EVENTS_READ)?
-        .into_iter()
-        .filter(|event| {
-            event.turn_id == Some(turn_id)
-                && event
-                    .payload
-                    .get("kind")
-                    .and_then(serde_json::Value::as_str)
-                    == Some("provider-status")
-        })
-        .filter_map(|event| {
-            event
-                .payload
-                .get("status")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-        })
-        .next_back();
-    Ok(matches!(
-        last_status.as_deref(),
-        Some("running" | "waiting" | "queued")
-    ))
-}
-
 pub(crate) fn provider_activity_event_entry(
     request: &ProviderChatRequest,
     turn_id: Uuid,

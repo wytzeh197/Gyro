@@ -328,7 +328,6 @@ fn interrupted_provider_status_payload(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::events::provider_turn_has_unfinished_attempt;
     use gyro_core::SessionOrigin;
 
     fn running_turn(store: &SessionStore, session: Uuid, turn: Uuid) {
@@ -448,12 +447,22 @@ mod tests {
         let count = store.read_events(session.id).unwrap().len();
         assert_eq!(reconcile_interrupted_provider_turns(&store).unwrap(), 0);
         assert_eq!(store.read_events(session.id).unwrap().len(), count);
-        assert!(provider_turn_has_unfinished_attempt(&store, session.id, turn).unwrap());
+        assert!(
+            store
+                .provider_turn_status_for_dispatch(session.id, turn)
+                .unwrap()
+                .1
+        );
         child.0.kill().unwrap();
         child.0.wait().unwrap();
         assert_eq!(reconcile_interrupted_provider_turns(&store).unwrap(), 1);
         assert_eq!(reconcile_interrupted_provider_turns(&store).unwrap(), 0);
-        assert!(!provider_turn_has_unfinished_attempt(&store, session.id, turn).unwrap());
+        assert!(
+            !store
+                .provider_turn_status_for_dispatch(session.id, turn)
+                .unwrap()
+                .1
+        );
     }
 
     #[test]
@@ -619,11 +628,21 @@ mod tests {
             .unwrap();
         // This is the state a force-quit leaves behind, and it refused every
         // further attempt on the turn.
-        assert!(provider_turn_has_unfinished_attempt(&store, session.id, turn_id).unwrap());
+        assert!(
+            store
+                .provider_turn_status_for_dispatch(session.id, turn_id)
+                .unwrap()
+                .1
+        );
 
         assert_eq!(reconcile_interrupted_provider_turns(&store).unwrap(), 1);
 
-        assert!(!provider_turn_has_unfinished_attempt(&store, session.id, turn_id).unwrap());
+        assert!(
+            !store
+                .provider_turn_status_for_dispatch(session.id, turn_id)
+                .unwrap()
+                .1
+        );
         let closing = store
             .read_recent_events(session.id, 32)
             .unwrap()

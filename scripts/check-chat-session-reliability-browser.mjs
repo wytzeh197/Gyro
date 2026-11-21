@@ -167,7 +167,7 @@ try {
         const {default:React} = await import('/node_modules/.vite/deps/react.js'); const {useState}=React;
         const {default:ReactDOM} = await import('/node_modules/.vite/deps/react-dom_client.js'); const {createRoot}=ReactDOM;
         const {TriangleAlert,X} = await import('/node_modules/.vite/deps/lucide-react.js');
-        const {ChatRun,ChatThread} = await import('/@fs${uiRoot}index.ts');
+        const {ChatRun,ChatSurface,ChatThread,SettingsSurface} = await import('/@fs${uiRoot}index.ts');
         const {buildRunModel} = await import('/@fs${uiRoot}chat-run.ts');
         ${noticeJs}
         document.getElementById('root').hidden=true;
@@ -180,6 +180,65 @@ try {
           onRetry:()=>{window.retryCalls++;return new Promise(resolve=>window.finishRetry=resolve)}
         }));
         const event=(id,kind,message,payload)=>({id,sessionId:'fixture',turnId:'turn',createdAt:'2026-11-17T10:00:00Z',kind,message,payload});
+        window.showCapabilityApproval = (outcome) => {
+          const approvalId = 'web-fetch-approval';
+          const callId = 'web-fetch-call';
+          const events = [
+            event('user', 'user-message', 'Fetch the release notes', {}),
+            event('pending', 'approval-requested', 'Allow web fetch?', {
+              schema: 'gyro.capability.v1', kind: 'capability-approval',
+              approvalId, callId, status: 'waiting', capabilityId: 'web-fetch',
+              capabilityClass: 'browser-navigate', scopeKind: 'origin', scopeValue: 'https://example.com',
+              choices: ['deny', 'allow-once', 'allow-project'],
+            }),
+          ];
+          const render = (sessionEvents) => window.fixtureRoot.render(React.createElement(ChatSurface, {
+            config: {
+              commandProfiles: [], modelProviders: [], requireCommandApproval: true,
+              requireFileEditApproval: true, telemetryEnabled: false,
+            },
+            events: sessionEvents, isComposerSending: outcome !== 'interrupted', onSend: () => {},
+            onProviderApprovalAction: (id, decision) => {
+              window.capabilityDecision = { id, decision };
+              render([...events, event('decision', 'system-event', 'Capability approval ' + outcome, {
+                kind: 'capability-approval', approvalId, callId, status: outcome,
+              })]);
+            },
+          }));
+          render(outcome === 'interrupted' ? [
+            ...events,
+            event('recovered', 'system-event', 'Interrupted', {
+              kind: 'provider-status', status: 'failed', recoveryKind: 'interrupted',
+            }),
+          ] : events);
+        };
+        window.showSitePermissions = () => {
+          const workspacePath = '/fixture-project';
+          const policy = {
+            workspaceKey: workspacePath, revision: 1,
+            grants: [{ id: 'permission', class: 'browser-navigate',
+              scopeKind: 'origin', scopeValue: 'https://search.brave.com' }],
+          };
+          window.siteRevokeCalls = 0;
+          window.fixtureRoot.render(React.createElement(SettingsSurface, {
+            activeSection: 'permissions',
+            themeMode: document.documentElement.dataset.theme,
+            config: { commandProfiles: [], modelProviders: [], requireCommandApproval: true,
+              requireFileEditApproval: true, telemetryEnabled: false },
+            onThemeChange: () => {},
+            projectSitePermissions: {
+              workspacePath,
+              load: async () => policy,
+              revoke: async (path, prior, id) => {
+                window.siteRevokeCalls++;
+                if (path !== workspacePath || id !== 'permission' || prior.revision !== policy.revision)
+                  throw Error('Wrong permission scope');
+                if (window.siteRevokeCalls === 1) throw Error('Permission list changed');
+                return { ...policy, revision: 2, grants: [] };
+              },
+            },
+          }));
+        };
         window.showAnswer=()=>window.fixtureRoot.render(React.createElement(ChatThread,{
           events:[event('user','user-message','Show the result',{}),event('reply','assistant-message',
             ${JSON.stringify(answerText)},{kind:'provider-response'}),
@@ -277,12 +336,80 @@ try {
         join(output, `${theme}-${width}-interrupted.png`),
         Buffer.from(shot.data, "base64"),
       );
+      for (const [label, decision, outcome, statusLabel] of [
+        ["Allow for project", "allow-project", "approved", "Approved"],
+        ["Allow for this chat", "approve", "approved", "Approved"],
+        ["Reject", "reject", "rejected", "Rejected"],
+      ]) {
+        await evaluate(`window.showCapabilityApproval(${JSON.stringify(outcome)})`);
+        const selector = "#reliability .gyro-inline-approval";
+        await until(() => evaluate(
+          `document.querySelector('${selector}.is-pending [role="status"]')?.textContent === "Waiting for your approval"`,
+        ), "web fetch awaiting approval");
+        assert.equal(await evaluate(`(() => {
+          const button = Array.from(document.querySelectorAll('${selector} button'))
+            .find((button) => button.textContent === ${JSON.stringify(label)});
+          button?.focus();
+          return button === document.activeElement;
+        })()`), true);
+        await key("Enter", "Enter", 13);
+        assert.deepEqual(await evaluate("window.capabilityDecision"), {
+          id: "web-fetch-approval", decision,
+        });
+        await until(() => evaluate(
+          `document.querySelector('${selector}.is-${outcome} [role="status"]')?.textContent === ${JSON.stringify(statusLabel)}`,
+        ), "web fetch approval settled");
+        assert.equal(await evaluate(`document.querySelectorAll('${selector} button').length`), 0);
+        assert.doesNotMatch(await evaluate('document.querySelector("#reliability").innerText'),
+          /Needs approval|Waiting for your approval|Capability approval (approved|rejected)/);
+      }
+      await evaluate("window.showCapabilityApproval('interrupted')");
+      await until(() => evaluate(
+        'document.querySelector("#reliability .gyro-inline-approval.is-cancelled [role=status]")?.textContent === "Cancelled"',
+      ), "interrupted approval cancelled");
+      assert.doesNotMatch(await evaluate('document.querySelector("#reliability").innerText'),
+        /Needs approval|Waiting for your approval|Allow for this chat/);
+
+      await evaluate("window.showSitePermissions()");
+      const revokeSelector = '#reliability button[aria-label="Revoke site permission for https://search.brave.com"]';
+      await until(() => evaluate(
+        `!!document.querySelector(${JSON.stringify(revokeSelector)})`,
+      ), "saved site shown");
+      const focusRevoke = () => evaluate(
+        `document.querySelector(${JSON.stringify(revokeSelector)}).focus()`,
+      );
+      await focusRevoke();
+      shot = await call("Page.captureScreenshot", { format: "png" });
+      await writeFile(
+        join(output, `${theme}-${width}-saved-sites.png`),
+        Buffer.from(shot.data, "base64"),
+      );
+      await key("Enter", "Enter", 13);
+      await until(() => evaluate(
+        'document.querySelector("#reliability").innerText.includes("Permission list changed")',
+      ), "revoke error presented");
+      await evaluate(
+        'Array.from(document.querySelectorAll("#reliability button")).find(button => button.textContent === "Reload").focus()',
+      );
+      await key("Enter", "Enter", 13);
+      await until(() => evaluate(
+        `document.querySelector(${JSON.stringify(revokeSelector)})?.disabled === false`,
+      ), "saved sites reloaded");
+      await focusRevoke();
+      await key("Enter", "Enter", 13);
+      await until(() => evaluate(
+        'document.querySelector("#reliability").innerText.includes("No saved sites")',
+      ), "site permission revoked");
+      assert.equal(await evaluate("window.siteRevokeCalls"), 2);
       results.push({
         theme,
         width,
         retryKeyboard: true,
         answerFidelity: true,
         interruptedTool: true,
+        capabilityApproval: true,
+        interruptedApproval: true,
+        sitePermissionRevocation: true,
       });
     }
   }
@@ -292,7 +419,7 @@ try {
     JSON.stringify(results, null, 2) + "\n",
   );
   console.log(
-    "Chat reliability browser checks passed: Retry keyboard/focus and pending state, code/number fidelity, interrupted labels; light/dark at 390/1280px.",
+    "Chat reliability browser checks passed: Retry keyboard/focus and pending state, code/number fidelity, interrupted labels, capability approval decisions, restart recovery, and site permission revocation; light/dark at 390/1280px.",
   );
 } finally {
   socket?.close();

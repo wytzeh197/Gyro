@@ -343,41 +343,47 @@ pub fn run_openai_compatible_chat(
                     e.catalog_fallbacks = e.catalog_fallbacks.saturating_add(1)
                 });
             }
-            let retired = prefix_retention.prepare(
+            let retired = prefix_retention.prepare_for_task(
                 &mut messages,
                 config.efficiency.evidence_policy(),
                 config.efficiency.enabled && config.efficiency.stable_api_prefix && !compatibility,
+                &request.message,
             );
             crate::provider_observation::retired_context(retired);
-            let (request_tools, tools_offered) = if compatibility {
+            let (send_catalog, tools_offered) = if compatibility {
                 if round_budget.is_some_and(|limit| round >= limit) {
                     messages.push(serde_json::json!({
                         "role": "user",
                         "content": "The tool budget is exhausted. Reply with a final JSON object describing completed work and what remains."
                     }));
                 }
-                (Vec::new(), false)
+                (false, false)
             } else {
                 // Definitions may remain at the checkpoint for cache reuse.
                 // Execution still depends on tools_offered below.
-                provider_reliability::openai_tools_for_round(
+                provider_reliability::openai_tool_round(
                     &mut messages,
-                    &tools,
                     round,
                     round_budget,
+                    !tools.is_empty(),
                     config.efficiency.policies() && config.efficiency.cache_assembly,
                 )
             };
-            let turn = crate::openai_compatible::openai_compat_tool_chat_with_updates(
-                OpenAiCompatChatRequest {
-                    base_url,
-                    api_key: api_key.as_str(),
-                    model,
-                    messages: messages.clone(),
-                    tools: request_tools,
-                    allow_tool_calls: tools_offered,
-                    reasoning_effort: reasoning_effort.as_deref(),
+            let round_request = OpenAiCompatChatRequest {
+                base_url,
+                api_key: api_key.as_str(),
+                model,
+                messages: std::mem::take(&mut messages),
+                tools: if send_catalog {
+                    std::mem::take(&mut tools)
+                } else {
+                    Vec::new()
                 },
+                allow_tool_calls: tools_offered,
+                reasoning_effort: reasoning_effort.as_deref(),
+            };
+            let turn = crate::openai_compatible::openai_compat_tool_chat_ref(
+                &round_request,
                 &cancellation,
                 |delta| {
                     if !compatibility {
@@ -394,6 +400,10 @@ pub fn run_openai_compatible_chat(
                 },
                 |tokens| runner::emit_request_usage(host, request, accounted_usage, tokens, None),
             );
+            messages = round_request.messages;
+            if send_catalog {
+                tools = round_request.tools;
+            }
             let mut turn = match turn {
                 Err(error)
                     if round == 0
@@ -460,16 +470,20 @@ pub fn run_openai_compatible_chat(
             // ACP uses, and do not spend a tool round on the retry. A cut that
             // included tool calls never reaches here. The compatibility bridge
             // must not parse that partial text as a protocol object.
-            // Plan mode keeps the reply as the document. A stop that is not
-            // labelled "length" can still end mid-sentence; continue it the
-            // same way, for every OpenAI-compatible model.
+            // Native Plan replies are Markdown documents that can end
+            // mid-sentence on a normal stop. The compatibility bridge
+            // validates its JSON actions separately.
             let plan_cut_off = request.mode == ChatMode::Plan
+                && !compatibility
+                && !turn.truncated
                 && turn.tool_calls.is_empty()
-                && crate::kimi_acp::answer_looks_cut_off(&{
+                && if joined_output.is_empty() {
+                    crate::kimi_acp::answer_looks_cut_off(&turn.content)
+                } else {
                     let mut joined = joined_output.clone();
                     joined.push_str(&turn.content);
-                    joined
-                });
+                    crate::kimi_acp::answer_looks_cut_off(&joined)
+                };
             match continue_owned_output_limit(
                 &turn.content,
                 turn.truncated || plan_cut_off,

@@ -247,7 +247,7 @@ pub(crate) fn wait_for_capability_approval(
             .evidence
             .lock()
             .ok()
-            .and_then(|contexts| contexts.get(&bound.workspace_key).cloned())
+            .and_then(|contexts| contexts.snapshot(&bound.workspace_key))
             .unwrap_or_else(|| bound.workspace_context.clone());
         let source = if selection_only {
             latest.selection.as_ref()

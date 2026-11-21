@@ -362,6 +362,14 @@ fn ollama_extraction_transport_withholds_tools_even_when_model_advertises_tool_s
 }
 
 #[test]
+fn browser_trace_transport_withholds_tools_and_rejects_forged_calls() {
+    for ollama in [false, true] {
+        exchange(InternalRequestPurpose::BrowserTrace, false, ollama);
+        exchange(InternalRequestPurpose::BrowserTrace, true, ollama);
+    }
+}
+
+#[test]
 #[ignore = "explicit opt-in live local Ollama probe; no paid endpoint"]
 fn live_local_review_probe() {
     use crate::code_reviews::*;

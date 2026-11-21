@@ -32,7 +32,8 @@ pub(crate) fn run_compaction_summary_call(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
 ) -> Result<(String, Option<ProviderContextUsage>), String> {
-    let transcript = conversation_history::compaction_transcript_for_session(&request.session_id)
+    let session_id = parse_uuid(&request.session_id)?;
+    let transcript = conversation_history::compaction_transcript_for_session(store, session_id)
         .ok_or_else(|| "this chat has no transcript to summarize".to_string())?;
     // Reads text and writes text, and touches nothing else. Council mode is
     // Gyro's existing shape for exactly that -- deny-all at the capability
@@ -71,9 +72,8 @@ pub(crate) fn run_compaction_summary_call(
     // runner refuses to start without one -- so the summarizer binds its own,
     // under the same deny-all council policy as the request.
     if active_provider_capability_context(app, &request.session_id).is_err() {
-        let session_uuid = parse_uuid(&request.session_id)?;
         let session = store
-            .get_session(session_uuid)
+            .get_session(session_id)
             .map_err(to_string)?
             .ok_or_else(|| "provider chat session no longer exists".to_string())?;
         let run_id = request
@@ -93,7 +93,7 @@ pub(crate) fn run_compaction_summary_call(
         None,
         UsageContext::new(
             store
-                .workflow_dispatch_origin(Uuid::parse_str(&request.session_id).map_err(to_string)?)
+                .workflow_dispatch_origin(session_id)
                 .map_err(to_string)?
                 .filter(|origin| {
                     matches!(origin, UsageOrigin::Automation | UsageOrigin::AgentSession)
@@ -112,13 +112,14 @@ pub(crate) fn compact_local_provider_chat(
     session_id: Uuid,
     run_id: Uuid,
 ) -> Result<ProviderContextCompactionResponse, String> {
-    let events = store.read_events(session_id).map_err(to_string)?;
-    let _ = efficiency::save_checkpoint(app, store, request);
-    // Refuse before spending a call: with no completed reply in the window
-    // there is nothing a model could summarize.
-    let fallback = local_compaction_summary(&events).ok_or_else(|| {
-        "this chat needs a completed reply before context can be compacted".to_string()
-    })?;
+    let fallback = {
+        let events = store.read_events(session_id).map_err(to_string)?;
+        let _ = efficiency::save_checkpoint(app, store, request);
+        // Refuse a summary call when the chat has no completed reply.
+        local_compaction_summary(&events).ok_or_else(|| {
+            "this chat needs a completed reply before context can be compacted".to_string()
+        })?
+    };
     let params = serde_json::json!({ "turnId": format!("{run_id}:{}", Uuid::new_v4()) });
     let label = request
         .model_label

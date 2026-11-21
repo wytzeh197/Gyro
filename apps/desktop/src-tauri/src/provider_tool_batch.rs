@@ -228,7 +228,12 @@ mod tests {
             (
                 "gyro_browser_type",
                 "ref",
-                "Optional element ref; defaults to focused element",
+                "Use a ref from read_page or find, or omit it if the intended field already has focus.",
+            ),
+            (
+                "gyro_browser_find",
+                "waitMs",
+                "Wait for a visible match after the document becomes readable, using a query or selector and offset 0.",
             ),
             (
                 "gyro_git_log",

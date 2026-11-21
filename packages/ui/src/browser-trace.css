@@ -1,0 +1,151 @@
+.gyro-trace-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+  color: var(--gyro-text);
+  font-size: 13px;
+}
+.gyro-trace-panel :is(h3, h4, p, ul, pre) {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.gyro-trace-panel h3 {
+  font-size: 15px;
+}
+.gyro-trace-panel section {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--gyro-border);
+}
+.gyro-trace-panel article {
+  display: grid;
+  gap: 4px;
+}
+.gyro-trace-panel ul {
+  padding-left: 18px;
+}
+.gyro-trace-panel li + li {
+  margin-top: 5px;
+}
+.gyro-trace-panel small {
+  color: var(--gyro-muted);
+}
+.gyro-trace-panel
+  label:has(> :is(textarea, select, input:not([type="checkbox"]))) {
+  display: grid;
+  gap: 4px;
+}
+.gyro-trace-panel label > :is(textarea, select, input:not([type="checkbox"])) {
+  min-width: 0;
+  padding: 7px 8px;
+  color: inherit;
+  background: var(--gyro-control);
+  border: 1px solid var(--gyro-border);
+  border-radius: 6px;
+  font: inherit;
+}
+.gyro-trace-panel input[type="checkbox"] {
+  margin-right: 6px;
+}
+.gyro-trace-panel details {
+  min-width: 0;
+}
+.gyro-trace-panel details > :not(summary) {
+  margin-top: 8px;
+}
+.gyro-trace-panel summary {
+  cursor: pointer;
+}
+.gyro-trace-panel pre {
+  max-height: 260px;
+  padding: 8px;
+  overflow: auto;
+  white-space: pre-wrap;
+  border: 1px solid var(--gyro-border);
+  border-radius: 6px;
+}
+.gyro-trace-models,
+.gyro-trace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.gyro-trace-models > * {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+.gyro-trace-models .gyro-provider-logo {
+  width: 14px;
+  height: 14px;
+}
+.gyro-trace-picker .gyro-composer-slash-menu {
+  position: static;
+  width: 100%;
+  max-width: 100%;
+  transform: none;
+}
+.gyro-trace-host {
+  display: flex;
+  width: 100%;
+  min-height: 0;
+}
+.gyro-trace-host[hidden] {
+  display: none;
+}
+.gyro-trace-status {
+  align-self: center;
+  margin-bottom: 6px;
+}
+
+.gyro-trace-panel :is(.gyro-review-primary, .gyro-review-secondary) {
+  box-sizing: border-box;
+  min-height: 30px;
+  width: auto;
+  margin: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-control, 6px);
+  background: var(--gyro-control);
+  color: var(--gyro-text);
+  font: inherit;
+  cursor: pointer;
+}
+.gyro-trace-panel .gyro-review-primary {
+  justify-self: start;
+  border-color: var(--gyro-ink-bg);
+  background: var(--gyro-ink-bg);
+  color: var(--gyro-ink-text);
+  font-weight: 600;
+}
+.gyro-trace-panel .gyro-review-primary:hover:not(:disabled) {
+  background: var(--gyro-ink-hover);
+}
+.gyro-trace-panel .gyro-review-secondary:hover:not(:disabled) {
+  background: var(--gyro-control-hover);
+}
+.gyro-trace-panel button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.gyro-trace-panel .gyro-review-citation {
+  display: inline;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--gyro-text);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.gyro-trace-panel :is(button, summary):focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}

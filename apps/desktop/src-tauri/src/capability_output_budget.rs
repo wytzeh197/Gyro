@@ -4,7 +4,7 @@ use crate::{
     ide::debug::redact_json_strings,
     terminal_wait,
 };
-use gyro_core::CapabilityId;
+use gyro_core::{efficiency::compaction::message_bytes, CapabilityId};
 use serde_json::{json, Value};
 
 #[derive(Clone, Copy)]
@@ -295,6 +295,7 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
         CapabilityId::BrowserFind => json!({
             "query": { "type": "string" },
             "selector": { "type": "string" },
+            "waitMs": { "type": "integer", "minimum":0, "maximum":crate::session_browser::MAX_FIND_WAIT_MS, "default":0, "description":"Wait for a visible match after the document becomes readable, using a query or selector and offset 0." },
             "offset": { "type":"integer","minimum":0 }, "limit": { "type":"integer","minimum":1,"maximum":40,"default":20 },
             "maxBytes": workspace_result_bytes_schema()
         }),
@@ -344,27 +345,61 @@ pub(super) fn browser_page_result(mut data: Value, max_bytes: usize) -> anyhow::
             page.remove(key);
         }
     }
-    fn prune(node: &mut Value) -> bool {
-        let Some(children) = node.get_mut("children").and_then(Value::as_array_mut) else {
+    // The object already has another member and these field names are plain
+    // ASCII. A new member adds a comma, two quotes, and a colon.
+    fn set_field(
+        object: &mut serde_json::Map<String, Value>,
+        key: &str,
+        value: Value,
+        bytes: &mut usize,
+    ) {
+        *bytes += message_bytes(&value);
+        match object.insert(key.into(), value) {
+            Some(previous) => *bytes -= message_bytes(&previous),
+            None => *bytes += key.len() + 4,
+        }
+    }
+    fn prune(node: &mut Value, bytes: &mut usize) -> bool {
+        let Some(object) = node.as_object_mut() else {
+            return false;
+        };
+        let Some(children) = object.get_mut("children").and_then(Value::as_array_mut) else {
             return false;
         };
         let Some(last) = children.last_mut() else {
             return false;
         };
-        if prune(last) {
+        if prune(last, bytes) {
             return true;
         }
-        children.pop();
-        let omitted = node["omittedChildren"].as_u64().unwrap_or(0);
-        node["omittedChildren"] = json!(omitted + 1);
+        let removed = children.pop().expect("last child exists");
+        *bytes -= message_bytes(&removed) + usize::from(!children.is_empty());
+        let omitted = object
+            .get("omittedChildren")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        set_field(
+            object,
+            "omittedChildren",
+            json!(omitted.saturating_add(1)),
+            bytes,
+        );
         true
     }
-    while serde_json::to_vec(&data)?.len() > max_bytes {
-        let pruned = data.pointer_mut("/page/tree").is_some_and(prune);
+    let mut bytes = serde_json::to_vec(&data)?.len();
+    while bytes > max_bytes {
+        let pruned = data
+            .pointer_mut("/page/tree")
+            .is_some_and(|tree| prune(tree, &mut bytes));
         if !pruned {
             anyhow::bail!("Browser page metadata exceeds maxBytes; increase the byte budget");
         }
-        data["page"]["truncated"] = json!(true);
+        if data["page"]["truncated"] != true {
+            let page = data["page"]
+                .as_object_mut()
+                .expect("tree belongs to a page object");
+            set_field(page, "truncated", Value::Bool(true), &mut bytes);
+        }
     }
     Ok(data)
 }
@@ -554,6 +589,33 @@ mod tests {
         assert_eq!(bounded["page"]["tree"]["children"][0]["ref"], "ref_0");
         assert!(bounded["page"].get("url").is_none());
         assert!(serde_json::to_vec(&bounded).unwrap().len() <= DEFAULT_WORKSPACE_RESULT_BYTES);
+    }
+
+    #[test]
+    fn browser_tree_budget_counts_escaped_text_and_omission_digit_growth() {
+        let kept = json!({"ref":"kept","name":"Quoted \"label\"\n🦀"});
+        let original = json!({
+            "page":{"truncated":false,"tree":{"ref":"root","children":[
+                kept,
+                {"ref":"expand","omittedChildren":9,"children":[
+                    {"ref":"removed","name":"Long quoted \"content\"\n🦀".repeat(16)}
+                ]}
+            ]}}
+        });
+        let expected = json!({
+            "page":{"truncated":true,"tree":{"ref":"root","children":[
+                kept, {"ref":"expand","omittedChildren":10,"children":[]}
+            ]}}
+        });
+        let exact_budget = serde_json::to_vec(&expected).unwrap().len();
+        assert_eq!(
+            browser_page_result(original.clone(), exact_budget).unwrap(),
+            expected
+        );
+        let tighter = browser_page_result(original, exact_budget - 1).unwrap();
+        assert_eq!(tighter["page"]["tree"]["children"], json!([kept]));
+        assert_eq!(tighter["page"]["tree"]["omittedChildren"], 1);
+        assert!(serde_json::to_vec(&tighter).unwrap().len() < exact_budget);
     }
 
     #[test]

@@ -629,16 +629,12 @@ pub(crate) fn suggested_title_for_turn(title: &str) -> (Option<String>, bool) {
 pub(crate) fn streamed_title_replacement(
     state: &mut (Option<String>, bool),
     stored_title: &str,
-    text: &str,
-    message_complete: bool,
+    title: String,
 ) -> Option<String> {
     if state.1 {
         return None;
     }
     let Some(expected_title) = state.0.as_deref() else {
-        return None;
-    };
-    let Some(title) = completed_stream_title(text, message_complete) else {
         return None;
     };
     if stored_title != expected_title {
@@ -680,6 +676,9 @@ pub(crate) fn publish_streamed_session_title(
     if state.1 || state.0.is_none() {
         return;
     }
+    let Some(title) = completed_stream_title(text, message_complete) else {
+        return;
+    };
     let Ok(store) = open_store() else {
         return;
     };
@@ -689,9 +688,7 @@ pub(crate) fn publish_streamed_session_title(
     let Ok(Some(session)) = store.get_session(session_id) else {
         return;
     };
-    let Some(title) =
-        streamed_title_replacement(&mut state, &session.title, text, message_complete)
-    else {
+    let Some(title) = streamed_title_replacement(&mut state, &session.title, title) else {
         return;
     };
     if let Ok(Some(session)) =
@@ -738,14 +735,12 @@ pub(crate) struct StrippedControlMarkers {
     pub(crate) artifacts: Vec<serde_json::Value>,
 }
 
-pub(crate) use gyro_core::provider_runtime::prompts::GYRO_SESSION_TITLE_MARKER;
-pub(crate) const GYRO_PLAN_UPDATE_MARKER: &str = "GYRO_PLAN_UPDATE:";
-pub(crate) const GYRO_GOAL_UPDATE_MARKER: &str = "GYRO_GOAL_UPDATE:";
-pub(crate) const GYRO_AGENT_UPDATE_MARKER: &str = "GYRO_AGENT_UPDATE:";
-pub(crate) const GYRO_ARTIFACTS_MARKER: &str = "GYRO_ARTIFACTS:";
-pub(crate) const GYRO_QUESTIONS_MARKER: &str = "GYRO_QUESTIONS:";
+pub(crate) use gyro_core::provider_runtime::prompts::{
+    GYRO_AGENT_UPDATE_MARKER, GYRO_ARTIFACTS_MARKER, GYRO_GOAL_UPDATE_MARKER,
+    GYRO_PLAN_UPDATE_MARKER, GYRO_QUESTIONS_MARKER, GYRO_SESSION_TITLE_MARKER,
+    MAX_CONTROL_MARKER_JSON_BYTES as MAX_CHAT_ARTIFACT_MARKER_BYTES,
+};
 pub(crate) const MAX_CHAT_ARTIFACTS: usize = 8;
-pub(crate) const MAX_CHAT_ARTIFACT_MARKER_BYTES: usize = 64 * 1024;
 
 pub(crate) fn strip_hidden_control_markers(response: &str) -> StrippedControlMarkers {
     // Repair glued blocks first so a marker that opens a block after

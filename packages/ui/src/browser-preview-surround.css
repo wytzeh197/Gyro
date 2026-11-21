@@ -11,11 +11,11 @@
    the spare height reads as the end of the page rather than a void around it. */
 .gyro-preview-stage[data-framed="true"] {
   align-items: center;
-  background: var(--gyro-code-bg);
+  background: color-mix(in srgb, var(--gyro-surface) 65%, var(--gyro-code-bg));
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   justify-content: flex-start;
 }
 .gyro-preview-surround {
@@ -53,17 +53,26 @@
   background: var(--gyro-muted);
 }
 .gyro-preview-stage-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
   flex: 0 0 auto;
   max-width: 100%;
-  overflow: hidden;
-  padding-inline: 8px;
+  padding-inline: 10px;
   box-sizing: border-box;
-  color: var(--gyro-faint);
+  color: var(--gyro-muted);
   font-size: var(--gyro-font-tiny);
-  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
   pointer-events: none;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.gyro-preview-stage-label > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gyro-preview-stage-label > span + span {
+  flex: 0 0 auto;
 }
 :root .gyro-browser-preview .gyro-preview-surround > .gyro-browser-page {
   position: relative;

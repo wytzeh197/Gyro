@@ -23,9 +23,12 @@ use gyro_core::{
     PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
 };
 use std::{
+    borrow::Cow,
+    collections::HashMap,
     fs,
     io::{Read, Write},
     path::Path,
+    sync::{LazyLock, OnceLock},
 };
 use uuid::Uuid;
 pub(crate) struct DesktopProviderPermissionContext {
@@ -199,6 +202,30 @@ pub(crate) fn advertised_capability_descriptors(
 }
 
 pub(crate) fn desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Value {
+    desktop_capability_tool_schema_ref(id).into_owned()
+}
+
+pub(crate) fn desktop_capability_tool_schema_ref(
+    id: CapabilityId,
+) -> Cow<'static, serde_json::Value> {
+    // Schema contents are static. Availability and permissions are evaluated
+    // separately. Initialize individual schemas on first use.
+    static SCHEMAS: LazyLock<HashMap<CapabilityId, OnceLock<serde_json::Value>>> =
+        LazyLock::new(|| {
+            gyro_core::CAPABILITY_DESCRIPTORS
+                .iter()
+                .map(|descriptor| (descriptor.id, OnceLock::new()))
+                .collect()
+        });
+    match SCHEMAS.get(&id) {
+        Some(schema) => {
+            Cow::Borrowed(schema.get_or_init(|| build_desktop_capability_tool_schema(id)))
+        }
+        None => Cow::Owned(build_desktop_capability_tool_schema(id)),
+    }
+}
+
+fn build_desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Value {
     let mut schema = efficiency::capability_schema(id)
         .unwrap_or_else(|| desktop_capability_tool_schema_inner(id));
     if capability_uses_workspace_root(id) {
@@ -210,7 +237,26 @@ pub(crate) fn desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Va
     schema
 }
 
-pub(crate) fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
+#[cfg(test)]
+#[test]
+fn cached_tool_schemas_match_the_broker_definitions() {
+    for descriptor in gyro_core::CAPABILITY_DESCRIPTORS {
+        let id = descriptor.id;
+        let cached = desktop_capability_tool_schema_ref(id);
+        assert!(matches!(cached, Cow::Borrowed(_)), "{id}");
+        assert_eq!(
+            serde_json::to_vec(cached.as_ref()).unwrap(),
+            serde_json::to_vec(&build_desktop_capability_tool_schema(id)).unwrap(),
+            "{id}"
+        );
+        assert!(std::ptr::eq(
+            cached.as_ref(),
+            desktop_capability_tool_schema_ref(id).as_ref()
+        ));
+    }
+}
+
+fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_json::Value {
     // Domain modules own their schemas so this function keeps one delegation
     // guard per module instead of one match arm per capability.
     if let Some((properties, required)) = capability_output_budget::schema(id)
@@ -295,6 +341,14 @@ pub(crate) fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_js
                 "enum": ["diff", "terminal", "browser", "problems", "test-results", "output"]
             }
         }),
+        CapabilityId::WebSearch => serde_json::json!({
+            "query": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": super::access::MAX_WEB_SEARCH_QUERY_CHARS,
+                "description": "Public search terms sent to Brave Search when the project's browser policy allows it."
+            }
+        }),
         CapabilityId::BrowserOpen | CapabilityId::BrowserNavigate => serde_json::json!({
             "url": { "type": "string" },
             "reveal": {
@@ -316,7 +370,7 @@ pub(crate) fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_js
             "ref": { "type": "string", "description": "Element ref from read_page or find" }
         }),
         CapabilityId::BrowserMouse => serde_json::json!({
-            "action": { "type": "string", "enum": ["hover", "click", "secondary-click", "drag"] },
+            "action": { "type": "string", "enum": ["move", "hover", "click", "secondary-click", "drag"], "description": "Use move to glide the model's pointer, hover for a foreground CSS hover, or click, secondary-click, or drag to press a button." },
             "captureId": { "type": "string", "description": "Filename from a recent screenshot of this chat's browser" },
             "x": { "type": "number", "description": "Start X in browser CSS pixels from the screenshot's top-left" },
             "y": { "type": "number", "description": "Start Y in browser CSS pixels from the screenshot's top-left" },
@@ -324,9 +378,9 @@ pub(crate) fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_js
             "toY": { "type": "number", "description": "Required destination Y for drag" }
         }),
         CapabilityId::BrowserType => serde_json::json!({
-            "text": { "type": "string" },
-            "ref": { "type": "string", "description": "Optional element ref; defaults to focused element" },
-            "submit": { "type": "boolean" }
+            "text": { "type": "string", "description": "Replace the field with this exact text, including whitespace, or pass an empty string to clear it." },
+            "ref": { "type": "string", "description": "Use a ref from read_page or find, or omit it if the intended field already has focus." },
+            "submit": { "type": "boolean", "description": "Send Enter and request form submission if the page does not handle Enter. Verify the outcome separately." }
         }),
         CapabilityId::BrowserScroll => serde_json::json!({
             "dx": { "type": "number" },
@@ -335,7 +389,7 @@ pub(crate) fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_js
         }),
         CapabilityId::BrowserFormInput => serde_json::json!({
             "ref": { "type": "string" },
-            "value": { "type": "string" }
+            "value": { "type": "string", "description": "Exact text or option value, including an empty string, or true or false as text for a checkbox or radio button." }
         }),
         CapabilityId::GithubRerunWorkflow => serde_json::json!({
             "runId": { "type": "integer", "minimum": 1 },
@@ -358,7 +412,7 @@ pub(crate) fn desktop_capability_tool_schema_inner(id: CapabilityId) -> serde_js
         _ => serde_json::json!({}),
     };
     let required = match id {
-        CapabilityId::WorkspaceSearch => vec!["query"],
+        CapabilityId::WorkspaceSearch | CapabilityId::WebSearch => vec!["query"],
         CapabilityId::WorkspaceRead
         | CapabilityId::WorkspaceReadRange
         | CapabilityId::WorkspaceReadEditor

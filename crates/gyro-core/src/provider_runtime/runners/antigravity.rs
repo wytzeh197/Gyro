@@ -49,7 +49,7 @@ pub fn run_antigravity_chat(
             approvals_sent_separately: false,
         },
     );
-    crate::provider_observation::native_prompt(&serde_json::json!(prompt));
+    crate::provider_observation::native_text_prompt(&prompt);
 
     // A headless run cannot ask, so the posture has to be decided up front:
     // only an unconditional full-access send gets the CLI's permission bypass.

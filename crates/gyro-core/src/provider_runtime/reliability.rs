@@ -129,8 +129,20 @@ pub fn tools_for_round(
     round: usize,
     limit: Option<usize>,
 ) -> Vec<serde_json::Value> {
+    if tool_round_available(messages, round, limit) {
+        tools.to_vec()
+    } else {
+        Vec::new()
+    }
+}
+
+pub(crate) fn tool_round_available(
+    messages: &mut Vec<serde_json::Value>,
+    round: usize,
+    limit: Option<usize>,
+) -> bool {
     if limit.is_none_or(|limit| round < limit) {
-        return tools.to_vec();
+        return true;
     }
     // A length-limited checkpoint may continue at the same round. Keep one
     // instruction in history instead of charging for another copy each time.
@@ -142,7 +154,7 @@ pub fn tools_for_round(
             "role": "user", "content": TOOL_BUDGET_CHECKPOINT
         }));
     }
-    Vec::new()
+    false
 }
 
 /// The cache-assembly experiment can keep definitions at a prose-only checkpoint.
@@ -154,14 +166,31 @@ pub fn openai_tools_for_round(
     limit: Option<usize>,
     retain_checkpoint_catalog: bool,
 ) -> (Vec<serde_json::Value>, bool) {
-    let offered = tools_for_round(messages, tools, round, limit);
-    let allow_calls = !offered.is_empty();
-    let definitions = if !allow_calls && retain_checkpoint_catalog {
+    let (send_catalog, allow_calls) = openai_tool_round(
+        messages,
+        round,
+        limit,
+        !tools.is_empty(),
+        retain_checkpoint_catalog,
+    );
+    let definitions = if send_catalog {
         tools.to_vec()
     } else {
-        offered
+        Vec::new()
     };
     (definitions, allow_calls)
+}
+
+pub(crate) fn openai_tool_round(
+    messages: &mut Vec<serde_json::Value>,
+    round: usize,
+    limit: Option<usize>,
+    has_tools: bool,
+    retain_checkpoint_catalog: bool,
+) -> (bool, bool) {
+    let allow_calls = tool_round_available(messages, round, limit) && has_tools;
+    let send_catalog = has_tools && (allow_calls || retain_checkpoint_catalog);
+    (send_catalog, allow_calls)
 }
 
 /// Whether this text is the round-budget notice rather than a provider fault.
@@ -444,7 +473,7 @@ pub fn validate_tool_call(
     if !arguments.is_object() {
         return Err("Tool arguments must be a JSON object. Correct the arguments and try again. No action was executed.".into());
     }
-    let schema = catalog.schema(id);
+    let schema = catalog.schema_ref(id);
     let mut normalized = std::borrow::Cow::Borrowed(arguments);
     // Validate the same effective observation budget the broker will use.
     // Only advertised size hints are repaired; paths, ranges, and mutation

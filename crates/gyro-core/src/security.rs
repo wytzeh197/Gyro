@@ -141,6 +141,10 @@ fn resolve_from_nearest_existing_ancestor(path: &Path) -> Result<PathBuf> {
 }
 
 pub fn redact_secrets(input: &str) -> String {
+    redact_secrets_cow(input).into_owned()
+}
+
+pub fn redact_secrets_cow(input: &str) -> Cow<'_, str> {
     let mut current = Cow::Borrowed(input);
     for regex in redaction_patterns() {
         if !regex.is_match(current.as_ref()) {
@@ -161,13 +165,17 @@ pub fn redact_secrets(input: &str) -> String {
                 .into_owned(),
         );
     }
-    current.into_owned()
+    current
 }
 
 /// Mask secrets without moving the editor positions of the surrounding text.
 /// Workspace read continuations use UTF-16 columns, so a replacement must keep
 /// both line breaks and UTF-16 width even when the secret contains Unicode.
 pub fn redact_secrets_preserving_positions(input: &str) -> String {
+    redact_secrets_preserving_positions_cow(input).into_owned()
+}
+
+pub fn redact_secrets_preserving_positions_cow(input: &str) -> Cow<'_, str> {
     let mut current = Cow::Borrowed(input);
     for regex in redaction_patterns() {
         if !regex.is_match(current.as_ref()) {
@@ -196,7 +204,7 @@ pub fn redact_secrets_preserving_positions(input: &str) -> String {
                 .into_owned(),
         );
     }
-    current.into_owned()
+    current
 }
 
 #[cfg(test)]

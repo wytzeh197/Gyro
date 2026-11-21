@@ -2,13 +2,134 @@
 //! Dropping a pending request/body releases it; no detached blocking readers
 //! survive Stop. Short health probes continue to use the existing ureq client.
 use crate::CancellationToken;
+use serde::Serialize;
 use serde_json::Value;
 use std::{
+    collections::BTreeMap,
     future::Future,
     io::{self, Read},
     sync::OnceLock,
     time::Duration,
 };
+use url::Url;
+
+const MAX_RETAINED_RETRY_BODY_BYTES: usize = 4 * 1024 * 1024;
+
+#[derive(Serialize)]
+#[serde(untagged)]
+pub(crate) enum ChatField<'a> {
+    Array(&'a [Value]),
+    Value(Value),
+}
+
+/// Borrow the message and schema arrays through serialization. The small
+/// envelope keeps the same sorted keys as the previous JSON object.
+#[derive(Serialize)]
+#[serde(transparent)]
+pub(crate) struct ChatPayload<'a> {
+    pub(crate) fields: BTreeMap<&'static str, ChatField<'a>>,
+}
+
+impl<'a> ChatPayload<'a> {
+    pub(crate) fn new(messages: &'a [Value], tools: Option<&'a [Value]>) -> Self {
+        let mut fields = BTreeMap::from([("messages", ChatField::Array(messages))]);
+        if let Some(tools) = tools {
+            fields.insert("tools", ChatField::Array(tools));
+        }
+        Self { fields }
+    }
+
+    pub(crate) fn insert(&mut self, key: &'static str, value: Value) {
+        self.fields.insert(key, ChatField::Value(value));
+    }
+
+    pub(crate) fn array(&self, key: &str) -> Option<&'a [Value]> {
+        match self.fields.get(key) {
+            Some(ChatField::Array(values)) => Some(*values),
+            _ => None,
+        }
+    }
+}
+
+/// A single HTTP exchange can reuse its encoded request across retries. The
+/// transport owns the body until response headers arrive, and only small
+/// bodies are shared into the retry wait.
+pub(crate) struct ChatPost<'a> {
+    url: &'a Url,
+    key: &'a str,
+    payload: ChatPayload<'a>,
+    idle: Duration,
+    local: bool,
+    retry_request: Option<reqwest::Request>,
+}
+
+impl<'a> ChatPost<'a> {
+    pub(crate) fn new(
+        url: &'a Url,
+        key: &'a str,
+        payload: ChatPayload<'a>,
+        idle: Duration,
+        local: bool,
+    ) -> Self {
+        Self {
+            url,
+            key,
+            payload,
+            idle,
+            local,
+            retry_request: None,
+        }
+    }
+
+    pub(crate) fn payload(&self) -> &ChatPayload<'a> {
+        &self.payload
+    }
+
+    pub(crate) fn remove_field(&mut self, key: &str) {
+        if self.payload.fields.remove(key).is_some() {
+            self.retry_request = None;
+        }
+    }
+
+    pub(crate) fn send(
+        &mut self,
+        cancellation: &CancellationToken,
+    ) -> Result<Response, ureq::Error> {
+        let client = client(self.local);
+        let request = self.request(client);
+        let result = send(
+            async move { client.execute(request?).await },
+            cancellation,
+            self.idle,
+        );
+        if result.is_ok() {
+            self.retry_request = None;
+        }
+        result
+    }
+
+    fn request(&mut self, client: &reqwest::Client) -> reqwest::Result<reqwest::Request> {
+        if let Some(request) = self
+            .retry_request
+            .as_ref()
+            .and_then(reqwest::Request::try_clone)
+        {
+            return Ok(request);
+        }
+        let request = post_builder(client, self.url, self.key)
+            .json(&self.payload)
+            .build()?;
+        if request
+            .body()
+            .and_then(reqwest::Body::as_bytes)
+            .is_some_and(|body| body.len() <= MAX_RETAINED_RETRY_BODY_BYTES)
+        {
+            // A reqwest JSON body is backed by shared serialized bytes.
+            self.retry_request = request.try_clone();
+        }
+        Ok(request)
+    }
+}
 
 fn runtime() -> &'static tokio::runtime::Runtime {
     static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
@@ -128,10 +249,11 @@ impl Read for Reader {
     }
 }
 
-pub(crate) fn post(
+#[cfg(test)]
+fn post(
     url: &url::Url,
     key: &str,
-    payload: &Value,
+    payload: &impl Serialize,
     cancellation: &CancellationToken,
     idle: Duration,
     local: bool,
@@ -167,41 +289,45 @@ pub(crate) fn get(
         .header("Accept-Encoding", "identity")
         .header("User-Agent", concat!("gyro/", env!("CARGO_PKG_VERSION")))
         .timeout(deadline);
-    send(request, cancellation, deadline)
+    send(async move { request.send().await }, cancellation, deadline)
+}
+
+fn post_builder(client: &reqwest::Client, url: &Url, key: &str) -> reqwest::RequestBuilder {
+    let mut request = client
+        .post(url.as_str())
+        .header("Accept", "text/event-stream")
+        .header("Accept-Encoding", "identity")
+        .header("User-Agent", concat!("gyro/", env!("CARGO_PKG_VERSION")));
+    if !key.is_empty() {
+        request = request.bearer_auth(key);
+    }
+    request
 }
 
 fn post_inner(
-    url: &url::Url,
+    url: &Url,
     key: &str,
-    payload: &Value,
+    payload: &impl Serialize,
     cancellation: &CancellationToken,
     idle: Duration,
     local: bool,
     deadline: Option<Duration>,
 ) -> Result<Response, ureq::Error> {
-    let mut request = client(local)
-        .post(url.as_str())
-        .header("Accept", "text/event-stream")
-        .header("Accept-Encoding", "identity")
-        .header("User-Agent", concat!("gyro/", env!("CARGO_PKG_VERSION")))
-        .json(payload);
-    if !key.is_empty() {
-        request = request.bearer_auth(key);
-    }
+    let mut request = post_builder(client(local), url, key).json(payload);
     if let Some(deadline) = deadline {
         request = request.timeout(deadline);
     }
-    send(request, cancellation, idle)
+    send(async move { request.send().await }, cancellation, idle)
 }
 
 fn send(
-    request: reqwest::RequestBuilder,
+    response: impl Future<Output = Result<reqwest::Response, reqwest::Error>>,
     cancellation: &CancellationToken,
     idle: Duration,
 ) -> Result<Response, ureq::Error> {
     // A total reqwest timeout creates Tokio timers when send is constructed.
     // Construct it inside the shared runtime, including discovery requests.
-    let response = wait(cancellation, idle, async move { request.send().await })?;
+    let response = wait(cancellation, idle, response)?;
     let mut response = Response {
         response,
         cancellation: cancellation.clone(),
@@ -253,6 +379,46 @@ mod tests {
         sync::mpsc,
         time::Instant,
     };
+
+    #[test]
+    fn retry_body_is_shared_until_the_envelope_changes_and_bounded_by_size() {
+        let url = Url::parse("http://127.0.0.1:11434/api/chat").unwrap();
+        let client = client(true);
+        let messages = [serde_json::json!({"role":"user","content":"fixture"})];
+        let mut payload = ChatPayload::new(&messages, None);
+        payload.insert("stream_options", serde_json::json!({"include_usage":true}));
+        let mut post = ChatPost::new(&url, "", payload, Duration::from_secs(1), true);
+        let first = post.request(client).unwrap();
+        let retry = post.request(client).unwrap();
+        let first_bytes = first.body().unwrap().as_bytes().unwrap();
+        let retry_bytes = retry.body().unwrap().as_bytes().unwrap();
+        assert!(std::ptr::eq(first_bytes, retry_bytes));
+
+        post.remove_field("stream_options");
+        let fallback = post.request(client).unwrap();
+        let fallback_bytes = fallback.body().unwrap().as_bytes().unwrap();
+        let mut expected: Value = serde_json::from_slice(first_bytes).unwrap();
+        expected.as_object_mut().unwrap().remove("stream_options");
+        assert_eq!(
+            serde_json::from_slice::<Value>(fallback_bytes).unwrap(),
+            expected
+        );
+
+        let large_messages = [
+            serde_json::json!({"role":"user","content":"x".repeat(MAX_RETAINED_RETRY_BODY_BYTES)}),
+        ];
+        let mut large = ChatPost::new(
+            &url,
+            "",
+            ChatPayload::new(&large_messages, None),
+            Duration::from_secs(1),
+            true,
+        );
+        let request = large.request(client).unwrap();
+        assert!(request.body().unwrap().as_bytes().unwrap().len() > MAX_RETAINED_RETRY_BODY_BYTES);
+        assert!(large.retry_request.is_none());
+    }
+
     #[test]
     fn broken_or_silent_error_bodies_preserve_status_and_retry_guidance() {
         for (status, quiet) in [(401, false), (429, true)] {

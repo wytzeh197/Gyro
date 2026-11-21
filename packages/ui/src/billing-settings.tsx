@@ -505,8 +505,10 @@ export function BillingSettings({
   if (snapshot.availability === "coming-soon" || snapshot.status === "unavailable") {
     return <SettingsSection title="Plan & billing" description="Manage optional Gyro services.">
       <SettingsGroup id="subscription" label="Subscription">
-        <p><strong>Billing is not available in this build</strong></p>
-        <p>Gyro works locally without a subscription.</p>
+        <SettingsRow
+          label="Billing is not available in this build"
+          detail="Gyro works locally without a subscription."
+        />
       </SettingsGroup>
       <SettingsGroup id="provider-billing" label="Provider billing">
         <p>AI provider charges are managed separately.</p>

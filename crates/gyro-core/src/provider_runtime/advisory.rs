@@ -17,7 +17,11 @@ pub fn supports_code_review(kind: ProviderAdapterKind) -> bool {
 pub fn is_advisory(request: &ProviderChatRequest) -> bool {
     matches!(
         request.internal_purpose,
-        Some(InternalRequestPurpose::CodeReview | InternalRequestPurpose::WorkflowExtraction)
+        Some(
+            InternalRequestPurpose::CodeReview
+                | InternalRequestPurpose::BrowserTrace
+                | InternalRequestPurpose::WorkflowExtraction
+        )
     )
 }
 pub fn validate_advisory_request(
@@ -29,7 +33,9 @@ pub fn validate_advisory_request(
         return Ok(());
     }
     let supported = match request.internal_purpose {
-        Some(InternalRequestPurpose::CodeReview) => supports_code_review(kind),
+        Some(InternalRequestPurpose::CodeReview | InternalRequestPurpose::BrowserTrace) => {
+            supports_code_review(kind)
+        }
         _ => matches!(
             kind,
             ProviderAdapterKind::Ollama | ProviderAdapterKind::OpenAiCompatible

@@ -202,6 +202,7 @@ impl SessionStore {
         use crate::provider_runtime::types::InternalRequestPurpose;
         let role = match purpose {
             InternalRequestPurpose::CodeReview => "code-review",
+            InternalRequestPurpose::BrowserTrace => "browser-trace",
             InternalRequestPurpose::WorkflowExtraction => "workflow-extraction",
             _ => anyhow::bail!("unsupported advisory session purpose"),
         };
@@ -227,6 +228,7 @@ impl SessionStore {
             .optional()?;
         role.map(|role| match role.as_str() {
             "code-review" => Ok(InternalRequestPurpose::CodeReview),
+            "browser-trace" => Ok(InternalRequestPurpose::BrowserTrace),
             "workflow-extraction" => Ok(InternalRequestPurpose::WorkflowExtraction),
             _ => anyhow::bail!("unknown restricted session purpose"),
         })

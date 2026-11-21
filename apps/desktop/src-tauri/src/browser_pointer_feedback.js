@@ -14,6 +14,7 @@
   let pendingPulse = null;
   let hidden = false;
   let labelWidth = 0;
+  let size = 1;
   const motionPreference = window.matchMedia?.("(prefers-reduced-motion: reduce)");
   const stopMotion = () => {
     motionId += 1;
@@ -28,13 +29,29 @@
   };
   const paint = (x, y) => {
     position = { x, y };
-    cursor.style.transform = `translate3d(${x - 2}px,${y - 2}px,0)`;
+    cursor.style.transform = `translate3d(${x - 2}px,${y - 2}px,0) scale(${size})`;
+    const width = labelWidth * size;
     const labelX =
-      x + 24 + labelWidth > window.innerWidth - 8
-        ? x - labelWidth - 8
-        : x + 24;
-    cursor.lastChild.style.left = `${Math.max(8, Math.min(window.innerWidth - labelWidth - 8, labelX)) - x + 2}px`;
-    cursor.lastChild.style.top = y > window.innerHeight - 36 ? "-24px" : "18px";
+      x + 22 * size + width > window.innerWidth - 8
+        ? x - width - 6 * size
+        : x + 22 * size;
+    cursor.lastChild.style.left = `${(Math.max(8, Math.min(window.innerWidth - width - 8, labelX)) - x) / size + 2}px`;
+    cursor.lastChild.style.top = y > window.innerHeight - 40 * size ? "-24px" : "18px";
+  };
+  const measureLabel = () => {
+    const label = cursor.lastChild;
+    label.style.maxWidth = `${Math.max(0, (window.innerWidth - 16) / size)}px`;
+    labelWidth = label.offsetWidth;
+  };
+  const setDisplayScale = (scale) => {
+    if (!Number.isFinite(scale) || scale <= 0) return;
+    const next = Math.min(4, Math.max(1, 1 / scale));
+    if (next === size) return;
+    size = next;
+    if (cursor && position) {
+      measureLabel();
+      paint(position.x, position.y);
+    }
   };
   const pulseAtArrival = () => {
     if (
@@ -115,6 +132,10 @@
   };
   const show = (el, options = {}) => {
     try {
+      if (options.sample && !options.first && !options.final && cursor) {
+        paint(options.x, options.y);
+        return;
+      }
       const rect = el.getBoundingClientRect();
       if (!rect.width && !rect.height) return;
       const dragging = options.action === "drag" && options.phase !== "move";
@@ -139,7 +160,7 @@
         cursor.setAttribute("aria-hidden", "true");
         cursor.setAttribute("data-gyro-browser-pointer", "");
         cursor.style.cssText =
-          "position:fixed;left:0;top:0;pointer-events:none;z-index:2147483647;width:24px;height:28px;filter:drop-shadow(0 1px 3px rgba(0,0,0,.4))";
+          "all:initial;position:fixed;left:0;top:0;pointer-events:none;z-index:2147483647;width:24px;height:28px;transform-origin:2px 2px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4))";
         cursor.style.transition = "none";
         cursor.style.visibility = hidden ? "hidden" : "visible";
         window.addEventListener?.("pagehide", clear);
@@ -152,6 +173,7 @@
         arrow.setAttribute("width", "24");
         arrow.setAttribute("height", "28");
         arrow.setAttribute("viewBox", "0 0 24 28");
+        arrow.style.cssText = "all:initial;display:block;width:24px;height:28px;overflow:visible;pointer-events:none";
         arrow.style.transformOrigin = "2px 2px";
         const path = document.createElementNS(
           "http://www.w3.org/2000/svg",
@@ -165,20 +187,19 @@
         arrow.appendChild(path);
         const label = document.createElement("span");
         label.style.cssText =
-          "position:absolute;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;font:600 11px system-ui;color:#fff;background:#0874df;border-radius:4px;padding:3px 6px";
+          "all:initial;position:absolute;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;font:600 11px/14px system-ui;color:#fff;background:#173450;border:1px solid #6fa5db;border-radius:5px;padding:2px 6px";
         cursor.append(arrow, label);
         document.documentElement.appendChild(cursor);
       }
       const label = cursor.lastChild;
       label.textContent = String(options.actor || "Gyro").slice(0, 32);
-      label.style.maxWidth = `${Math.max(0, window.innerWidth - 16)}px`;
-      labelWidth = label.offsetWidth;
-      const completedAction = options.phase !== "move" && options.action !== "hover";
+      measureLabel();
+      const completedAction = options.phase !== "move" && !["hover", "move"].includes(options.action);
       if (completedAction) {
         targetBox = document.createElement("div");
         targetBox.setAttribute("aria-hidden", "true");
         targetBox.setAttribute("data-gyro-browser-target", "");
-        targetBox.style.cssText = `position:fixed;pointer-events:none;z-index:2147483646;left:${rect.left - 3}px;top:${rect.top - 3}px;width:${rect.width + 6}px;height:${rect.height + 6}px;box-sizing:border-box;border:2px solid #0874df;border-radius:6px;box-shadow:0 0 0 4px rgba(8,116,223,.18)`;
+        targetBox.style.cssText = `all:initial;position:fixed;pointer-events:none;z-index:2147483646;left:${rect.left - 2 * size}px;top:${rect.top - 2 * size}px;width:${rect.width + 4 * size}px;height:${rect.height + 4 * size}px;box-sizing:border-box;border:${1.5 * size}px solid #0874df;border-radius:${5 * size}px;box-shadow:0 0 0 ${2 * size}px rgba(8,116,223,.18)`;
         targetBox.style.visibility = hidden ? "hidden" : "visible";
         document.documentElement.appendChild(targetBox);
         // Native input is already complete. Highlight now and pulse at arrival.
@@ -192,7 +213,7 @@
       }
       // Visual travel never delays native input or changes its real coordinates.
       // The SVG's tip is (2,2); paint() aligns it with the page coordinate.
-      move(px, py, reduced);
+      move(px, py, reduced || options.sample);
       if (position) paint(position.x, position.y);
       // Match the browser presence strip's linger, rather than disappearing
       // before the person watching can locate the pointer.
@@ -209,5 +230,5 @@
     if (cursor) cursor.style.visibility = hidden ? "hidden" : "visible";
     if (targetBox) targetBox.style.visibility = hidden ? "hidden" : "visible";
   };
-  return { show, clear, setHidden };
+  return { show, clear, setHidden, setDisplayScale };
 });

@@ -155,20 +155,15 @@
   justify-content: space-between;
 }
 
-.gyro-import-archived {
-  align-items: center;
-  display: flex;
-  gap: 20px;
+.gyro-import-scan-controls {
+  justify-content: flex-end;
 }
 
-.gyro-import-archived > div,
 .gyro-import-job-header > div {
   display: grid;
   gap: 3px;
 }
 
-.gyro-import-archived span,
-.gyro-import-helper,
 .gyro-import-job-header span,
 .gyro-import-selection-footer > span,
 .gyro-import-projects-toolbar > span {
@@ -177,9 +172,6 @@
   line-height: 1.5;
 }
 
-.gyro-import-helper {
-  margin: -12px 0 0;
-}
 .gyro-import-error {
   align-items: center;
   background: var(--gyro-danger-soft);

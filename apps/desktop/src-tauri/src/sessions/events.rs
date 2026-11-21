@@ -66,7 +66,7 @@ pub(crate) async fn append_chat_context_event(
                     return goal_runner::pause(&store, session_id);
                 }
                 let current = session_goal::stored_session_goal(
-                    &store.read_context_events(session_id).map_err(to_string)?,
+                    &store.read_goal_events(session_id).map_err(to_string)?,
                 );
                 let (message, payload) = session_goal::goal_change(&payload, current.as_ref())?;
                 (SessionEventKind::GoalUpdated, message, payload)

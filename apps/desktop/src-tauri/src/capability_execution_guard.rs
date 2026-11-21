@@ -178,7 +178,7 @@ mod tests {
                 &ProjectCapabilityPolicy::defaults(workspace_key.clone()),
                 CapabilityRunMode::Normal,
             ),
-            workspace_context: WorkspaceContextSnapshot::empty(workspace_key.clone()),
+            workspace_context: WorkspaceContextSnapshot::empty(workspace_key.clone()).into(),
             workspace_check: WorkspaceCheckReport::placeholder(workspace_key),
         };
         (temp, store, bound)

@@ -6,6 +6,7 @@
 //! * `Implicit` — the provider caches a stable prefix on its own, so the only thing that can break
 //!   the cache is *us* rewriting early messages. That makes prefix stability our responsibility.
 //! * `None` — nothing to cache; shaping would only add bytes.
+use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use url::Url;
@@ -63,20 +64,46 @@ impl Plan {
 /// rewrites an early message changes this key, which is exactly the churn
 /// [`Plan::wants_stable_prefix`] exists to warn about.
 pub fn openai_prefix_key(payload: &Value) -> String {
-    let stable = payload["messages"]
-        .as_array()
-        .map(|m| {
-            m.iter()
-                .filter(|v| matches!(v["role"].as_str(), Some("system" | "developer")))
-                .cloned()
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let prefix = json!({"instructions":stable,"tools":payload["tools"]});
-    format!(
-        "gyro:{:x}",
-        Sha256::digest(serde_json::to_vec(&prefix).unwrap_or_default())
+    openai_prefix_key_for(
+        payload["messages"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default(),
+        &payload["tools"],
     )
+}
+
+pub(crate) fn openai_prefix_key_for<T: Serialize + ?Sized>(
+    messages: &[Value],
+    tools: &T,
+) -> String {
+    #[derive(Serialize)]
+    struct Prefix<'a, T: ?Sized> {
+        instructions: Vec<&'a Value>,
+        tools: &'a T,
+    }
+    struct HashWriter(Sha256);
+    impl std::io::Write for HashWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.update(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let prefix = Prefix {
+        instructions: messages
+            .iter()
+            .filter(|message| matches!(message["role"].as_str(), Some("system" | "developer")))
+            .collect(),
+        tools,
+    };
+    let mut writer = HashWriter(Sha256::new());
+    if serde_json::to_writer(&mut writer, &prefix).is_err() {
+        return format!("gyro:{:x}", Sha256::digest([]));
+    }
+    format!("gyro:{:x}", writer.0.finalize())
 }
 
 /// `prompt_cache_options` for a model that accepts them, or `None` for one that does not.

@@ -570,24 +570,15 @@ fn native_prompt_wrappers_keep_standalone_workspace_locations() {
 #[test]
 fn a_title_the_user_renamed_survives_the_model_marker() {
     let mut state = suggested_title_for_turn("We Drew Our Own Traffic Lights");
-    assert!(streamed_title_replacement(
-        &mut state,
-        "My Own Name",
-        "GYRO_SESSION_TITLE: Traffic Light Bug\nWorking on it.",
-        true,
-    )
-    .is_none());
+    assert!(
+        streamed_title_replacement(&mut state, "My Own Name", "Traffic Light Bug".into(),)
+            .is_none()
+    );
     assert!(
         state.1,
         "a hand rename closes the control for the rest of the run"
     );
-    assert!(streamed_title_replacement(
-        &mut state,
-        "My Own Name",
-        "GYRO_SESSION_TITLE: Late Marker\nWorking on it.",
-        true,
-    )
-    .is_none());
+    assert!(streamed_title_replacement(&mut state, "My Own Name", "Late Marker".into(),).is_none());
 }
 
 #[test]

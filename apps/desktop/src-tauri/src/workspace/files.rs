@@ -240,7 +240,10 @@ pub(crate) fn read_workspace_file_with_limit(
         anyhow::bail!("binary workspace files cannot be previewed");
     }
     let content_hash = content_hash(&bytes);
-    let content = decode_workspace_utf8(&bytes, truncated)?;
+    let content = match String::from_utf8(bytes) {
+        Ok(content) => content,
+        Err(error) => decode_workspace_utf8(error.as_bytes(), truncated)?,
+    };
 
     Ok(WorkspaceFileContent {
         path: path.to_string(),

@@ -6,9 +6,9 @@
  * confirm button named after what it does ("Discard", "Move to Trash") and
  * tinted red when the action loses work.
  */
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
-import { AlertTriangle, Info } from "lucide-react";
+import { AlertTriangle, Info, ShieldAlert } from "lucide-react";
 import "./text-prompt.css";
 
 export type ConfirmDialogOptions = {
@@ -16,13 +16,18 @@ export type ConfirmDialogOptions = {
   title?: string;
   confirmLabel?: string;
   cancelLabel?: string;
-  tone?: "danger" | "default";
+  tone?: "danger" | "default" | "permission";
+  detail?: { label: string; value: string };
 };
 
 type Verb = { pattern: RegExp; label: string; danger: boolean };
 
 const VERBS: Verb[] = [
-  { pattern: /\bto the (host's )?trash\b/i, label: "Move to Trash", danger: true },
+  {
+    pattern: /\bto the (host's )?trash\b/i,
+    label: "Move to Trash",
+    danger: true,
+  },
   { pattern: /^discard\b/i, label: "Discard", danger: true },
   { pattern: /^delete\b/i, label: "Delete", danger: true },
   { pattern: /^remove\b/i, label: "Remove", danger: true },
@@ -34,7 +39,9 @@ const VERBS: Verb[] = [
 /** Name the confirm button after the action the message asks about. */
 export function describeConfirmation(message: string): Required<
   Pick<ConfirmDialogOptions, "title" | "confirmLabel" | "tone">
-> & { acknowledgeOnly: boolean } {
+> & {
+  acknowledgeOnly: boolean;
+} {
   const trimmed = message.trim();
   // A statement, not a question, only needs acknowledging.
   if (!trimmed.endsWith("?")) {
@@ -68,23 +75,38 @@ function ConfirmDialog({
   const derived = describeConfirmation(options.message);
   const tone = options.tone ?? derived.tone;
   const title = options.title ?? derived.title;
+  const acknowledgeOnly = derived.acknowledgeOnly && tone !== "permission";
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = dialog.current;
     if (!element) return;
+    const previousFocus = document.activeElement;
     if (!element.open) element.showModal();
-    // A destructive default would let Return lose work; land on Cancel.
-    (tone === "danger" && !derived.acknowledgeOnly
+    (tone !== "default" && !acknowledgeOnly
       ? cancelButton.current
       : confirmButton.current
     )?.focus();
-  }, [derived.acknowledgeOnly, tone]);
+    return () => {
+      element.close();
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
+        previousFocus.focus();
+      }
+    };
+  }, [acknowledgeOnly, tone]);
 
-  const Icon = tone === "danger" ? AlertTriangle : Info;
+  const Icon = {
+    danger: AlertTriangle,
+    default: Info,
+    permission: ShieldAlert,
+  }[tone];
 
   return (
     <dialog
-      aria-describedby="gyro-confirm-message"
+      aria-describedby={
+        options.detail
+          ? "gyro-confirm-message gyro-confirm-detail"
+          : "gyro-confirm-message"
+      }
       aria-label={title}
       className={`gyro-text-prompt gyro-confirm-dialog is-${tone}`}
       onCancel={(event) => {
@@ -109,10 +131,19 @@ function ConfirmDialog({
             <p className="gyro-text-prompt-message" id="gyro-confirm-message">
               {options.message}
             </p>
+            {options.detail ? (
+              <dl
+                className="gyro-confirm-dialog-detail"
+                id="gyro-confirm-detail"
+              >
+                <dt>{options.detail.label}</dt>
+                <dd>{options.detail.value}</dd>
+              </dl>
+            ) : null}
           </div>
         </div>
         <div className="gyro-text-prompt-actions">
-          {derived.acknowledgeOnly ? null : (
+          {acknowledgeOnly ? null : (
             <button
               className="gyro-secondary-button"
               onClick={() => onClose(false)}

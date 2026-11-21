@@ -1,3 +1,4 @@
+import { BrowserTracePanel, traceQuestion, useBrowserTrace, type BrowserTraceRuntime } from "./browser-trace";
 import { humanModelName } from "./model-name";
 import { turnReviewPayload, useTurnReviews, type TurnReview } from "./code-reviews/turn-progress";
 import { reviewIsActive } from "./code-reviews/types";
@@ -319,6 +320,7 @@ import {
 } from "./settings-shortcut-conflicts";
 import type { PortableSettings } from "./settings-transfer";
 import { SettingsTransferPanel } from "./settings-transfer-panel";
+import { reconcileInterruptedProviderApprovals } from "./session-approvals";
 import { type SidebarProjectSettings } from "./sidebar-project-card";
 import {
   pendingSubagentApprovals,
@@ -5023,6 +5025,7 @@ type ChatSurfaceProps = {
   codeReviewEntry?: import("./code-reviews/types").CodeReviewEntryRequest;
   onSaveWorkflow?: (turnId?:string)=>void;
   codeReviews?: CodeReviewRuntime;
+  browserTrace?: BrowserTraceRuntime;
   supportsSecondOpinion?: boolean;
   subagents?: SubagentSurfaceState;
   planEditorRequest?: {
@@ -5134,6 +5137,7 @@ type ChatSurfaceProps = {
 const chatCompanionTabIcons: Record<ChatCompanionTabId, IconComponent> = {
   canvas: FileText,
   review: FileDiff,
+  trace: Search,
   terminal: SquareTerminal,
   browser: Globe,
   files: Folders,
@@ -5144,7 +5148,7 @@ const chatCompanionTabIcons: Record<ChatCompanionTabId, IconComponent> = {
 
 /** Agents open from their rows; the launcher offers only general tools. */
 const chatCompanionTabs = chatCompanionTabIds
-  .filter((id) => id !== "agents")
+  .filter((id) => id !== "agents" && id !== "trace")
   .map((id) => ({
     id,
     label: chatCompanionTabLabels[id],
@@ -5284,6 +5288,7 @@ export function ChatSurface({
   codeReviewEntry,
   onSaveWorkflow,
   codeReviews,
+  browserTrace,
   supportsSecondOpinion,
   subagents,
   planEditorRequest,
@@ -5453,6 +5458,15 @@ export function ChatSurface({
   }, [onCloseGoalComposer, onCancelGoalComposer]);
   // A question or plan card in the composer takes what is typed as its answer.
   const composerAnswerRef = useRef<((text: string) => void) | null>(null);
+  const [tracePrompt, setTracePrompt] = useState("");
+  const openTrace = () => (onOpenCompanionTab ?? onSelectChatPanel)?.("trace");
+  const traceRun = useBrowserTrace(browserTrace, openTrace);
+  const canTrace = Boolean(browserTrace) && chatMode === "normal" && !isGoalComposerActive;
+  const traceStatus = traceRun.id && activeChatPanel !== "trace" ? (
+    <button type="button" className="gyro-turn-second-opinion gyro-trace-status" onClick={openTrace}>
+      {traceRun.capture?.done ? "Review trace" : traceRun.capture?.evidence.click ? "Capturing browser activity…" : "Trace armed · click the control in Browser"}
+    </button>
+  ) : null;
   const handleSend = useCallback(async () => {
     if (composerBlockedReason) return;
     const answerCard = composerAnswerRef.current;
@@ -5498,6 +5512,13 @@ export function ChatSurface({
       }
       return;
     }
+    const question = canTrace ? traceQuestion(inlineDraft.display, inlineDraft.commands, localDraft) : undefined;
+    if (question !== undefined) {
+      setTracePrompt(question);
+      (onOpenCompanionTab ?? onSelectChatPanel)?.("trace");
+      handleDraftChange("");
+      return;
+    }
     const reviewer = inlineDraft.reviewCommand?.reviewer;
     if (reviewer) onSend(localDraft.trimEnd(), { secondOpinion: reviewer });
     else onSend(localDraft);
@@ -5505,6 +5526,11 @@ export function ChatSurface({
     closeGoalComposer,
     composerBlockedReason,
     inlineDraft.reviewCommand,
+    inlineDraft.display,
+    inlineDraft.commands,
+    canTrace,
+    onOpenCompanionTab,
+    onSelectChatPanel,
     composerDraft,
     handleDraftChange,
     isGoalComposerActive,
@@ -6506,7 +6532,30 @@ export function ChatSurface({
       // user sized. The browser earns more room only when the user drags it.
       width={companionWidth}
     >
-      {displayedRailPanel === "canvas" ? (
+      {browserTrace && openTabs.includes("trace") && (
+        <div className="gyro-trace-host" hidden={displayedRailPanel !== "trace"}>
+          <BrowserTracePanel
+            key={browserTrace.sessionId}
+            runtime={browserTrace}
+            options={connectedReviewerOptions(providersForConfig(config), providerStatuses)}
+            browserUrl={browserPreview?.url}
+            initialQuestion={tracePrompt}
+            run={traceRun}
+            openBrowser={() => (onOpenCompanionTab ?? onSelectChatPanel)?.("browser")}
+            draftFix={(message) => {
+              const existing = messageInput.display;
+              if (!existing.includes(message)) messageInput.change(existing ? existing + "\n\n" + message : message);
+              const textarea = transcriptRef.current?.closest(".gyro-chat-thread-canvas")
+                ?.querySelector<HTMLTextAreaElement>('textarea[data-tour="composer.input"]');
+              const panel = textarea?.closest(".gyro-chat-thread-canvas")?.querySelector(".gyro-chat-companion")?.getBoundingClientRect();
+              const input = textarea?.getBoundingClientRect();
+              if (panel && input && panel.left < input.right && panel.right > input.left) closeCompanion();
+              textarea?.focus({ preventScroll: true });
+            }}
+          />
+        </div>
+      )}
+      {displayedRailPanel === "trace" ? null : displayedRailPanel === "canvas" ? (
         <ChatCanvas
           key={transcriptSessionId ?? "draft"}
           artifacts={canvasArtifacts}
@@ -6797,6 +6846,7 @@ export function ChatSurface({
             </p>
           ) : null}
           {chatNotice}
+          {traceStatus}
           <Composer
             onOpenCouncil={openCouncilEnvironment}
             overlay={councilScopeDock}
@@ -6818,6 +6868,7 @@ export function ChatSurface({
             onAttachMediaPaths={onAttachMediaPaths}
             onMediaDropError={onMediaDropError}
             supportsSecondOpinion={supportsSecondOpinion && !isGoalComposerActive && chatMode === "normal" && !composerAnswerRef.current}
+            supportsTrace={canTrace && !composerAnswerRef.current}
             onSend={handleSend}
             onStop={onStopChat}
             isStopping={isStoppingChat}
@@ -7052,6 +7103,7 @@ export function ChatSurface({
               {goalSaveNotice}
             </p>
           ) : null}
+          {traceStatus}
           <Composer
             onOpenCouncil={openCouncilEnvironment}
             queue={
@@ -7107,6 +7159,7 @@ export function ChatSurface({
             onAttachMediaPaths={onAttachMediaPaths}
             onMediaDropError={onMediaDropError}
             supportsSecondOpinion={supportsSecondOpinion && !isGoalComposerActive && chatMode === "normal" && !composerAnswerRef.current}
+            supportsTrace={canTrace && !composerAnswerRef.current}
             onSend={handleSend}
             onStop={onStopChat}
             isStopping={isStoppingChat}
@@ -16810,17 +16863,16 @@ function WebBrowserPreviewSurface({
   const resolvedVariant = variant ?? (compact ? "workbench" : "workbench");
   const isChat = resolvedVariant === "chat";
   const isBlank = isChat && preview.status === "idle";
-  const [addressValue, setAddressValue] = useState(() =>
-    isBlank ? "" : preview.url,
-  );
+  const [addressDraft, setAddressDraft] = useState<string | null>(null);
+  const addressValue = addressDraft ?? (isBlank ? "" : preview.url);
+  const addressInputRef = useRef<HTMLInputElement>(null);
   const [isBrowserMenuOpen, setIsBrowserMenuOpen] = useState(false);
+  const browserMenuId = useId();
+  const browserMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const browserToolbarRef = useOutsidePointerDismiss<HTMLDivElement>(
     isBrowserMenuOpen,
     () => setIsBrowserMenuOpen(false),
   );
-  useEffect(() => {
-    setAddressValue(preview.url);
-  }, [isBlank, preview.url]);
   const canGoBack = preview.historyIndex > 0;
   const canGoForward = preview.historyIndex < preview.history.length - 1;
   const [frameRevision, setFrameRevision] = useState(0);
@@ -16963,7 +17015,16 @@ function WebBrowserPreviewSurface({
         {isChat && (isLoading || isCapturing) ? (
           <span aria-hidden="true" className="gyro-browser-progress" />
         ) : null}
-        <div className="gyro-browser-preview-toolbar" ref={browserToolbarRef}>
+        <div
+          className="gyro-browser-preview-toolbar"
+          ref={browserToolbarRef}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape" || !isBrowserMenuOpen || event.defaultPrevented) return;
+            event.preventDefault();
+            setIsBrowserMenuOpen(false);
+            browserMenuTriggerRef.current?.focus();
+          }}
+        >
           <div
             className="gyro-browser-nav-group"
             role="group"
@@ -17001,11 +17062,13 @@ function WebBrowserPreviewSurface({
             className="gyro-url-bar"
             onSubmit={(event) => {
               event.preventDefault();
-              if (isChat && !addressValue.trim()) return;
+              const address = addressValue.trim();
+              if (isChat && !address) return;
               if (showingCapture) {
                 setFrameMode("live");
               }
-              onNavigate?.(isChat ? addressValue : frameUrl);
+              onNavigate?.(isChat ? address : frameUrl);
+              setAddressDraft(null);
             }}
           >
             {isChat ? (
@@ -17025,13 +17088,18 @@ function WebBrowserPreviewSurface({
             )}
             <input
               aria-label="Browser URL"
+              autoCapitalize="none"
+              autoComplete="off"
+              spellCheck={false}
+              ref={addressInputRef}
+              onBlur={() => setAddressDraft(null)}
               onChange={(event) => {
-                setAddressValue(event.target.value);
-                if (!isChat) onUrlChange?.(event.target.value);
+                if (isChat) setAddressDraft(event.target.value);
+                else onUrlChange?.(event.target.value);
               }}
               onKeyDown={(event) => {
                 if (isChat && event.key === "Escape") {
-                  setAddressValue(isBlank ? "" : preview.url);
+                  event.preventDefault();
                   event.currentTarget.blur();
                 }
               }}
@@ -17052,6 +17120,7 @@ function WebBrowserPreviewSurface({
             {isChat ? (
               <button
                 aria-label="Open page in system browser"
+                className="gyro-browser-address-external"
                 disabled={isBlank}
                 onClick={onOpenExternal}
                 title="Open in system browser"
@@ -17079,6 +17148,8 @@ function WebBrowserPreviewSurface({
               aria-label="Browser options"
               title="Browser options"
               aria-expanded={isBrowserMenuOpen}
+              aria-controls={browserMenuId}
+              ref={browserMenuTriggerRef}
               onClick={() => setIsBrowserMenuOpen((open) => !open)}
               type="button"
             >
@@ -17087,11 +17158,13 @@ function WebBrowserPreviewSurface({
           ) : null}
           <div
             className={`gyro-browser-actions${isChat ? " is-overflow-menu" : ""}${isBrowserMenuOpen ? " is-open" : ""}`}
+            id={browserMenuId}
             role="group"
             aria-label="Browser actions"
             onClick={(event) => {
               if ((event.target as Element).closest("button:not(:disabled)")) {
                 setIsBrowserMenuOpen(false);
+                if (event.detail === 0) browserMenuTriggerRef.current?.focus();
               }
             }}
           >
@@ -17147,19 +17220,16 @@ function WebBrowserPreviewSurface({
               <Camera size={14} />
               {isChat ? <span>Screenshot</span> : null}
             </button>
-            {/* The chat address bar already has this action. */}
-            {!isChat ? (
-              <button
-                aria-label="Open in system browser"
-                className="gyro-browser-external-button"
-                disabled={isBlank}
-                onClick={onOpenExternal}
-                title="Open in system browser"
-                type="button"
-              >
-                <Globe2 size={14} />
-              </button>
-            ) : null}
+            <button
+              aria-label="Open in system browser"
+              className="gyro-browser-external-button"
+              disabled={isBlank}
+              onClick={onOpenExternal}
+              title="Open in system browser"
+              type="button"
+            >
+              {isChat ? <ArrowUpRight size={14} /> : <Globe2 size={14} />}
+            </button>
             {runtimeMenu}
           </div>
         </div>
@@ -17216,8 +17286,14 @@ function WebBrowserPreviewSurface({
             {isBlank ? (
               <div className="gyro-browser-new-tab">
                 <Globe aria-hidden="true" size={28} />
-                <strong>Start browsing</strong>
-                <span>Enter a URL to open a page</span>
+                <strong>Open a page</strong>
+                <button
+                  className="gyro-browser-start-button"
+                  onClick={() => addressInputRef.current?.focus()}
+                  type="button"
+                >
+                  Search or enter a URL <ArrowUpRight size={13} aria-hidden="true" />
+                </button>
               </div>
             ) : useNativeHost ? (
               <div
@@ -17318,8 +17394,16 @@ function WebBrowserPreviewSurface({
             className={
               preview.captureStatus === "failed" ? "has-errors" : undefined
             }
-            disabled={preview.captureStatus !== "captured"}
+            disabled={
+              preview.captureStatus !== "captured" &&
+              (preview.captureStatus !== "failed" || !canCapturePreview || isBlank || !onScreenshot)
+            }
             onClick={() => {
+              if (preview.captureStatus === "failed") {
+                setFrameMode("live");
+                onScreenshot?.("capture");
+                return;
+              }
               if (preview.captureStatus === "captured" && hasCapture) {
                 setFrameMode((mode) =>
                   mode === "capture" ? "live" : "capture",
@@ -17343,7 +17427,7 @@ function WebBrowserPreviewSurface({
             {preview.captureStatus === "capturing"
               ? "Capturing…"
               : preview.captureStatus === "failed"
-                ? "Capture failed"
+                ? canCapturePreview && !isBlank && onScreenshot ? "Retry capture" : "Capture failed"
                 : showingCapture
                   ? "Viewing capture"
                   : `${preview.latestCapture?.width ?? 0} × ${preview.latestCapture?.height ?? 0}`}
@@ -18909,6 +18993,7 @@ export type SettingsSurfaceProps = {
   billingSettings?: ReactNode;
 
   projectImport?: ProjectImportSettingsProps;
+  projectSitePermissions?: ProjectSitePermissionsProps;
   config: GyroConfig;
   cliLaunchPreset?: CliLaunchPreset;
   themeMode: ThemeMode;
@@ -19179,6 +19264,93 @@ function CliLaunchPresetEditor({
   );
 }
 
+type ProjectSitePermissionsProps = {
+  workspacePath?: string;
+  load: (workspacePath: string) => Promise<ProjectCapabilityPolicy>;
+  revoke: (workspacePath: string, policy: ProjectCapabilityPolicy, id: string) => Promise<ProjectCapabilityPolicy>;
+};
+
+function ProjectSitePermissions({ workspacePath, load, revoke }: ProjectSitePermissionsProps) {
+  const [policy, setPolicy] = useState<ProjectCapabilityPolicy>();
+  const [pendingId, setPendingId] = useState<string>();
+  const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
+  const [loadRevision, setLoadRevision] = useState(0);
+  useEffect(() => {
+    if (!workspacePath) return;
+    let current = true;
+    setError(undefined);
+    void load(workspacePath).then(
+      (loaded) => { if (current) setPolicy(loaded); },
+      (failure) => { if (current) setError(String(failure)); },
+    );
+    return () => { current = false; };
+  }, [loadRevision, load, workspacePath]);
+
+  const sites = policy?.grants.filter(
+    (grant) => grant.class === "browser-navigate" && grant.scopeKind === "origin",
+  ) ?? [];
+  const remove = async (id: string, origin: string) => {
+    if (!workspacePath || !policy || pendingId) return;
+    setPendingId(id);
+    setError(undefined);
+    setNotice(undefined);
+    try {
+      setPolicy(await revoke(workspacePath, policy, id));
+      setNotice(`Permission removed for ${origin}`);
+    } catch (failure) {
+      setError(String(failure));
+    } finally {
+      setPendingId(undefined);
+    }
+  };
+
+  return (
+    <SettingsGroup
+      id="project-site-permissions"
+      label="Saved sites"
+      description={workspacePath}
+      collapsible={false}
+    >
+      {!workspacePath ? (
+        <SettingsRow label="Open a project to review saved sites" />
+      ) : !policy && !error ? (
+        <SettingsRow label="Loading saved sites…" />
+      ) : policy && sites.length === 0 ? (
+        <SettingsRow label="No saved sites" detail="Sites appear here when you allow them for the project." />
+      ) : null}
+      {sites.map(({ id, scopeValue }) => (
+        <SettingsRow key={id} label={scopeValue} detail="Allowed for this project">
+          <button
+            className="gyro-secondary-button"
+            type="button"
+            disabled={Boolean(pendingId) || Boolean(error)}
+            aria-label={`Revoke site permission for ${scopeValue}`}
+            onClick={() => void remove(id, scopeValue)}
+          >
+            {pendingId === id ? "Revoking…" : "Revoke"}
+          </button>
+        </SettingsRow>
+      ))}
+      {error ? (
+        <SettingsRow label="Could not update saved sites" detail={error}>
+          <button
+            type="button"
+            className="gyro-secondary-button"
+            onClick={() => {
+              setPolicy(undefined);
+              setLoadRevision((revision) => revision + 1);
+            }}
+          >
+            Reload
+          </button>
+        </SettingsRow>
+      ) : null}
+      {notice ? <span className="gyro-sr-only" role="status">{notice}</span> : null}
+    </SettingsGroup>
+  );
+}
+
 export function SettingsSurface({
   accountSettings,
   cloudSettings,
@@ -19190,6 +19362,7 @@ export function SettingsSurface({
   billingSettings,
 
   projectImport,
+  projectSitePermissions,
   config,
   cliLaunchPreset = defaultCliLaunchPreset(),
   themeMode,
@@ -20331,10 +20504,10 @@ export function SettingsSurface({
                           onChange={(checked) => onUsagePauseChange?.(checked)}
                         />
                       </SettingsRow>
+                      <p className="gyro-usage-footnote">
+                        Billing and plan limits are managed by your provider.
+                      </p>
                     </SettingsGroup>
-                    <p className="gyro-usage-footnote">
-                      Billing and plan limits are managed by your provider.
-                    </p>
                   </>
                 }
                 tokens={
@@ -20499,6 +20672,12 @@ export function SettingsSurface({
                   />
                 </SettingsRow>
               </SettingsGroup>
+              {projectSitePermissions ? (
+                <ProjectSitePermissions
+                  key={projectSitePermissions.workspacePath}
+                  {...projectSitePermissions}
+                />
+              ) : null}
               <SettingsGroup
                 id="workspace-protection"
                 label="Workspace protection"
@@ -22345,6 +22524,7 @@ function Composer({
   branchCatalog,
   inlineDraft,
   supportsSecondOpinion,
+  supportsTrace,
   onRemoveAttachment,
   canAttachEditorSnapshot = false,
   onAttachProblem,
@@ -22412,6 +22592,7 @@ function Composer({
   branchCatalog?: GitBranchCatalog;
   inlineDraft: InlineCommandDraft;
   supportsSecondOpinion?: boolean;
+  supportsTrace?: boolean;
   onRemoveAttachment?: (attachmentId: string) => void;
   /** True when an open project file can be captured for the Editor action. */
   canAttachEditorSnapshot?: boolean;
@@ -22692,6 +22873,7 @@ function Composer({
   // Model and effort open from independent composer controls.
   const modelMenuEntry = useRef<"root" | "model">("root");
   const modelMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const approvalMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const [modelMenuPane, setModelMenuPane] = useState<
     "root" | "model" | "effort" | "provider" | "provider-model" | "settings"
   >("root");
@@ -22990,9 +23172,11 @@ function Composer({
     () => explorerAskSendHeld,
     () => false,
   );
+  const isTraceDraft = supportsTrace && traceQuestion(inlineDraft.display, inlineDraft.commands, plainDraft) !== undefined;
   const canSubmitComposer =
     !askAttachmentPending &&
-    (isGoalComposerActive && !startsGoalSession ? true : canSubmitChat);
+    (isTraceDraft ? shellReady && !sendDisabledReason :
+      isGoalComposerActive && !startsGoalSession ? true : canSubmitChat);
   const needsProviderSetup =
     !boundToSession &&
     !providerConfigs.some((provider) =>
@@ -23166,6 +23350,7 @@ function Composer({
   const closeWriterPicker = () => { setWriterPickerOpen(false); composerTextareaRef.current?.focus({ preventScroll: true }); };
   const openWriterPicker = () => { setActivePopover(null); setWriterPickerOpen(true); };
   const slashCommands: ComposerSlashCommand[] = [
+    { available: supportsTrace === true, command: "/trace", description: "Trace a browser interaction to source", icon: Search, label: "Trace a bug", group: "workspace" },
     { action: "open-memory", command: "/memory", description: "Inspect or update this project's memory", icon: ScrollText, label: "Project memory", group: "workspace" },
     {
       command: "/help",
@@ -24348,6 +24533,7 @@ function Composer({
                 aria-label={`Approval mode: ${approvalCopy.chipLabel}`}
                 className={approvalChipClassName}
                 onClick={() => togglePopover("approval")}
+                ref={approvalMenuTriggerRef}
                 title={`Approval mode: ${approvalCopy.chipLabel}`}
                 type="button"
                 {...menuProps("approval")}
@@ -24389,7 +24575,12 @@ function Composer({
                       label: approvalCopy.directLabel,
                     },
                   ]}
-                  onAction={runPopoverAction}
+                  onAction={(action, item) => {
+                    if (action === "set-approval-direct") {
+                      approvalMenuTriggerRef.current?.focus();
+                    }
+                    runPopoverAction(action, item);
+                  }}
                 />
               ) : null}</SurfacePresence>
             </div>
@@ -24828,7 +25019,7 @@ function Composer({
             aria-label={
               isGoalComposerActive
                 ? startsGoalSession ? "Set goal and send" : "Save goal"
-                : isSending ? "Queue message" : "Send message"
+                : isTraceDraft ? "Set up trace" : isSending ? "Queue message" : "Send message"
             }
             className={isSending ? "gyro-send-button is-queue" : "gyro-send-button"}
             disabled={!canSubmitComposer || plainDraft.trim().length === 0}
@@ -25225,6 +25416,7 @@ type ProviderToolApproval = {
   providerLabel: string;
   capabilityId?: string;
   allowProject?: boolean;
+  allowForChat?: boolean;
   editorPreview?: string;
   scope?: string;
   command?: string;
@@ -25384,7 +25576,7 @@ function ProviderToolApprovalCard({
             {approval.approvalType === "command"
               ? "Run command"
               : approval.approvalType === "capability"
-                ? "Allow once"
+                ? approval.allowForChat ? "Allow for this chat" : "Allow once"
                 : "Approve"}
           </button>
         </>
@@ -25500,6 +25692,7 @@ function deriveTranscriptState(
   events: SessionEvent[],
   turnCache?: ReturnType<typeof createTranscriptTurnCache<ChatTranscriptTurn>>,
 ) {
+  events = reconcileInterruptedProviderApprovals(events);
   const turnTokenReadings = turnTokensFromEvents(events);
   const mutationDecisions = new Map<string, Record<string, unknown>>();
   const providerApprovalDecisions = new Map<string, Record<string, unknown>>();
@@ -25522,10 +25715,8 @@ function deriveTranscriptState(
         capabilityCallAnchors.set(capabilityCall.callId, event.id);
       }
     }
-    if (
-      event.kind === "system-event" &&
-      stringFromEventPayload(payload, "kind") === "mutation-approval"
-    ) {
+    const payloadKind = stringFromEventPayload(payload, "kind");
+    if (event.kind === "system-event" && payloadKind === "mutation-approval") {
       const proposalId = stringFromEventPayload(payload, "proposalId");
       const status = stringFromEventPayload(payload, "status");
       if (proposalId && status && status !== "pending") {
@@ -25534,7 +25725,7 @@ function deriveTranscriptState(
     }
     if (
       event.kind === "system-event" &&
-      stringFromEventPayload(payload, "kind") === "provider-tool-approval"
+      (payloadKind === "provider-tool-approval" || payloadKind === "capability-approval")
     ) {
       const approvalId = stringFromEventPayload(payload, "approvalId");
       const status = stringFromEventPayload(payload, "status");
@@ -28116,14 +28307,10 @@ function isHiddenTranscriptEvent(event: SessionEvent) {
     return true;
   }
   if (
-    payloadKind === "mutation-approval" &&
-    event.kind !== "approval-requested"
-  ) {
-    return true;
-  }
-  if (
-    payloadKind === "provider-tool-approval" &&
-    event.kind !== "approval-requested"
+    event.kind !== "approval-requested" &&
+    (payloadKind === "mutation-approval" ||
+      payloadKind === "provider-tool-approval" ||
+      payloadKind === "capability-approval")
   ) {
     return true;
   }
@@ -28201,6 +28388,7 @@ function providerApprovalFromEvent(
       command: stringFromEventPayload(payload, "command"),
       cwd: stringFromEventPayload(payload, "cwd"),
       allowProject: Array.isArray(payload?.choices) ? payload.choices.includes("allow-project") : undefined,
+      allowForChat: scopeKind === "origin" && payload?.capabilityClass === "browser-navigate",
       scope: payload?.command ? undefined : [scopeKind, scopeValue].filter(Boolean).join(" · "),
       reason:
         stringFromEventPayload(payload, "reason") ??

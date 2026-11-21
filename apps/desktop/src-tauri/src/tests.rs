@@ -63,7 +63,6 @@ use crate::{
     },
     context_compaction, delegated_agents,
     diagnostics::export::{terminal_command_path, user_home_directory},
-    efficiency,
     git::{
         branches::git_branch_catalog_impl,
         commands::{
@@ -288,7 +287,7 @@ fn bound_capability_context(request: &ProviderChatRequest) -> BoundProviderCapab
         workspace_identity_revision: 1,
         allow_delegation: delegated_agents::request_allows_delegation(request),
         policy: CapabilityPolicySnapshot::from_policy(&policy, CapabilityRunMode::Normal),
-        workspace_context,
+        workspace_context: workspace_context.into(),
         workspace_check: WorkspaceCheckReport::placeholder(workspace_key.clone()),
         workspace_key,
     }

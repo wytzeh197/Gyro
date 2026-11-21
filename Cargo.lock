@@ -2253,6 +2253,7 @@ dependencies = [
  "dom_query 0.27.0",
  "keyring",
  "libc",
+ "memchr",
  "rand 0.8.6",
  "regex",
  "reqwest",

@@ -20,12 +20,11 @@ use crate::{
             append_provider_diagnostics_event, append_provider_status_event,
             emit_provider_activity_event, emit_provider_chat_event, kimi_acp_plan_payload,
             provider_activity_event_entry, provider_chat_status_message,
-            provider_turn_has_unfinished_attempt,
         },
         markers::{
             completed_chat_artifacts, completed_plan_updates, derive_session_summary,
-            publish_streamed_session_title, strip_hidden_control_markers, suggested_title_for_turn,
-            ChatArtifactExtraction, SessionTitleExtraction,
+            strip_hidden_control_markers, suggested_title_for_turn, ChatArtifactExtraction,
+            SessionTitleExtraction,
         },
         process::provider_adapter_for,
         retry::run_provider_chat_with_retry,
@@ -101,7 +100,7 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
     let paths = GyroPaths::for_current_user().map_err(to_string)?;
     let config = GyroConfig::load(&paths).map_err(to_string)?;
     let requested_full_access = request.full_access;
-    bind_provider_chat_request(&mut request, &session, &config, store.paths())?;
+    bind_provider_chat_request(&mut request, &session, &config, &store)?;
     request.project_memory = Some(gyro_core::project_memory::PreparedMemoryContext {
         suggest_candidates: origin == UsageOrigin::Chat && session.parent_session_id.is_none(),
         ..Default::default()
@@ -109,13 +108,14 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
     delegated_agents::restrict_request(&app, &mut request);
     // The stored goal outranks the window's copy, which may predate a clear or
     // a completion made elsewhere; the window's copy covers a failed save.
-    let events = store.read_context_events(session_id).map_err(to_string)?;
-    request.goal = session_goal::stored_or_unsaved_goal(&events, request.goal.take());
+    let goal_events = store.read_goal_events(session_id).map_err(to_string)?;
+    request.goal = session_goal::stored_or_unsaved_goal(&goal_events, request.goal.take());
     request.message = validate_chat_message(&request.message)?;
     // Automatic title ownership survives omitted markers, failed first turns,
     // retries, model switches and app restarts. Generic names start naming;
     // durable ownership decides whether it is finished. A retry may have lost
     // the window's first-send flag before initialization ever ran.
+    let mut opened_title_task = false;
     if is_generic_session_title(&session.title) {
         let fallback =
             session_title_from_message(&request.message).unwrap_or_else(|| session.title.clone());
@@ -123,6 +123,7 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
             .begin_session_title(session_id, &session.title, &fallback, &request.message)
             .map_err(to_string)?
         {
+            opened_title_task = true;
             let _ = app.emit("gyro://session-title-updated", renamed);
         }
     }
@@ -131,6 +132,7 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
     let _title_task = session_title_stream::TaskScope::start(
         &request.session_id,
         pending_title.as_ref().map(|(_, task)| task.as_str()),
+        opened_title_task.then_some(request.message.as_str()),
     );
     let title_before_turn = pending_title
         .as_ref()
@@ -182,10 +184,10 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
     // and scanning the workspace, binding a capability context, and persisting
     // a snapshot for it are all wasted. Running the check first also means a
     // refused send no longer leaves a bound capability context behind it.
-    let turn_status = store
-        .latest_provider_status_for_turn(session_id, run_id)
+    let (turn_status, unfinished) = store
+        .provider_turn_status_for_dispatch(session_id, run_id)
         .map_err(to_string)?;
-    if provider_turn_has_unfinished_attempt(&store, session_id, run_id).map_err(to_string)? {
+    if unfinished {
         return Err(
             "this turn has an unfinished provider attempt; start a new turn to avoid replaying tools"
                 .into(),
@@ -257,7 +259,7 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
         parse_uuid(&bound_context.session_id)?,
     );
     let workspace_context = bound_context.workspace_context.clone();
-    request.workspace_context = Some(workspace_context.clone());
+    request.workspace_context = Some(workspace_context.as_ref().clone());
     request.workspace_check = Some(bound_context.workspace_check.clone());
     let attempt_id = Uuid::new_v4();
     let started_at = chrono::Utc::now();
@@ -309,7 +311,7 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
                 serde_json::json!({
                     "kind": "workspace-context",
                     "schema": WorkspaceContextSnapshot::SCHEMA,
-                    "snapshot": workspace_context,
+                    "snapshot": workspace_context.as_ref(),
                     "check": bound_context.workspace_check,
                 }),
                 Some(run_id),
@@ -399,12 +401,6 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
             return Err(error);
         }
     };
-    publish_streamed_session_title(&app, &request, &runner_output.response, true);
-    // Some models omit the naming instruction entirely. Repair the title with
-    // the selected model under deny-all authority, without replaying the task.
-    // Failure leaves durable pending state for a later send instead of failing
-    // a successful user response.
-    session_title_stream::repair_missing(&store, &app, &request);
     // One pass removes every GYRO_* control marker (including ones glued
     // mid-line after multi-block streams) and returns title, plan, and
     // artifacts together. Chaining the per-marker helpers would drop later
@@ -419,6 +415,7 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
         #[cfg(test)]
         message: control_markers.message.clone(),
     };
+    session_title_stream::repair_missing(&store, &app, &request, title_extraction.title.as_deref());
     let mut plan_payloads =
         completed_plan_updates(&runner_output.activities, control_markers.plan_updates);
     let questions = control_markers.questions;
@@ -734,7 +731,7 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
                 && !goal.text.trim().is_empty()
                 && !provider_chat_cancelled(&app, &request.session_id)
                 && session_goal::stored_session_goal(
-                    &store.read_context_events(session_id).unwrap_or_default(),
+                    &store.read_goal_events(session_id).unwrap_or_default(),
                 )
                 .is_some_and(|current| current.status == "active" && current.text == goal.text)
         })
@@ -750,13 +747,12 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
                         "text": text,
                         "status": "complete",
                         "source": "model",
-                        "goalVersion": session_goal::goal_revision(&events),
+                        "goalVersion": session_goal::goal_revision(&goal_events),
                     }),
                     Some(run_id),
                 )
                 .ok()
         });
-    publish_streamed_session_title(&app, &request, &runner_output.response, true);
     let renamed_session = store.get_session(session_id).ok().flatten();
     let session_summary = derive_session_summary(&assistant_event.message);
     let session = session_summary
@@ -825,12 +821,13 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
             &request,
             binding,
             UsageContext::new(origin),
+            super::retry::CompactionPoint::AfterReply,
         ) {
-            Ok((binding, compacted)) => {
-                if !compacted.is_empty() && binding.is_none() {
+            Ok(compacted) => {
+                if !compacted.activity_events.is_empty() && compacted.binding.is_none() {
                     runner_output.resume_cursor = None;
                 }
-                activity_events.extend(compacted);
+                activity_events.extend(compacted.activity_events);
             }
             Err(error) => {
                 // The answer is already saved. Keep it; a failed compaction
@@ -959,7 +956,7 @@ pub(crate) fn compact_provider_chat_blocking(
         project_memory: None,
         internal_purpose: None,
     };
-    bind_provider_chat_request(&mut request, &session, &config, store.paths())?;
+    bind_provider_chat_request(&mut request, &session, &config, &store)?;
     if request.provider_id != "openai" {
         return compact_local_provider_chat(&app, &store, &request, session_uuid, run_id);
     }

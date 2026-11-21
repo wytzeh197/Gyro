@@ -1,9 +1,74 @@
-// Page-local input for a private agent webview. Never moves the OS cursor.
+// Page-local model input, including movement in a visible browser.
 // The broker checks policy and screenshot freshness before this runs.
 (function createBackgroundPointer(agent, window, document) {
   const pointerId = 2147483000;
+  let hovered;
+  const send = (
+    element,
+    type,
+    x,
+    y,
+    button = 0,
+    buttons = 0,
+    relatedTarget = null,
+  ) =>
+    element.dispatchEvent(
+      new (type.startsWith("pointer") || type.endsWith("pointercapture")
+        ? window.PointerEvent
+        : window.MouseEvent)(type, {
+        bubbles: !/enter$|leave$/.test(type),
+        cancelable: true,
+        composed: !/enter$|leave$/.test(type),
+        view: window,
+        clientX: x,
+        clientY: y,
+        button,
+        buttons,
+        pointerId,
+        pointerType: "mouse",
+        isPrimary: true,
+        relatedTarget,
+      }),
+    );
+  const hoverAt = (x, y, target) => {
+    const previous = hovered;
+    hovered = target;
+    if (previous !== target) {
+      if (previous?.isConnected) {
+        for (const type of [
+          "pointerout",
+          "mouseout",
+          "pointerleave",
+          "mouseleave",
+        ])
+          send(previous, type, x, y, -1, 0, target);
+      }
+      if (target) {
+        for (const type of [
+          "pointerover",
+          "mouseover",
+          "pointerenter",
+          "mouseenter",
+        ])
+          send(target, type, x, y, -1, 0, previous);
+      }
+    }
+    if (target) {
+      send(target, "pointermove", x, y, -1);
+      send(target, "mousemove", x, y);
+    }
+  };
   return function backgroundPointer(options) {
-    const { action, x, y, toX = x, toY = y } = options;
+    const { action, x, y, toX = x, toY = y, expected } = options;
+    if (action === "move") {
+      const observed = agent.pointerTarget({ x, y, movement: true });
+      const target =
+        observed.ok && !observed.blocked
+          ? document.elementFromPoint(x, y)
+          : null;
+      hoverAt(x, y, target);
+      return { ok: true };
+    }
     if (!["hover", "click", "secondary-click", "drag"].includes(action))
       return { ok: false, error: "unsupported browser pointer action" };
     const points =
@@ -13,7 +78,7 @@
             y + ((toY - y) * step) / 12,
           ])
         : [[x, y]];
-    const check = (px, py) => {
+    const check = (px, py, token) => {
       if (
         !Number.isFinite(px) ||
         !Number.isFinite(py) ||
@@ -24,42 +89,38 @@
       )
         return "pointer coordinates are outside the browser viewport";
       const target = agent.pointerTarget({ x: px, y: py });
-      return !target.ok ||
+      if (!target.ok ||
         target.blocked ||
-        (action !== "hover" && target.sensitive)
-        ? target.error ||
-            target.blockedReason ||
-            "this target needs user takeover"
-        : undefined;
+        (action !== "hover" && (target.sensitive || target.disabled))) {
+        return target.error ||
+          (target.disabled ? "this pointer target is disabled" : target.blocked && target.blockedReason) ||
+          "this target needs user takeover";
+      }
+      if (expected && (target.url !== expected.url ||
+          !Object.keys(target.viewport).every(key => target.viewport[key] === expected.viewport[key]))) {
+        return "browser page or viewport changed; take a new screenshot";
+      }
+      if (token && token !== target.targetToken) {
+        return "browser target changed before the pointer press; take a new screenshot";
+      }
     };
-    for (const [px, py] of points) {
+    const checkEndpoints = () =>
+      check(x, y, expected?.source) ||
+      (action === "drag" && check(toX, toY, expected?.destination));
+    const endpointError = checkEndpoints();
+    if (endpointError) return { ok: false, error: endpointError };
+    for (const [px, py] of points.slice(1, -1)) {
       const error = check(px, py);
       if (error) return { ok: false, error };
     }
     const target = document.elementFromPoint(x, y);
-    if (!target || target.closest("[disabled],[inert]"))
-      return { ok: false, error: "pointer target is unavailable or disabled" };
+    if (!target) return { ok: false, error: "pointer target is unavailable" };
     const button = action === "secondary-click" ? 2 : 0;
-    const send = (element, type, px, py, buttons = 0) =>
-      element.dispatchEvent(
-        new (type.startsWith("pointer") || type.endsWith("pointercapture")
-          ? window.PointerEvent
-          : window.MouseEvent)(type, {
-          bubbles: !["pointerenter", "mouseenter"].includes(type),
-          cancelable: true,
-          view: window,
-          clientX: px,
-          clientY: py,
-          button,
-          buttons,
-          pointerId,
-          pointerType: "mouse",
-          isPrimary: true,
-        }),
-      );
+    const sendButton = (element, type, px, py, buttons = 0) =>
+      send(element, type, px, py, button, buttons);
     const move = (element, px, py, buttons = 0) => {
-      send(element, "pointermove", px, py, buttons);
-      send(element, "mousemove", px, py, buttons);
+      sendButton(element, "pointermove", px, py, buttons);
+      sendButton(element, "mousemove", px, py, buttons);
     };
     let captured;
     let position = [x, y];
@@ -97,30 +158,34 @@
       if (prototype && action !== "hover") {
         patch("setPointerCapture", (element) => {
           if (captured && captured !== element)
-            send(captured, "lostpointercapture", ...position);
+            sendButton(captured, "lostpointercapture", ...position);
           captured = element;
-          send(element, "gotpointercapture", ...position);
+          sendButton(element, "gotpointercapture", ...position);
         });
         patch("releasePointerCapture", (element) => {
           if (captured === element) {
             captured = undefined;
-            send(element, "lostpointercapture", ...position);
+            sendButton(element, "lostpointercapture", ...position);
           }
         });
         patch("hasPointerCapture", (element) => captured === element);
       }
-      send(target, "pointerover", x, y);
-      send(target, "mouseover", x, y);
-      send(target, "pointerenter", x, y);
-      send(target, "mouseenter", x, y);
-      move(target, x, y);
+      hoverAt(x, y, target);
       if (action !== "hover") {
+        const error = checkEndpoints();
+        if (error || !target.isConnected || target !== document.elementFromPoint(x, y)) {
+          return { ok: false, error: error || "browser target changed before the pointer press; take a new screenshot" };
+        }
         const buttons = button === 2 ? 2 : 1;
-        const pointerDefault = send(target, "pointerdown", x, y, buttons);
+        const pointerDefault = sendButton(target, "pointerdown", x, y, buttons);
         const mouseDefault =
-          pointerDefault && send(target, "mousedown", x, y, buttons);
+          pointerDefault && sendButton(target, "mousedown", x, y, buttons);
         // Background input must leave keyboard ownership with the user.
-        if (mouseDefault && document.hasFocus() && typeof target.focus === "function")
+        if (
+          mouseDefault &&
+          document.hasFocus() &&
+          typeof target.focus === "function"
+        )
           target.focus({ preventScroll: true });
         const nativeRange =
           action !== "secondary-click" &&
@@ -173,10 +238,10 @@
               if (over) dragEvent(over, "dragover", px, py);
             }
           }
-          const error = check(toX, toY);
+          const error = check(toX, toY, expected?.destination);
           const release = captured || target;
-          send(release, "pointerup", toX, toY);
-          send(release, "mouseup", toX, toY);
+          sendButton(release, "pointerup", toX, toY);
+          sendButton(release, "mouseup", toX, toY);
           if (transfer) {
             const drop = document.elementFromPoint(toX, toY);
             if (!error && drop) dragEvent(drop, "drop", toX, toY);
@@ -184,9 +249,9 @@
           }
           if (error) return { ok: false, error };
         } else {
-          send(captured || target, "pointerup", x, y);
-          send(captured || target, "mouseup", x, y);
-          send(
+          sendButton(captured || target, "pointerup", x, y);
+          sendButton(captured || target, "mouseup", x, y);
+          sendButton(
             target,
             action === "secondary-click" ? "contextmenu" : "click",
             x,
@@ -215,7 +280,7 @@
       };
     } finally {
       try {
-        if (captured) send(captured, "lostpointercapture", ...position);
+        if (captured) sendButton(captured, "lostpointercapture", ...position);
       } finally {
         for (const [name, descriptor] of descriptors) {
           if (descriptor) Object.defineProperty(prototype, name, descriptor);

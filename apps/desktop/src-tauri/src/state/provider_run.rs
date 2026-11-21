@@ -15,7 +15,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicU64},
-        mpsc, Mutex,
+        mpsc, Arc, Mutex,
     },
 };
 use tauri::Manager;
@@ -46,7 +46,7 @@ pub(crate) struct BoundProviderCapabilityContext {
     pub(crate) workspace_identity_revision: u64,
     pub(crate) allow_delegation: bool,
     pub(crate) policy: CapabilityPolicySnapshot,
-    pub(crate) workspace_context: WorkspaceContextSnapshot,
+    pub(crate) workspace_context: Arc<WorkspaceContextSnapshot>,
     pub(crate) workspace_check: WorkspaceCheckReport,
 }
 

@@ -9,7 +9,11 @@ use crate::{
 };
 use gyro_core::{CapabilityId, CapabilityRequest, CapabilityResourceRef};
 use serde_json::{json, Value};
-use std::path::Path;
+use std::{
+    collections::HashSet,
+    path::Path,
+    sync::{Mutex, OnceLock},
+};
 
 pub(super) fn execute(
     app: &tauri::AppHandle,
@@ -40,29 +44,40 @@ pub(super) fn execute(
     let data = if !ranged {
         read_disk_file_data(&workspace, &path)?
     } else {
-        // Copy only the buffer and selection this read needs. The snapshot lists
-        // every open tab and can hold unsaved text for more than the active file.
-        let (buffer, context_selection, context_revision) =
-            with_ide_evidence(app, bound, |context| {
-                let buffer = context
-                    .buffers
-                    .iter()
-                    .find(|buffer| buffer.get("path").and_then(Value::as_str) == Some(&path))
-                    .cloned();
-                let selection = context
-                    .selection
-                    .as_ref()
-                    .filter(|selection| {
-                        selection.get("path").and_then(Value::as_str) == Some(&path)
-                            && selection.get("text").and_then(Value::as_str).is_some()
-                    })
-                    .cloned();
-                Ok((buffer, selection, context.revision))
-            })?;
         let selection_only = arguments
             .get("selectionOnly")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        // Copy only the buffer and selection this read needs. The snapshot lists
+        // every open tab and can hold unsaved text for more than the active file.
+        let (buffer, context_selection, context_revision) =
+            with_ide_evidence(app, bound, |context| {
+                let (buffer, selection) = match (editor_read, selection_only) {
+                    (false, _) => (None, None),
+                    (true, true) => (
+                        None,
+                        context
+                            .selection
+                            .as_ref()
+                            .filter(|selection| {
+                                selection.get("path").and_then(Value::as_str) == Some(&path)
+                                    && selection.get("text").and_then(Value::as_str).is_some()
+                            })
+                            .cloned(),
+                    ),
+                    (true, false) => (
+                        context
+                            .buffers
+                            .iter()
+                            .find(|buffer| {
+                                buffer.get("path").and_then(Value::as_str) == Some(&path)
+                            })
+                            .cloned(),
+                        None,
+                    ),
+                };
+                Ok((buffer, selection, context.revision))
+            })?;
         let selection = context_selection;
         let (content, hash, disk_hash, dirty, source) = if editor_read && selection_only {
             let selection = selection.ok_or_else(|| {
@@ -102,7 +117,11 @@ pub(super) fn execute(
                 "disk",
             )
         };
-        let mut data = select_safe_range(&content, arguments)?;
+        let mut data = if let Some(version) = hash.as_str().filter(|_| !editor_read) {
+            select_safe_disk_range(&content, version, arguments)?
+        } else {
+            select_safe_range(&content, arguments)?
+        };
         data["path"] = json!(path);
         data["source"] = json!(source);
         data["dirty"] = json!(dirty);
@@ -143,8 +162,8 @@ pub(super) fn execute(
 /// value was too expensive to carry, so a single read must not reintroduce it wholesale.
 const SPILL_TOOL_WINDOW: usize = 64 * 1024;
 
-/// Headroom kept free for the address, the window numbers and the JSON keys, so the content
-/// returned never has to be trimmed after the offsets were computed from it.
+/// Headroom for the address, window numbers, and JSON keys. The content uses
+/// the remaining encoded byte budget.
 const SPILL_RESULT_OVERHEAD: usize = 512;
 
 /// Read one window of a retired copy.
@@ -159,15 +178,16 @@ fn read_spill(
     max_bytes: usize,
 ) -> anyhow::Result<(String, Value, Option<CapabilityResourceRef>)> {
     let offset = arguments.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
-    let limit = max_bytes
-        .saturating_sub(SPILL_RESULT_OVERHEAD)
-        .clamp(1, SPILL_TOOL_WINDOW);
-    let Some(window) = gyro_core::efficiency::spill::read_scoped_window(address, offset, limit)?
+    let content_budget = max_bytes.saturating_sub(SPILL_RESULT_OVERHEAD).max(1);
+    let limit = content_budget.min(SPILL_TOOL_WINDOW);
+    let Some(mut window) =
+        gyro_core::efficiency::spill::read_scoped_window(address, offset, limit)?
     else {
         anyhow::bail!(
             "{address} is not a copy this session can read: it was swept, or never written"
         );
     };
+    fit_spill_text_to_json_budget(&mut window.text, content_budget);
     let (summary, data) = spill_payload(&window);
     let resource = CapabilityResourceRef {
         id: format!("spill:{session_id}:{address}"),
@@ -175,6 +195,32 @@ fn read_spill(
         label: window.address.clone(),
     };
     Ok((summary, data, Some(resource)))
+}
+
+/// Fit the UTF-8 text inside an encoded JSON string, excluding its two quotes.
+fn fit_spill_text_to_json_budget(text: &mut String, mut remaining: usize) {
+    if text.len().saturating_mul(6) <= remaining {
+        return;
+    }
+    let mut end = text
+        .bytes()
+        .take_while(|&byte| {
+            let encoded = match byte {
+                b'"' | b'\\' | 0x08 | b'\t' | b'\n' | 0x0c | b'\r' => 2,
+                0x00..=0x1f => 6,
+                _ => 1,
+            };
+            let Some(next) = remaining.checked_sub(encoded) else {
+                return false;
+            };
+            remaining = next;
+            true
+        })
+        .count();
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.truncate(end);
 }
 
 /// The window as the tool reports it. The numbers are the ones the CLI prints, so a reader can
@@ -249,6 +295,53 @@ mod spill_read_tests {
         assert!(summary.contains("complete"), "{summary}");
         assert_eq!(data["nextOffset"], Value::Null);
         assert_eq!(data["truncated"], json!(false));
+    }
+
+    #[test]
+    fn recovered_spill_pages_fit_the_encoded_budget_and_join_without_gaps() {
+        use gyro_core::efficiency::spill::{self, SessionScope};
+        let directory = tempfile::tempdir().unwrap();
+        let paths = gyro_core::GyroPaths::from_base_dir(directory.path().join("Gyro"));
+        let session = uuid::Uuid::new_v4();
+        let _scope = SessionScope::start(&paths, session);
+        let text = "\0\u{001f}\u{0008}\r\n\t\\\"é🦀".repeat(5_000);
+        let address = spill::address("workspace-search", "result-data", &text);
+        assert!(spill::persist(&address, &text));
+
+        for budget in [
+            1024,
+            16 * 1024,
+            gyro_core::capabilities::MAX_CAPABILITY_RESULT_BYTES,
+        ] {
+            let raw_page_limit = (budget - SPILL_RESULT_OVERHEAD).min(SPILL_TOOL_WINDOW);
+            let raw = spill::read_scoped_window(&address, 0, raw_page_limit)
+                .unwrap()
+                .unwrap();
+            assert!(serde_json::to_vec(&spill_payload(&raw).1).unwrap().len() > budget);
+
+            let mut recovered = String::new();
+            loop {
+                let (_, page, _) = read_spill(
+                    &session.to_string(),
+                    &json!({"offset":recovered.len()}),
+                    &address,
+                    budget,
+                )
+                .unwrap();
+                assert!(serde_json::to_vec(&page).unwrap().len() <= budget);
+                assert_eq!(page["offset"], recovered.len());
+                let body = page["content"].as_str().unwrap();
+                assert!(!body.is_empty());
+                recovered.push_str(body);
+                if page["truncated"] == false {
+                    assert!(page["nextOffset"].is_null());
+                    break;
+                }
+                assert_eq!(page["nextOffset"], recovered.len());
+                assert!(recovered.len() < text.len());
+            }
+            assert_eq!(recovered, text);
+        }
     }
 
     #[test]
@@ -589,10 +682,43 @@ fn select_safe_range(content: &str, arguments: &Value) -> anyhow::Result<Value> 
     // Redact the complete source before range selection. A chunk beginning
     // halfway through a secret must not expose its otherwise unrecognizable
     // suffix, and masking preserves the requested source positions.
-    let masked = gyro_core::security::redact_secrets_preserving_positions(content);
+    let masked = gyro_core::security::redact_secrets_preserving_positions_cow(content);
     let mut data = select_range(&masked, arguments)?;
-    if masked != content {
+    if masked.as_ref() != content {
         data["redacted"] = json!(true);
+    }
+    Ok(data)
+}
+
+fn select_safe_disk_range(
+    content: &str,
+    verified_hash: &str,
+    arguments: &Value,
+) -> anyhow::Result<Value> {
+    const MIN_CACHED_READ_BYTES: usize = 8 * 1024;
+    const MAX_CACHED_VERSIONS: usize = 256;
+    static SCANNED_VERSIONS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    if content.len() < MIN_CACHED_READ_BYTES {
+        return select_safe_range(content, arguments);
+    }
+    // The hash is computed from the complete bytes just read from disk. A
+    // cache hit skips rescanning those bytes, never the disk read itself.
+    // Store only hashes of files whose scan left the text unchanged.
+    let versions = SCANNED_VERSIONS.get_or_init(Mutex::default);
+    if versions
+        .lock()
+        .is_ok_and(|versions| versions.contains(verified_hash))
+    {
+        return select_range(content, arguments);
+    }
+    let data = select_safe_range(content, arguments)?;
+    if data["redacted"] != true {
+        if let Ok(mut versions) = versions.lock() {
+            if versions.len() >= MAX_CACHED_VERSIONS {
+                versions.clear();
+            }
+            versions.insert(verified_hash.to_owned());
+        }
     }
     Ok(data)
 }
@@ -638,15 +764,17 @@ fn bound_read_result(mut data: Value, max_bytes: usize) -> anyhow::Result<Value>
     let raw = data
         .as_object_mut()
         .and_then(|object| object.remove("content"))
-        .and_then(|value| value.as_str().map(str::to_owned))
+        .and_then(|value| match value {
+            Value::String(text) => Some(text),
+            _ => None,
+        })
         .unwrap_or_default();
-    let masked = gyro_core::security::redact_secrets_preserving_positions(&raw);
+    let masked = gyro_core::security::redact_secrets_preserving_positions_cow(&raw);
     data = redact_json_strings(data);
-    if masked != raw {
+    if masked.as_ref() != raw {
         data["redacted"] = json!(true);
     }
-    data["content"] = json!(masked);
-    let full = data["content"].as_str().unwrap_or("");
+    let full = masked.as_ref();
     let full_len = full.len();
     // The serialized payload is never smaller than its text, so text past the
     // result budget can never fit. Cutting it first keeps the boundary search
@@ -655,7 +783,7 @@ fn bound_read_result(mut data: Value, max_bytes: usize) -> anyhow::Result<Value>
     while !full.is_char_boundary(cap) {
         cap -= 1;
     }
-    let content = full[..cap].to_owned();
+    let content = &full[..cap];
     let already_truncated = data["truncated"].as_bool().unwrap_or(false);
     let line = data["line"].as_u64().unwrap_or(1);
     let column = data["column"].as_u64().unwrap_or(1);
@@ -1117,5 +1245,33 @@ mod tests {
         let continued = select_safe_range(&text, &arguments).unwrap();
         assert_eq!(continued["content"], "*".repeat(10));
         assert_eq!(continued["redacted"], true);
+    }
+
+    #[test]
+    fn repeated_disk_ranges_mask_changed_bytes_even_with_the_same_file_size() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().to_str().unwrap();
+        let path = workspace.path().join("source.txt");
+        let sensitive = format!("token = \"{}\"", "z".repeat(50));
+        let clean = "x".repeat(sensitive.len());
+        let background = "ordinary workspace input and valid UTF-16 positions\r\n".repeat(400);
+        fs::write(&path, format!("{clean}\r\n{background}")).unwrap();
+        let arguments = json!({"line":1, "endLine":1, "column":17, "endColumn":30});
+        let first = read_range_source(root, "source.txt").unwrap();
+        let previous =
+            select_safe_disk_range(&first.content, &first.content_hash, &arguments).unwrap();
+        let repeated =
+            select_safe_disk_range(&first.content, &first.content_hash, &arguments).unwrap();
+        assert_eq!(repeated, previous);
+        assert_eq!(repeated["content"], "x".repeat(13));
+
+        fs::write(&path, format!("{sensitive}\r\n{background}")).unwrap();
+        let changed = read_range_source(root, "source.txt").unwrap();
+        assert_eq!(first.size_bytes, changed.size_bytes);
+        assert_ne!(first.content_hash, changed.content_hash);
+        let masked =
+            select_safe_disk_range(&changed.content, &changed.content_hash, &arguments).unwrap();
+        assert_eq!(masked["redacted"], true);
+        assert_eq!(masked["content"], "*".repeat(13));
     }
 }

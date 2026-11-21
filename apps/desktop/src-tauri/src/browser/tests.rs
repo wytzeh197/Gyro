@@ -111,6 +111,61 @@ fn browser_knowledge_context_uses_capabilities_across_adapters() {
 }
 
 #[test]
+fn text_research_keeps_source_rules_without_sending_the_surface_guide() {
+    use gyro_core::provider_runtime::prompts::{claude_chat_prompt, openai_codex_chat_prompt};
+
+    let mut request = anthropic_provider_request();
+    let research = browser_knowledge::web_research_context();
+    for rule in [
+        "gyro_web_fetch",
+        "prefer official",
+        "renderingMayBeRequired",
+        "cross-origin redirect",
+        "Do not bypass access controls",
+        "Do not silently mark a failed site check as complete",
+    ] {
+        assert!(research
+            .to_ascii_lowercase()
+            .contains(&rule.to_ascii_lowercase()));
+    }
+    for task in [
+        "Summarize https://example.com/announcements",
+        "Research which model releases were announced this week",
+        "Run a web search for the release notes and cite official sources",
+    ] {
+        request.message = task.into();
+        let prompt = provider_context_message_with_capabilities(&request, None, true, true);
+        for framed in [
+            claude_chat_prompt(&prompt, None, false, true, false),
+            openai_codex_chat_prompt(&prompt, None, None, false, true, false),
+            prompt,
+        ] {
+            assert_eq!(framed.matches(research).count(), 1, "task: {task}");
+            assert!(!framed.contains(browser_knowledge::SIDE_PANEL_GUIDE));
+            assert!(!framed.contains("Current browser capability contract"));
+            assert!(framed.ends_with(task));
+        }
+    }
+    for task in [
+        "Click the Downloads button on https://example.com",
+        "Summarize https://example.com and show its screenshot",
+        "Build a Canvas item about the latest model releases",
+    ] {
+        request.message = task.into();
+        let prompt = provider_context_message_with_capabilities(&request, None, true, true);
+        assert!(prompt.contains(browser_knowledge::GUIDE), "task: {task}");
+        assert!(prompt.contains(browser_knowledge::SIDE_PANEL_GUIDE));
+    }
+    let full = browser_knowledge::context(true, true, "normal", true);
+    assert!(research.len() < full.len() / 3);
+    println!(
+        "Web research guidance: {} -> {} UTF-8 bytes",
+        full.len(),
+        research.len()
+    );
+}
+
+#[test]
 fn explicit_in_app_browser_requests_route_models_to_gyro_browser_tools() {
     for message in [
         "Can you use the in-app browser of Gyro to check usegyro.io?",

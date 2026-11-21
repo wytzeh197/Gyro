@@ -116,7 +116,7 @@ pub fn run_openai_codex_chat(
         can_resume,
     );
 
-    crate::provider_observation::native_prompt(&serde_json::json!(prompt));
+    crate::provider_observation::native_text_prompt(&prompt);
     process.current_dir(cwd);
     let speed_config = host.config()?;
     process.args(crate::fast_mode::cli_args(
@@ -482,7 +482,7 @@ pub fn run_openai_codex_app_server_chat(
         if can_resume {
             billed.set_baseline(accounting::codex_usage_baseline(&thread_result["thread"]));
         }
-        crate::provider_observation::native_prompt(&serde_json::json!(prompt));
+        crate::provider_observation::native_text_prompt(&prompt);
         let mut input = vec![serde_json::json!({ "type": "text", "text": prompt })];
         for attachment in request
             .attachments

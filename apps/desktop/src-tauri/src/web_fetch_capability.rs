@@ -82,7 +82,7 @@ pub(super) fn execute(
             || (access == CapabilityAccess::Ask
                 && app
                     .state::<session_browser::SessionBrowserManager>()
-                    .is_origin_approved(&bound.session_id, &origin)
+                    .is_origin_approved(&bound.session_id, &bound.workspace_key, &origin)
                     .unwrap_or(false)))
     })?;
     let summary = format!(

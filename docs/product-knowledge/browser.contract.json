@@ -197,12 +197,13 @@
       "name": "gyro_browser_click"
     },
     {
-      "description": "Move, click, secondary-click, or drag the mouse in this chat's browser using CSS-pixel coordinates from a recent gyro_browser_screenshot. Pass that screenshot's filename as captureId. Re-observe after acting; coordinates from a changed page are rejected.",
+      "description": "Move, hover, click, secondary-click, or drag with the model's mouse in this chat's browser using CSS-pixel coordinates from a recent gyro_browser_screenshot. Pass that screenshot's filename as captureId. The pointer glides from its last position. Re-observe after acting; coordinates from a changed page are rejected.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "action": {
-            "enum": ["hover", "click", "secondary-click", "drag"],
+            "description": "Use move to glide the model's pointer, hover for a foreground CSS hover, or click, secondary-click, or drag to press a button.",
+            "enum": ["move", "hover", "click", "secondary-click", "drag"],
             "type": "string"
           },
           "captureId": {
@@ -237,13 +238,15 @@
         "additionalProperties": false,
         "properties": {
           "ref": {
-            "description": "Optional element ref; defaults to focused element",
+            "description": "Use a ref from read_page or find, or omit it if the intended field already has focus.",
             "type": "string"
           },
           "submit": {
+            "description": "Send Enter and request form submission if the page does not handle Enter. Verify the outcome separately.",
             "type": "boolean"
           },
           "text": {
+            "description": "Replace the field with this exact text, including whitespace, or pass an empty string to clear it.",
             "type": "string"
           }
         },
@@ -281,6 +284,7 @@
             "type": "string"
           },
           "value": {
+            "description": "Exact text or option value, including an empty string, or true or false as text for a checkbox or radio button.",
             "type": "string"
           }
         },
@@ -323,7 +327,7 @@
       "name": "gyro_browser_read_page"
     },
     {
-      "description": "Find elements matching text or a CSS selector in this chat's open browser and return refs.",
+      "description": "Find visible elements matching text or a CSS selector in this chat's open browser and return refs. Set waitMs on the first page to wait for a delayed result after an interaction, then verify the matching content.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -349,6 +353,13 @@
           },
           "selector": {
             "type": "string"
+          },
+          "waitMs": {
+            "default": 0,
+            "description": "Wait for a visible match after the document becomes readable, using a query or selector and offset 0.",
+            "maximum": 5000,
+            "minimum": 0,
+            "type": "integer"
           }
         },
         "required": [],

@@ -1,5 +1,6 @@
 use crate::{
     app::config::load_config_blocking,
+    conversation_history::PrefetchedHistory,
     delegated_agents, efficiency, provider_accounting,
     provider_accounting::{provider_turn_tokens, record_provider_usage},
     provider_context, provider_reliability,
@@ -15,11 +16,13 @@ use crate::{
         runner::runner_for,
         streaming::{provider_chat_cancelled, provider_stop_message},
         tauri_host::TauriRunnerHost,
-        types::{ProviderResumeCursor, ProviderRunAttempt, ProviderRunnerOutput},
+        types::{
+            ProviderAdapterKind, ProviderResumeCursor, ProviderRunAttempt, ProviderRunnerOutput,
+        },
     },
     state::managers::ProviderCancellationManager,
     stores::parse_uuid,
-    usage::guard::{session_context_signal, usage_guard_block, UsageContext},
+    usage::guard::{should_compact_before_turn, usage_guard_block, UsageContext},
 };
 use gyro_core::{
     timing, timing::Stage as TimingStage, ProviderSessionBinding, SessionStore, UsageOrigin,
@@ -31,6 +34,18 @@ use std::{
 };
 use tauri::Manager;
 use uuid::Uuid;
+
+pub(crate) enum CompactionPoint {
+    BeforePrompt,
+    AfterReply,
+}
+
+pub(crate) struct AutoCompaction {
+    pub(crate) binding: Option<ProviderSessionBinding>,
+    pub(crate) activity_events: Vec<gyro_core::SessionEvent>,
+    history: Option<PrefetchedHistory>,
+}
+
 /// Compact a resumed session before the next prompt when its last measured
 /// fill is at or past the configured share.
 ///
@@ -45,32 +60,27 @@ pub(crate) fn auto_compact_owned_session(
     request: &ProviderChatRequest,
     binding: Option<ProviderSessionBinding>,
     usage_context: UsageContext,
-) -> anyhow::Result<(Option<ProviderSessionBinding>, Vec<gyro_core::SessionEvent>)> {
+    point: CompactionPoint,
+) -> anyhow::Result<AutoCompaction> {
+    let mut result = AutoCompaction {
+        binding,
+        activity_events: Vec::new(),
+        history: None,
+    };
     // A summary of the conversation must not compact the conversation first.
     if usage_context.origin == UsageOrigin::ContextCompaction
         || isolated_internal_purpose(request).is_some()
         || request.message.trim() == "/compact"
     {
-        return Ok((binding, Vec::new()));
+        return Ok(result);
     }
-    let percent = match load_config_blocking() {
-        Ok(config) => config.usage_guard.auto_compact_percent,
-        Err(_) => return Ok((binding, Vec::new())),
+    let config = match load_config_blocking() {
+        Ok(config) => config,
+        Err(_) => return Ok(result),
     };
     let Ok(session_id) = parse_uuid(&request.session_id) else {
-        return Ok((binding, Vec::new()));
+        return Ok(result);
     };
-    let Ok(events) = store.read_events(session_id) else {
-        return Ok((binding, Vec::new()));
-    };
-    let signals = events
-        .iter()
-        .map(session_context_signal)
-        .collect::<Vec<_>>();
-    let catalog_window = provider_context::provider_model_context_window(
-        &request.provider_id,
-        request.model_id.as_deref(),
-    );
     let control = app
         .state::<ProviderCancellationManager>()
         .flags
@@ -80,16 +90,50 @@ pub(crate) fn auto_compact_owned_session(
     let requested = control
         .as_ref()
         .is_some_and(|control| control.context_compaction_requested.load(Ordering::Acquire));
-    if !requested
-        && !provider_context::should_auto_compact_session(
+    if !requested {
+        let percent = config.usage_guard.auto_compact_percent;
+        if percent == 0 {
+            return Ok(result);
+        }
+        let declared_kind = config
+            .model_providers
+            .iter()
+            .find(|provider| provider.id == request.provider_id)
+            .and_then(|provider| provider.kind.as_deref());
+        let adapter = gyro_core::provider_runtime::api_config::provider_adapter_with_kind(
+            &request.provider_id,
+            declared_kind,
+        );
+        let recent = if matches!(point, CompactionPoint::BeforePrompt)
+            && matches!(
+                adapter.kind,
+                ProviderAdapterKind::OpenAiCompatible | ProviderAdapterKind::Ollama
+            )
+            && !(config.efficiency.policies() && config.efficiency.task_state)
+        {
+            store.read_events_with_revision(session_id)
+        } else {
+            store.read_events(session_id).map(|events| (events, None))
+        };
+        let Ok((events, revision)) = recent else {
+            return Ok(result);
+        };
+        let catalog_window = provider_context::provider_model_context_window(
+            &request.provider_id,
+            request.model_id.as_deref(),
+        );
+        if !should_compact_before_turn(
             percent,
+            adapter.kind,
             &request.provider_id,
             request.model_id.as_deref(),
             catalog_window,
-            &signals,
-        )
-    {
-        return Ok((binding, Vec::new()));
+            &events,
+        ) {
+            result.history =
+                revision.and_then(|revision| PrefetchedHistory::new(session_id, revision, events));
+            return Ok(result);
+        }
     }
     let run_id = request
         .turn_id
@@ -105,10 +149,10 @@ pub(crate) fn auto_compact_owned_session(
         provider_retry_recovery::wait_for_shared_cooldown(app, request)?;
         match compact_provider_chat_blocking(app.clone(), request.session_id.clone(), run_id) {
             Ok(response) => {
-                return Ok((
-                    store.get_provider_session_binding(session_id, &request.provider_id)?,
-                    response.activity_events,
-                ))
+                result.binding =
+                    store.get_provider_session_binding(session_id, &request.provider_id)?;
+                result.activity_events = response.activity_events;
+                return Ok(result);
             }
             Err(error) if provider_reliability::is_rate_limit_error(&error) => {
                 let hint = gyro_core::provider_retry::provider_cooldown_hint(&error)
@@ -176,9 +220,22 @@ pub(crate) fn run_provider_chat_with_retry(
     provider_retry_recovery::wait_for_shared_cooldown(app, request)?;
     let profiled = efficiency::profile(request);
     let request = &profiled;
-    let (binding, _) = auto_compact_owned_session(store, app, request, binding, usage_context)?;
-    let mut output =
-        run_provider_chat_with_retry_inner(store, app, request, binding, usage_context)?;
+    let compacted = auto_compact_owned_session(
+        store,
+        app,
+        request,
+        binding,
+        usage_context,
+        CompactionPoint::BeforePrompt,
+    )?;
+    let mut output = run_provider_chat_with_retry_inner(
+        store,
+        app,
+        request,
+        compacted.binding,
+        usage_context,
+        compacted.history,
+    )?;
     let mut continuation = request.clone();
     for round in 0..=8 {
         let Some(reports) = delegated_agents::collect_for_parent(app, request)? else {
@@ -218,8 +275,14 @@ pub(crate) fn run_provider_chat_with_retry(
             });
         let a = provider_turn_tokens(request, Some(&output));
         provider_accounting::set_usage_offset(app, &request.session_id, Some(a));
-        let next_result =
-            run_provider_chat_with_retry_inner(store, app, &continuation, binding, usage_context);
+        let next_result = run_provider_chat_with_retry_inner(
+            store,
+            app,
+            &continuation,
+            binding,
+            usage_context,
+            None,
+        );
         provider_accounting::set_usage_offset(app, &request.session_id, None);
         let mut next = next_result?;
         let b = provider_turn_tokens(&continuation, Some(&next));
@@ -235,12 +298,13 @@ pub(crate) fn run_provider_chat_with_retry(
     )
 }
 
-pub(crate) fn run_provider_chat_with_retry_inner(
+fn run_provider_chat_with_retry_inner(
     store: &SessionStore,
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
     binding: Option<ProviderSessionBinding>,
     usage_context: UsageContext,
+    mut prefetched_history: Option<PrefetchedHistory>,
 ) -> anyhow::Result<ProviderRunnerOutput> {
     if let Some(reason) = usage_guard_block(store, usage_context.origin, &request.provider_id) {
         anyhow::bail!(reason);
@@ -274,6 +338,7 @@ pub(crate) fn run_provider_chat_with_retry_inner(
                 continuation.as_ref().unwrap_or(request),
                 resume_cursor,
                 attempt,
+                prefetched_history.take(),
             );
             attempt.tools_dispatched |=
                 provider_accounting::has_dispatched_tools(app, &request.session_id);
@@ -418,6 +483,7 @@ pub(crate) fn run_provider_chat_once(
     request: &ProviderChatRequest,
     resume_cursor: Option<&ProviderResumeCursor>,
     attempt: &mut ProviderRunAttempt,
+    prefetched_history: Option<PrefetchedHistory>,
 ) -> anyhow::Result<ProviderRunnerOutput> {
     gyro_core::model_retirements::validate_provider_model(
         &request.provider_id,
@@ -456,7 +522,7 @@ pub(crate) fn run_provider_chat_once(
         memory_store.invalidate_project_memory_receipt(memory_session.id, &request.provider_id)?;
     }
     let output = runner.run(
-        &TauriRunnerHost::new(app),
+        &TauriRunnerHost::with_prefetched_history(app, prefetched_history),
         &expanded,
         resume_cursor,
         attempt,

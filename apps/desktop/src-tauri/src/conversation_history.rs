@@ -1,5 +1,9 @@
 use crate::stores::{open_store, parse_uuid};
-use gyro_core::{SessionEvent, SessionEventKind};
+use gyro_core::{SessionEvent, SessionEventKind, SessionStore};
+use std::{borrow::Cow, collections::VecDeque};
+use uuid::Uuid;
+
+type HistoryLine<'a> = (&'static str, Cow<'a, str>);
 
 /// Turns kept at full length before the transcript starts clipping harder.
 ///
@@ -10,14 +14,67 @@ const HISTORY_RECENT_TURNS: usize = 6;
 const HISTORY_RECENT_CHARS: usize = 2_000;
 const HISTORY_OLDER_CHARS: usize = 400;
 
+/// A turn's bounded history and the revision read during its compaction check.
+/// Prompt assembly verifies the revision before reusing the history.
+pub(super) struct PrefetchedHistory {
+    session_id: Uuid,
+    revision: String,
+    text: Option<String>,
+}
+
+impl PrefetchedHistory {
+    pub(super) fn new(
+        session_id: Uuid,
+        revision: String,
+        events: Vec<SessionEvent>,
+    ) -> Option<Self> {
+        if model_switch_awaits_first_reply(&events) {
+            return None;
+        }
+        Some(Self {
+            session_id,
+            revision,
+            text: conversation_history_from_events(events),
+        })
+    }
+
+    fn is_current(&self, store: &SessionStore, session_id: Uuid) -> bool {
+        self.session_id == session_id
+            && store.transcript_revision(session_id).as_deref().ok() == Some(self.revision.as_str())
+    }
+}
+
 /// Load the local Gyro transcript for any model handoff or failed resume.
 ///
 /// A failed resume and the first turn after a model switch both use the tapered
 /// window: six recent turns stay at 2,000 characters and older turns clip to
 /// 400. The current user request is not repeated here.
-pub(super) fn acp_conversation_history_text_for_session(session_id: &str) -> Option<String> {
+pub(super) fn conversation_history_text_for_session(
+    session_id: &str,
+    prefetched_history: Option<PrefetchedHistory>,
+) -> Option<String> {
     let session_uuid = parse_uuid(session_id).ok()?;
     let store = open_store().ok()?;
+    history_from_store(
+        &store,
+        session_uuid,
+        super::efficiency::config(),
+        prefetched_history,
+    )
+}
+
+fn history_from_store(
+    store: &SessionStore,
+    session_uuid: Uuid,
+    config: gyro_core::efficiency::Config,
+    prefetched_history: Option<PrefetchedHistory>,
+) -> Option<String> {
+    let uses_task_state = config.policies() && config.task_state;
+    if let Some(history) = prefetched_history
+        .filter(|history| !uses_task_state && history.is_current(store, session_uuid))
+    {
+        return history.text;
+    }
     // Scan the existing bounded event window before selecting conversation.
     // Tool activity must not consume the 40-message history allowance.
     let events = store.read_events(session_uuid).ok()?;
@@ -25,7 +82,6 @@ pub(super) fn acp_conversation_history_text_for_session(session_id: &str) -> Opt
         let transcript = store.read_transcript_events(session_uuid).unwrap_or(events);
         // Model switches use task state independently of experimental prompt
         // compaction. Respect the user's explicit efficiency/task-state opt-outs.
-        let config = super::efficiency::config();
         let checkpoint = if config.enabled && config.task_state {
             store
                 .get_session(session_uuid)
@@ -33,7 +89,7 @@ pub(super) fn acp_conversation_history_text_for_session(session_id: &str) -> Opt
                 .flatten()
                 .and_then(|session| {
                     super::efficiency::checkpoint(
-                        &store,
+                        store,
                         session_uuid,
                         &session.workspace_path.to_string_lossy(),
                         session.workspace_identity.revision,
@@ -45,7 +101,7 @@ pub(super) fn acp_conversation_history_text_for_session(session_id: &str) -> Opt
         };
         return model_handoff_history(checkpoint, transcript);
     }
-    if super::efficiency::config().policies() && super::efficiency::config().task_state {
+    if uses_task_state {
         let context = store.read_efficiency_context_events(session_uuid).ok()?;
         if let Some(record) = context
             .iter()
@@ -155,17 +211,21 @@ impl LocalCompaction {
     }
 }
 
-pub(super) fn local_compaction_summary(events: &[SessionEvent]) -> Option<LocalCompaction> {
+pub(super) fn has_reply_since_checkpoint(events: &[SessionEvent]) -> bool {
     let since = events
         .iter()
         .rposition(|event| local_context_checkpoint(event).is_some())
         .map_or(0, |index| index + 1);
-    if !events[since..].iter().any(|event| {
+    events[since..].iter().any(|event| {
         event.kind == SessionEventKind::AssistantMessage && !event.message.trim().is_empty()
-    }) {
+    })
+}
+
+pub(super) fn local_compaction_summary(events: &[SessionEvent]) -> Option<LocalCompaction> {
+    if !has_reply_since_checkpoint(events) {
         return None;
     }
-    let lines = history_lines(events.to_vec());
+    let lines = history_lines(events);
     let history = join_history(&lines)?;
     const MAX_CHARS: usize = 8_000;
     if history.chars().count() <= MAX_CHARS {
@@ -192,9 +252,7 @@ pub(super) fn local_compaction_summary(events: &[SessionEvent]) -> Option<LocalC
 /// middle is what a character cap cannot carry whole. It is returned rather
 /// than dropped so the checkpoint can describe it turn by turn instead of
 /// leaving a hole where the conversation used to be.
-fn split_compacted_history(
-    lines: Vec<(String, String)>,
-) -> (String, Vec<(String, String)>, String) {
+fn split_compacted_history(lines: Vec<HistoryLine<'_>>) -> (String, Vec<HistoryLine<'_>>, String) {
     const PREFIX_CHARS: usize = 1_500;
     const TAIL_CHARS: usize = 4_800;
 
@@ -242,7 +300,7 @@ fn split_compacted_history(
 /// so the next prompt is not starting from a blank where forty turns used to
 /// be. No paraphrase is attempted, because that would need a model call and
 /// this path deliberately does not make one.
-fn condensed_turns_digest(condensed: &[(String, String)]) -> String {
+fn condensed_turns_digest(condensed: &[HistoryLine<'_>]) -> String {
     const DIGEST_TURN_CHARS: usize = 200;
     const DIGEST_CHARS: usize = 1_600;
 
@@ -253,7 +311,7 @@ fn condensed_turns_digest(condensed: &[(String, String)]) -> String {
             .lines()
             .map(str::trim)
             .find(|line| !line.is_empty())
-            .unwrap_or(text.as_str());
+            .unwrap_or(text.as_ref());
         let clipped: String = first.chars().take(DIGEST_TURN_CHARS).collect();
         let elided = first.chars().count() > DIGEST_TURN_CHARS;
         let line = format!("- {role}: {clipped}{}", if elided { "…" } else { "" });
@@ -296,57 +354,52 @@ fn model_switch_awaits_first_reply(events: &[SessionEvent]) -> bool {
 }
 
 /// The handoff history as message lines: role plus text, already tapered.
-fn history_lines(events: Vec<SessionEvent>) -> Vec<(String, String)> {
-    collect_history_lines(events, true)
+fn history_lines(events: &[SessionEvent]) -> Vec<HistoryLine<'_>> {
+    taper_history_lines(conversation_before_current_request(events))
 }
 
-fn history_lines_full(events: Vec<SessionEvent>) -> Vec<(String, String)> {
-    collect_history_lines(events, false)
-}
-
-fn collect_history_lines(events: Vec<SessionEvent>, taper: bool) -> Vec<(String, String)> {
+fn conversation_before_current_request(events: &[SessionEvent]) -> Vec<HistoryLine<'_>> {
     let mut lines = conversation_lines(events);
     // Drop the trailing user line — it is the message currently being sent and
     // already lives in the main prompt. Dropped before the taper so it does not
     // spend one of the full-length slots on text the prompt already carries.
-    if lines.last().is_some_and(|(role, _)| role == "User") {
+    if lines.last().is_some_and(|(role, _)| *role == "User") {
         lines.pop();
-    }
-    if taper {
-        taper_history_lines(lines)
-    } else {
-        lines
-    }
-}
-
-/// Every spoken turn since the last checkpoint, whole and in order.
-fn conversation_lines(events: Vec<SessionEvent>) -> Vec<(String, String)> {
-    let mut lines: Vec<(String, String)> = Vec::new();
-    for event in events {
-        if let Some(summary) = local_context_checkpoint(&event) {
-            lines.clear();
-            lines.push(("Context summary".to_string(), summary.to_string()));
-            continue;
-        }
-        let role = match event.kind {
-            SessionEventKind::UserMessage => "User",
-            SessionEventKind::AssistantMessage => "Assistant",
-            _ => continue,
-        };
-        let text = event.message.trim();
-        if text.is_empty() || (role == "User" && text == "/compact") {
-            continue;
-        }
-        lines.push((role.to_string(), text.to_string()));
     }
     lines
 }
 
-fn taper_history_lines(mut lines: Vec<(String, String)>) -> Vec<(String, String)> {
+/// Every spoken turn since the last checkpoint, whole and in order.
+fn conversation_lines(events: &[SessionEvent]) -> Vec<HistoryLine<'_>> {
+    let mut lines = Vec::new();
+    for event in events {
+        if let Some(summary) = local_context_checkpoint(event) {
+            lines.clear();
+            lines.push(("Context summary", Cow::Borrowed(summary)));
+            continue;
+        }
+        if let Some((role, text)) = spoken_line(event) {
+            lines.push((role, Cow::Borrowed(text)));
+        }
+    }
+    lines
+}
+
+fn spoken_line(event: &SessionEvent) -> Option<(&'static str, &str)> {
+    let role = match event.kind {
+        SessionEventKind::UserMessage => "User",
+        SessionEventKind::AssistantMessage => "Assistant",
+        _ => return None,
+    };
+    let text = event.message.trim();
+    (!text.is_empty() && (role != "User" || text != "/compact")).then_some((role, text))
+}
+
+fn taper_history_lines(mut lines: Vec<HistoryLine<'_>>) -> Vec<HistoryLine<'_>> {
     if lines.len() > 40 {
         let summary = lines
             .first()
-            .filter(|(role, _)| role.as_str() == "Context summary")
+            .filter(|(role, _)| *role == "Context summary")
             .cloned();
         lines.drain(..lines.len() - if summary.is_some() { 39 } else { 40 });
         if let Some(summary) = summary {
@@ -367,12 +420,11 @@ fn taper_history_lines(mut lines: Vec<(String, String)>) -> Vec<(String, String)
             } else {
                 HISTORY_OLDER_CHARS
             };
-            let clipped: String = text.chars().take(budget).collect();
-            let elided = text.chars().nth(budget).is_some();
-            (
-                role,
-                format!("{clipped}{}", if elided { " […]" } else { "" }),
-            )
+            let text = match text.char_indices().nth(budget) {
+                Some((end, _)) => Cow::Owned(format!("{} […]", &text[..end])),
+                None => text,
+            };
+            (role, text)
         })
         .collect()
 }
@@ -380,18 +432,25 @@ fn taper_history_lines(mut lines: Vec<(String, String)>) -> Vec<(String, String)
 /// The handoff history as one string: what the model is given when Gyro has to
 /// reconstruct the conversation instead of resuming a provider session.
 fn conversation_history_from_events(events: Vec<SessionEvent>) -> Option<String> {
-    join_history(&history_lines(events))
+    join_history(&history_lines(&events))
 }
 
-fn conversation_history_from_events_full(events: Vec<SessionEvent>) -> Option<String> {
-    join_history(&history_lines_full(events))
+/// Count the same bounded transcript the owned runners replay. The pending
+/// user message travels in the new request and is not history to summarize.
+pub(super) fn carried_history_characters(events: &[SessionEvent]) -> u64 {
+    let lines = history_lines(events);
+    let characters = lines
+        .iter()
+        .map(|(role, text)| role.len() + 2 + text.chars().count())
+        .sum::<usize>();
+    (characters + 2 * lines.len().saturating_sub(1)) as u64
 }
 
-fn history_line((role, text): &(String, String)) -> String {
+fn history_line((role, text): &HistoryLine<'_>) -> String {
     format!("{role}: {text}")
 }
 
-fn join_history(lines: &[(String, String)]) -> Option<String> {
+fn join_history(lines: &[HistoryLine<'_>]) -> Option<String> {
     let joined = lines
         .iter()
         .map(history_line)
@@ -407,6 +466,7 @@ fn join_history(lines: &[(String, String)]) -> Option<String> {
 /// over-budget transcript keeps its opening and its newest lines: background
 /// plus the thread being continued.
 const COMPACTION_TRANSCRIPT_CHARS: usize = 24_000;
+const OMITTED_TRANSCRIPT_MIDDLE: &str = "\n\n[middle of this conversation omitted]\n\n";
 
 /// The longest checkpoint a summary may become.
 ///
@@ -431,15 +491,92 @@ preamble.";
 /// This is the untapered history: the summarizer is the one reader that has to
 /// see whole turns, because its reply is what later prompts get instead of
 /// them.
-pub(super) fn compaction_transcript_for_session(session_id: &str) -> Option<String> {
-    let session_uuid = parse_uuid(session_id).ok()?;
-    let store = open_store().ok()?;
-    let events = store.read_transcript_events(session_uuid).ok()?;
-    conversation_history_from_events_full(events).map(|text| bounded_transcript(&text))
+pub(super) fn compaction_transcript_for_session(
+    store: &SessionStore,
+    session_id: Uuid,
+) -> Option<String> {
+    let mut transcript = CompactionTranscript::default();
+    store
+        .visit_transcript_events(session_id, |event| {
+            transcript.record(event);
+            true
+        })
+        .ok()?;
+    transcript.finish()
 }
 
-fn bounded_transcript(transcript: &str) -> String {
-    bounded_transcript_to(transcript, COMPACTION_TRANSCRIPT_CHARS)
+#[derive(Default)]
+struct CompactionTranscript {
+    first: String,
+    first_chars: usize,
+    last: VecDeque<char>,
+    omitted_middle: bool,
+    pending_user: Option<String>,
+}
+
+impl CompactionTranscript {
+    fn record(&mut self, event: &SessionEvent) {
+        if let Some(summary) = local_context_checkpoint(event) {
+            *self = Self::default();
+            self.line("Context summary", summary);
+            return;
+        }
+        let Some((role, text)) = spoken_line(event) else {
+            return;
+        };
+        // A trailing user message belongs to the next request. Only include
+        // it here if another spoken message follows it.
+        if let Some(previous) = self.pending_user.take() {
+            self.line("User", &previous);
+        }
+        if role == "User" {
+            self.pending_user = Some(text.to_owned());
+        } else {
+            self.line(role, text);
+        }
+    }
+
+    fn line(&mut self, role: &str, text: &str) {
+        if !self.first.is_empty() {
+            self.append("\n\n");
+        }
+        self.append(role);
+        self.append(": ");
+        self.append(text);
+    }
+
+    fn append(&mut self, text: &str) {
+        const FIRST: usize = COMPACTION_TRANSCRIPT_CHARS / 3;
+        const LAST: usize = COMPACTION_TRANSCRIPT_CHARS - FIRST;
+
+        let split = text
+            .char_indices()
+            .nth(FIRST - self.first_chars)
+            .map_or(text.len(), |(index, _)| index);
+        let (first, rest) = text.split_at(split);
+        self.first.push_str(first);
+        self.first_chars += first.chars().count();
+
+        // Keep the end of an oversized message without copying its middle.
+        let skip = rest
+            .char_indices()
+            .rev()
+            .nth(LAST)
+            .map_or(0, |(index, ch)| index + ch.len_utf8());
+        let rest = &rest[skip..];
+        let remove = (self.last.len() + rest.chars().count()).saturating_sub(LAST);
+        self.omitted_middle |= skip > 0 || remove > 0;
+        self.last.drain(..remove);
+        self.last.extend(rest.chars());
+    }
+
+    fn finish(mut self) -> Option<String> {
+        if self.omitted_middle {
+            self.first.push_str(OMITTED_TRANSCRIPT_MIDDLE);
+        }
+        self.first.extend(self.last);
+        (!self.first.is_empty()).then_some(self.first)
+    }
 }
 
 fn bounded_transcript_to(transcript: &str, limit: usize) -> String {
@@ -451,7 +588,7 @@ fn bounded_transcript_to(transcript: &str, limit: usize) -> String {
     let tail_chars = limit - head_chars;
     let head: String = transcript.chars().take(head_chars).collect();
     let tail: String = transcript.chars().skip(total - tail_chars).collect();
-    format!("{head}\n\n[middle of this conversation omitted]\n\n{tail}")
+    format!("{head}{OMITTED_TRANSCRIPT_MIDDLE}{tail}")
 }
 
 /// How much of the main chat one side chat prompt carries: about 4K tokens.
@@ -509,7 +646,7 @@ fn side_chat_context_from_events(
 /// Unlike a handoff, this keeps a trailing user line: in the main chat that is
 /// the request still being worked on, and no other part of the prompt has it.
 fn side_chat_transcript(events: Vec<SessionEvent>) -> Option<String> {
-    join_history(&taper_history_lines(conversation_lines(events)))
+    join_history(&taper_history_lines(conversation_lines(&events)))
         .map(|text| bounded_transcript_to(&text, SIDE_CHAT_CONTEXT_CHARS))
 }
 
@@ -539,7 +676,7 @@ fn strip_code_fence(text: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
+    use serde_json::Value;
 
     #[test]
     fn interrupted_response_commentary_is_not_replayed_as_a_completed_answer() {
@@ -825,6 +962,65 @@ mod tests {
     }
 
     #[test]
+    fn prefetched_history_matches_fresh_history_and_expires_after_an_append() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(gyro_core::GyroPaths::from_base_dir(
+            temp.path().join("data"),
+        ))
+        .unwrap();
+        let session = store
+            .create_session(
+                temp.path(),
+                gyro_core::SessionOrigin::Desktop,
+                "Continue work",
+            )
+            .unwrap();
+        let append = |kind, message, payload| {
+            store
+                .append_event(session.id, kind, message, payload)
+                .unwrap();
+        };
+        append(
+            SessionEventKind::UserMessage,
+            "Review the retry loop",
+            Value::Null,
+        );
+        append(
+            SessionEventKind::AssistantMessage,
+            "The retry limit is three",
+            Value::Null,
+        );
+        append(SessionEventKind::UserMessage, "Proceed", Value::Null);
+        let prefetch = || {
+            let (events, revision) = store.read_events_with_revision(session.id).unwrap();
+            PrefetchedHistory::new(session.id, revision.unwrap(), events)
+        };
+        let render = |history| history_from_store(&store, session.id, Default::default(), history);
+        let snapshot = prefetch().unwrap();
+        assert!(snapshot.is_current(&store, session.id));
+        assert!(!snapshot.is_current(&store, Uuid::new_v4()));
+        assert_eq!(render(Some(snapshot)), render(None));
+
+        let stale = prefetch().unwrap();
+        append(
+            SessionEventKind::AssistantMessage,
+            "The tests passed",
+            Value::Null,
+        );
+        assert!(!stale.is_current(&store, session.id));
+        let fresh = render(None).unwrap();
+        assert!(fresh.ends_with("Assistant: The tests passed"));
+        assert_eq!(render(Some(stale)).as_deref(), Some(fresh.as_str()));
+
+        append(
+            SessionEventKind::SystemEvent,
+            "Switched model",
+            serde_json::json!({"kind":"model-switch"}),
+        );
+        assert!(prefetch().is_none());
+    }
+
+    #[test]
     fn side_chat_opening_turn_carries_the_main_chat_and_its_running_request() {
         let session = Uuid::new_v4();
         let event =
@@ -956,14 +1152,70 @@ mod tests {
     }
 
     #[test]
-    fn compaction_transcript_keeps_both_ends_of_an_over_budget_chat() {
-        let mut transcript = String::from("Assistant: opening state\n\n");
-        transcript.push_str(&"middle line\n\n".repeat(4_000));
-        transcript.push_str("User: the newest request");
-        let bounded = bounded_transcript(&transcript);
-        assert!(bounded.chars().count() <= COMPACTION_TRANSCRIPT_CHARS + 60);
-        assert!(bounded.starts_with("Assistant: opening state"));
-        assert!(bounded.ends_with("User: the newest request"));
-        assert!(bounded.contains("[middle of this conversation omitted]"));
+    fn streamed_compaction_matches_the_full_transcript_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let store =
+            SessionStore::open(gyro_core::GyroPaths::from_base_dir(dir.path().join("data")))
+                .unwrap();
+        let session = store
+            .create_session(dir.path(), gyro_core::SessionOrigin::Desktop, "Long chat")
+            .unwrap();
+        let append = |kind, text: String, payload| {
+            store.append_event(session.id, kind, text, payload).unwrap();
+        };
+        let verify = || {
+            let events = store.read_transcript_events(session.id).unwrap();
+            let expected = join_history(&conversation_before_current_request(&events))
+                .map(|text| bounded_transcript_to(&text, COMPACTION_TRANSCRIPT_CHARS));
+            let actual = compaction_transcript_for_session(&store, session.id);
+            assert_eq!(actual, expected);
+            actual
+        };
+
+        append(
+            SessionEventKind::UserMessage,
+            "Current request".into(),
+            Value::Null,
+        );
+        assert!(verify().is_none());
+        // A new checkpoint resets everything, including the pending request.
+        append(
+            SessionEventKind::SystemEvent,
+            "Compacted".into(),
+            serde_json::json!({"contextSummary":"Prior state 🦀"}),
+        );
+        let checkpoint = verify().unwrap();
+        assert_eq!(checkpoint, "Context summary: Prior state 🦀");
+        append(
+            SessionEventKind::UserMessage,
+            "  Follow up  ".into(),
+            Value::Null,
+        );
+        let spoken_prefix = format!("{checkpoint}\n\nUser: Follow up\n\nAssistant: ");
+        append(
+            SessionEventKind::AssistantMessage,
+            "水".repeat(COMPACTION_TRANSCRIPT_CHARS - spoken_prefix.chars().count()),
+            Value::Null,
+        );
+        assert!(!verify().unwrap().contains(OMITTED_TRANSCRIPT_MIDDLE));
+        append(
+            SessionEventKind::AssistantMessage,
+            format!("{}latest reply", "あ🚀".repeat(29_000)),
+            Value::Null,
+        );
+        append(
+            SessionEventKind::UserMessage,
+            "Pending request".into(),
+            Value::Null,
+        );
+        append(
+            SessionEventKind::SystemEvent,
+            "Tool output".into(),
+            serde_json::json!({"output":"build log\n".repeat(10_000)}),
+        );
+        let bounded = verify().unwrap();
+        assert!(bounded.starts_with(&spoken_prefix));
+        assert!(bounded.ends_with("latest reply"));
+        assert!(bounded.contains(OMITTED_TRANSCRIPT_MIDDLE));
     }
 }

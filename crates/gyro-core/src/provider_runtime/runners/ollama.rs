@@ -192,10 +192,11 @@ pub fn run_ollama_chat(
         .map(str::trim)
         .filter(|model| !model.is_empty())
         .ok_or_else(|| anyhow::anyhow!("select an installed Ollama model before sending"))?;
-    let discovered = crate::discover_ollama_model_with_cancellation(provider.base_url.as_deref(), model, &cancellation)?
+    let selected = crate::ollama::discover_selected_model(provider.base_url.as_deref(), model, &cancellation)?
         .ok_or_else(|| anyhow::anyhow!(
             "Ollama model `{model}` is not installed; refresh the model picker or run `ollama pull {model}`"
         ))?;
+    let discovered = selected.model;
     let expanded = host.expand_browser_images(request, discovered.supports_images)?;
     let request = &expanded;
     let run_mode = capability_run_mode_for_chat(request.mode);
@@ -400,35 +401,40 @@ pub fn run_ollama_chat(
                     e.catalog_fallbacks = e.catalog_fallbacks.saturating_add(1)
                 });
             }
-            let retired = crate::efficiency::context::prepare_owned_model_request_with_policy(
+            let retired = crate::efficiency::context::prepare_owned_model_request_for_task(
                 &mut messages,
                 config.efficiency.evidence_policy(),
+                &request.message,
             );
             crate::provider_observation::retired_context(retired);
-            let round_tools = if compatibility {
+            let tools_offered = if compatibility {
                 if round_budget.is_some_and(|limit| round >= limit) {
                     messages.push(serde_json::json!({
                         "role": "user",
                         "content": "The tool budget is exhausted. Reply now with a final JSON object describing completed work and what remains. Do not request another tool."
                     }));
                 }
-                Vec::new()
+                false
             } else {
-                provider_reliability::tools_for_round(&mut messages, &tools, round, round_budget)
+                provider_reliability::tool_round_available(&mut messages, round, round_budget)
+                    && !tools.is_empty()
             };
-            let tools_offered = !round_tools.is_empty();
-            let turn = crate::ollama::ollama_tool_chat_with_updates(
-                OllamaToolChatRequest {
-                    base_url: provider.base_url.as_deref(),
-                    model,
-                    messages: messages.clone(),
-                    tools: round_tools,
-                    context_window_tokens: discovered.context_window_tokens,
-                    // The allocation this turn already made, never the meter's
-                    // window: a model maximum here would allocate (and reload
-                    // with) the full KV cache for every short prompt.
-                    minimum_context_window_tokens: allocated_window,
+            let round_request = OllamaToolChatRequest {
+                base_url: provider.base_url.as_deref(),
+                model,
+                messages: std::mem::take(&mut messages),
+                tools: if tools_offered {
+                    std::mem::take(&mut tools)
+                } else {
+                    Vec::new()
                 },
+                context_window_tokens: discovered.context_window_tokens,
+                // Preserve the allocation already made by this tool loop.
+                minimum_context_window_tokens: allocated_window,
+            };
+            let turn = crate::ollama::ollama_tool_chat_ref(
+                &round_request,
+                selected.digest.as_deref(),
                 &cancellation,
                 |delta| {
                     if !compatibility {
@@ -446,8 +452,12 @@ pub fn run_ollama_chat(
                 |tokens, window| {
                     runner::emit_request_usage(host, request, accounted_usage, tokens, window)
                 },
-            )
-            .map_err(|error| {
+            );
+            messages = round_request.messages;
+            if tools_offered {
+                tools = round_request.tools;
+            }
+            let turn = turn.map_err(|error| {
                 if error.to_string().contains(OLLAMA_CANCELLED_MESSAGE)
                     || cancellation.is_cancelled()
                 {

@@ -338,6 +338,10 @@ impl Drop for SessionScope {
     }
 }
 
+pub(super) fn has_session_scope() -> bool {
+    SCOPED_STORE.with(|current| current.borrow().is_some())
+}
+
 /// Model-facing reads require the session scope established by the host. A
 /// content-derived address is an identifier, never proof of authorization.
 /// Older unscoped cache entries are deliberately not used as a fallback.

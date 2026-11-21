@@ -130,8 +130,15 @@ fn acp_stop_is_end_turn(reason: &str) -> bool {
 /// Sentence-final punctuation and a closed code fence count as finished. A
 /// trailing ellipsis does not: that is how the cut document looks.
 pub fn answer_looks_cut_off(text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.chars().count() < 80 {
+    use crate::provider_runtime::prompts::{
+        before_trailing_control_lines, has_complete_clarification,
+    };
+    let prose = before_trailing_control_lines(text);
+    if has_complete_clarification(prose, &text[prose.len()..]) {
+        return false;
+    }
+    let trimmed = prose.trim();
+    if trimmed.chars().take(80).count() < 80 {
         return false;
     }
     if trimmed.ends_with("```") {
@@ -531,12 +538,13 @@ impl KimiAcpConnection {
     fn send_request(&mut self, method: &str, params: Value) -> Result<u64> {
         let id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
-        self.send(json!({
+        let mut request = json!({
             "jsonrpc": "2.0",
             "id": id,
             "method": method,
-            "params": params,
-        }))?;
+        });
+        request["params"] = params;
+        self.send(request)?;
         Ok(id)
     }
 
@@ -562,6 +570,7 @@ impl KimiAcpConnection {
 
     fn send(&mut self, value: Value) -> Result<()> {
         let bytes = serde_json::to_vec(&value)?;
+        drop(value);
         if bytes.len() > ACP_MAX_REQUEST_BYTES {
             anyhow::bail!(
                 "{} ACP request exceeded its size limit",
@@ -746,6 +755,32 @@ impl KimiAcpConnection {
 
 pub fn run_kimi_acp<Delta, Activity, Approval, WriteFile>(
     request: KimiAcpRequest,
+    on_delta: Delta,
+    on_activity: Activity,
+    on_approval: Approval,
+    on_write_file: WriteFile,
+) -> Result<KimiAcpOutput>
+where
+    Delta: FnMut(&str),
+    Activity: FnMut(&KimiAcpActivity),
+    Approval: FnMut(&KimiAcpApprovalRequest) -> Result<KimiAcpApprovalDecision>,
+    WriteFile: FnMut(&Path, &str, Option<&str>) -> Result<()>,
+{
+    run_kimi_acp_with_context(
+        request,
+        None,
+        on_delta,
+        on_activity,
+        on_approval,
+        on_write_file,
+    )
+}
+
+/// The host may prepare the leading prompt and any handoff history after ACP
+/// has chosen a fresh or resumed session. Attachments are already in `prompt`.
+pub(crate) fn run_kimi_acp_with_context<Delta, Activity, Approval, WriteFile>(
+    request: KimiAcpRequest,
+    prepare_context: Option<&mut dyn FnMut(bool) -> (String, Option<String>)>,
     mut on_delta: Delta,
     mut on_activity: Activity,
     mut on_approval: Approval,
@@ -759,6 +794,7 @@ where
 {
     run_kimi_acp_with_usage_probe(
         request,
+        prepare_context,
         &mut on_delta,
         &mut on_activity,
         &mut on_approval,
@@ -769,6 +805,7 @@ where
 
 fn run_kimi_acp_with_usage_probe<Delta, Activity, Approval, WriteFile>(
     mut request: KimiAcpRequest,
+    prepare_context: Option<&mut dyn FnMut(bool) -> (String, Option<String>)>,
     mut on_delta: &mut Delta,
     mut on_activity: &mut Activity,
     mut on_approval: &mut Approval,
@@ -978,20 +1015,26 @@ where
 
     crate::timing::mark(crate::timing::Stage::ProtocolReady);
     let mut prompt = std::mem::take(&mut request.prompt);
-    if resumed {
-        if let Some(short_prompt) = request.resumed_prompt.as_deref() {
-            if let Some(text) = prompt.first_mut().and_then(|part| part.get_mut("text")) {
-                *text = Value::String(short_prompt.to_string());
+    let history = if let Some(prepare_context) = prepare_context {
+        let (message, history) = prepare_context(resumed);
+        prompt.insert(0, json!({"type":"text", "text":message}));
+        history
+    } else {
+        if resumed {
+            if let Some(short_prompt) = request.resumed_prompt.take() {
+                if let Some(text) = prompt.first_mut().and_then(|part| part.get_mut("text")) {
+                    *text = Value::String(short_prompt);
+                }
             }
         }
-    }
+        request.conversation_history_text.take()
+    };
     // Gyro sessions are local. Whenever this provider turn is not continuing an
     // open agent session — first turn after a model handoff, failed reopen, or
     // an agent that never supported resume — inject the local transcript so any
     // model can pick up where another left off.
     if !resumed {
-        if let Some(history) = request
-            .conversation_history_text
+        if let Some(history) = history
             .as_deref()
             .map(str::trim)
             .filter(|text| !text.is_empty())
@@ -1033,6 +1076,7 @@ where
                 retry.timeout = retry.timeout.saturating_sub(started_at.elapsed());
                 let mut output = run_kimi_acp_with_usage_probe(
                     retry,
+                    None,
                     on_delta,
                     on_activity,
                     on_approval,
@@ -1049,8 +1093,13 @@ where
         None
     };
 
+    anyhow::ensure!(
+        !request.cancellation.is_cancelled(),
+        "{} ACP run cancelled",
+        request.provider_label
+    );
     crate::timing::mark(crate::timing::Stage::PromptSent);
-    crate::provider_observation::native_prompt(&json!(prompt));
+    crate::provider_observation::native_prompt_parts(&prompt);
     connection.begin_usage();
     // The before-probe ran first and begin_usage cleared its replay. A resumed
     // Kimi session can still show that occupancy as soon as the turn starts.
@@ -1064,10 +1113,9 @@ where
     // not the model's token count. Grok sends that count as `_meta.totalTokens`
     // on the updates that follow. Tool text is not a count and does not fill
     // the meter while those frames are still arriving.
-    let prompt_id = connection.send_request(
-        "session/prompt",
-        json!({"sessionId": session_id, "prompt": prompt}),
-    )?;
+    let mut prompt_params = json!({"sessionId": session_id});
+    prompt_params["prompt"] = Value::Array(prompt);
+    let prompt_id = connection.send_request("session/prompt", prompt_params)?;
     connection.declined_permission = false;
     let result = wait_for_response(
         &mut connection,
@@ -1132,7 +1180,7 @@ where
         } else {
             DECLINED_TOOL_CONTINUATION
         };
-        crate::provider_observation::native_prompt(&json!(continuation));
+        crate::provider_observation::native_text_prompt(continuation);
         let continuation_id = connection.send_request(
             "session/prompt",
             json!({
@@ -2691,9 +2739,9 @@ mod tests {
         acp_session_reopen_methods, acp_stop_is_end_turn, acp_stop_is_output_limit,
         answer_looks_cut_off, check_kimi_acp_health, classify_approval, is_acp_method_not_found,
         permission_option_id, plan_mode_denies_approval, resolve_workspace_write_path,
-        run_kimi_acp, thought_tail, CredentialPolicy, KimiAcpApprovalDecision, KimiAcpApprovalKind,
-        KimiAcpHealthStatus, KimiAcpMode, KimiAcpRequest, THOUGHT_LABEL_CHARS,
-        USAGE_PROBE_FAILURES,
+        run_kimi_acp, run_kimi_acp_with_context, thought_tail, CredentialPolicy,
+        KimiAcpApprovalDecision, KimiAcpApprovalKind, KimiAcpHealthStatus, KimiAcpMode,
+        KimiAcpRequest, THOUGHT_LABEL_CHARS, USAGE_PROBE_FAILURES,
     };
 
     #[test]
@@ -3745,12 +3793,20 @@ done
                 CancellationToken::default(),
                 resumed.then(|| "same-session".into()),
             );
-            request.prompt = vec![json!({"type":"text","text":"full instructions"})];
-            request.resumed_prompt = Some("selected short".into());
-            request.conversation_history_text = Some("earlier context".into());
+            let attachment = json!({"type":"resource", "resource":{"uri":"file:///fixture.txt", "text":"attached evidence"}});
+            request.prompt = vec![attachment.clone()];
             request.timeout = Duration::from_secs(6);
-            let output = run_kimi_acp(
+            let mut prepared = Vec::new();
+            let output = run_kimi_acp_with_context(
                 request,
+                Some(&mut |reopened| {
+                    prepared.push(reopened);
+                    if reopened {
+                        ("selected short".into(), None)
+                    } else {
+                        ("full instructions".into(), Some("earlier context".into()))
+                    }
+                }),
                 |_| {},
                 |_| {},
                 |_| panic!("unexpected approval"),
@@ -3758,10 +3814,11 @@ done
             )
             .unwrap();
             assert_eq!(output.resumed, resumed);
+            assert_eq!(prepared, [resumed]);
             let sent = std::fs::read_to_string(temp.path().join("generation-requests")).unwrap();
             assert_eq!(sent.lines().count(), 1);
             let sent: serde_json::Value = serde_json::from_str(sent.trim()).unwrap();
-            let expected = if resumed {
+            let mut expected = if resumed {
                 vec![json!({"type":"text","text":"selected short"})]
             } else {
                 vec![
@@ -3769,6 +3826,7 @@ done
                     json!({"type":"text","text":"full instructions"}),
                 ]
             };
+            expected.push(attachment);
             assert_eq!(sent["params"]["prompt"], json!(expected));
         }
     }
@@ -4345,6 +4403,12 @@ done
         assert!(answer_looks_cut_off(cut));
         assert!(answer_looks_cut_off(&format!("{cut}...")));
         assert!(answer_looks_cut_off(&format!("{cut}\u{2026}")));
+        assert!(answer_looks_cut_off(&format!(
+            "{cut}\nGYRO_TASKS: {{\"tasks\":[]}}"
+        )));
+        assert!(answer_looks_cut_off(&format!(
+            "{cut}.\nGYRO_TASKS: {{\"tasks\":[{{\"title\":\"Work"
+        )));
         assert!(!answer_looks_cut_off(
             "Verify the worker loop, keep the existing quality gate, and leave the relay least-privilege."
         ));
@@ -4355,6 +4419,69 @@ done
         assert!(acp_stop_is_end_turn("stop"));
         assert!(acp_stop_is_end_turn("completed"));
         assert!(!acp_stop_is_end_turn("refusal"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn complete_plan_with_control_trailers_uses_one_generation() {
+        let prose = "Verify the new worker reads the existing lease, preserves queued work, and correctly handles an expired lease.";
+        let answer = format!(
+            "{prose}\n{}\n{}",
+            r#"GYRO_QUESTIONS: {"questions":[{"question":"Which rollout?","options":[{"label":"Pilot"},{"label":"All"}]}]}"#,
+            r#"GYRO_TASKS: {"tasks":[{"title":"Measure queue age","prompt":"Capture the wait time"}]}"#,
+        );
+        let update = |text: &str| {
+            json!({
+            "jsonrpc":"2.0","method":"session/update","params":{
+                "update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":text}}
+            }
+        }).to_string()
+        };
+        let script = r#"
+while IFS= read -r line; do
+  id=${line#*'"id":'}
+  id=${id%%,*}
+  case "$line" in
+    *'"method":"initialize"'*) printf '{"id":%s,"result":{"authMethods":[{"id":"login"}]}}\n' "$id" ;;
+    *'"method":"session/new"'*) printf '{"id":%s,"result":{"sessionId":"plan-session"}}\n' "$id" ;;
+    *'"method":"session/prompt"'*)
+      if test -f generations; then
+        update='NEXT_UPDATE'
+        stop='end_turn'
+      else
+        update='FIRST_UPDATE'
+        stop='FIRST_STOP'
+      fi
+      printf 'generation\n' >> generations
+      printf '%s\n' "$update"
+      printf '{"id":%s,"result":{"stopReason":"%s"}}\n' "$id" "$stop" ;;
+    *) printf '{"id":%s,"result":{}}\n' "$id" ;;
+  esac
+done
+"#;
+        for (initial, stop, continuation) in [
+            (answer.as_str(), "end_turn", None),
+            ("Verify the new worker reads the existing lease, preserves queued work, and correctly handles an", "end_turn", Some(" expired lease.")),
+            (answer.as_str(), "max_tokens", Some("\nThe provider finished the final check.")),
+        ] {
+            let (temp, program) = acp_fixture(&script
+                .replace("FIRST_UPDATE", &update(initial))
+                .replace("FIRST_STOP", stop)
+                .replace("NEXT_UPDATE", &update(continuation.unwrap_or(" Extra generation."))));
+            let mut request = fixture_request(program, temp.path().into(), CancellationToken::default(), None);
+            request.mode = KimiAcpMode::Plan;
+            let output = run_kimi_acp(
+                request,
+                |_| {},
+                |_| {},
+                |_| panic!("a plan ending in text must not ask for tool consent"),
+                |_, _, _| panic!("a plan ending in text must not write files"),
+            ).unwrap();
+            let generations = std::fs::read_to_string(temp.path().join("generations")).unwrap().lines().count();
+            assert_eq!(generations, if continuation.is_some() { 2 } else { 1 });
+            assert_eq!(output.response, format!("{initial}{}", continuation.unwrap_or("")));
+            assert!(!output.truncated);
+        }
     }
 
     #[cfg(unix)]
@@ -4942,10 +5069,18 @@ done
             Some("stale-session".into()),
         );
         request.provider_label = "xAI".into();
-        request.conversation_history_text = Some("User: hello\n\nAssistant: hi there".into());
-        request.resumed_prompt = Some("short resumed context".into());
-        let output = run_kimi_acp(
+        request.prompt.clear();
+        let mut history_loads = 0;
+        let output = run_kimi_acp_with_context(
             request,
+            Some(&mut |resumed| {
+                assert!(!resumed, "fallback must use the fresh prompt");
+                history_loads += 1;
+                (
+                    "full instructions".into(),
+                    Some("User: hello\n\nAssistant: hi there".into()),
+                )
+            }),
             |_| {},
             |_| {},
             |_| Ok(KimiAcpApprovalDecision::RejectOnce),
@@ -4954,6 +5089,7 @@ done
         .unwrap();
         assert_eq!(output.session_id, "fresh-after-failed-reopen");
         assert!(!output.resumed);
+        assert_eq!(history_loads, 1);
         assert_eq!(output.response, "history-aware reply");
     }
 

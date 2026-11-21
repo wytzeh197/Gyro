@@ -35,9 +35,51 @@ function latestNativeTurnEvents(events: SessionEvent[]) {
     );
 }
 
+/** Provider requests expire with the run that was interrupted. File proposals stay reviewable. */
+export function reconcileInterruptedProviderApprovals(events: SessionEvent[]) {
+  const interruptedTurns = new Set<string>();
+  for (const event of events) {
+    const payload = payloadOf(event);
+    const turn = turnId(event);
+    if (
+      turn &&
+      event.kind === "system-event" &&
+      payload.kind === "provider-status" &&
+      payload.status === "failed" &&
+      payload.recoveryKind === "interrupted" &&
+      payload.historical !== true
+    ) {
+      interruptedTurns.add(`${event.sessionId}:${turn}`);
+    }
+  }
+  if (!interruptedTurns.size) return events;
+  return events.map((event) => {
+    if (event.kind !== "approval-requested") return event;
+    const payload = payloadOf(event);
+    if (
+      !interruptedTurns.has(`${event.sessionId}:${turnId(event)}`) ||
+      payload.historical === true ||
+      (payload.kind !== "provider-tool-approval" && payload.kind !== "capability-approval") ||
+      !["pending", "waiting", "requested"].includes(String(payload.status ?? "pending"))
+    ) {
+      return event;
+    }
+    return {
+      ...event,
+      payload: {
+        ...payload,
+        status: "cancelled",
+        error: "This turn ended before the approval was decided.",
+      },
+    };
+  });
+}
+
 /** Navigation reflects the latest turn's reconciled approvals, never imported history. */
 export function pendingSessionApprovals(events: SessionEvent[]) {
-  return pendingSubagentApprovals(latestNativeTurnEvents(events));
+  return pendingSubagentApprovals(
+    reconcileInterruptedProviderApprovals(latestNativeTurnEvents(events)),
+  );
 }
 
 export function sessionApprovalCounts(

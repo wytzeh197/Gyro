@@ -611,12 +611,34 @@
   thead {
   color: var(--gyro-muted);
 }
+/* Column labels read like the Providers table head: tiny, uppercase, faint,
+   so the two tables on neighbouring pages share one header voice. */
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-cli-profiles-table
+  thead th {
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-tiny);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding-block: var(--gyro-space-group);
+  text-transform: uppercase;
+}
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-cli-profiles-table
+  tbody :is(th, td) {
+  padding-block: var(--gyro-space-comfortable);
+}
+/* Monospace runs visually larger than the UI face at the same size, so
+   commands step down to the support size. */
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings
   .gyro-cli-profiles-table
   code {
   font: inherit;
   font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-font-support);
 }
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings
@@ -667,7 +689,6 @@
     .gyro-workspace-contribution-title > span,
     .gyro-provider-custom-list > li > div,
     .gyro-usage-toolbar > div:first-child,
-    .gyro-import-archived > div,
     .gyro-import-job-header > div,
     .gyro-import-project-expand > span
   ) {
@@ -704,4 +725,14 @@
   .gyro-settings-group-rows
   > :is(.gyro-remote-stack, .gyro-usage-dashboard) {
   padding-top: var(--gyro-space-card);
+}
+
+/* Council is mounted inside the Connected providers group but reads as its
+   own group, so it takes the same 40px group rhythm instead of butting
+   against the provider list. */
+:root[data-theme]
+  .gyro-settings-surface.is-minimal-settings
+  .gyro-settings-group-rows
+  > .gyro-settings-disclosure-group {
+  margin-top: calc(var(--gyro-space-section) * 2);
 }

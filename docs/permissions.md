@@ -25,9 +25,13 @@ Approval opens the destinations for one invocation. Public IPv4 resolution is
 required. Model terminals can host loopback preview servers. Their outbound
 access stays blocked in bounded mode.
 
-Provider sign-in, model traffic, and separately approved Browser and Web Fetch
-actions follow their own policies. See the [execution boundary
-matrix](agent-execution-boundaries.md) for route details and acceptance.
+Provider sign-in and model traffic follow their own policies. Browser actions,
+web fetch, and Gyro web search use site permissions. **Allow for this chat**
+remembers a site in the current chat until Gyro quits. **Allow for project**
+saves the site across chats. Open **Settings → Permissions → Saved sites**
+from a project to revoke a saved site and clear its remembered access in that
+project's chats. See the [execution boundary matrix](agent-execution-boundaries.md)
+for route details and acceptance.
 
 ## Stop and recover
 

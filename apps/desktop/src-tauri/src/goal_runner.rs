@@ -6,7 +6,6 @@ use crate::{
             normal_chat_requests_plan, ChatMode, ProviderChatRequest, ProviderChatResponse,
         },
         commands::run_goal_chat,
-        events::provider_turn_has_unfinished_attempt,
         session_lifecycle::ProviderSessionLease,
         streaming::provider_stop_message,
     },
@@ -282,7 +281,7 @@ fn persist(
     goal: &str,
     run: &Run,
 ) -> Result<Option<SessionEvent>, String> {
-    let events = store.read_context_events(session).map_err(to_string)?;
+    let events = store.read_goal_events(session).map_err(to_string)?;
     let Some(current) = session_goal::stored_session_goal(&events) else {
         return Ok(None);
     };
@@ -388,7 +387,7 @@ pub(super) fn run(
 ) -> Result<ProviderChatResponse, String> {
     let store = open_store()?;
     let session = parse_uuid(&request.session_id)?;
-    let events = store.read_context_events(session).map_err(to_string)?;
+    let events = store.read_goal_events(session).map_err(to_string)?;
     let goal = session_goal::stored_or_unsaved_goal(&events, request.goal.clone());
     if let Some(expected) = expected_run {
         if !latest_event(&events)
@@ -455,7 +454,7 @@ pub(super) fn run(
         request.turn_id = turn_id;
     }
     run.goal_version =
-        session_goal::goal_revision(&store.read_context_events(session).map_err(to_string)?);
+        session_goal::goal_revision(&store.read_goal_events(session).map_err(to_string)?);
     run.limits.validate()?;
     let lease = ProviderSessionLease::for_run(&store, session).map_err(to_string)?;
     let control = app
@@ -472,7 +471,7 @@ pub(super) fn run(
     let _deadline = Deadline::start(control.clone(), remaining);
     let mut last_response = None;
     loop {
-        let current_events = store.read_context_events(session).map_err(to_string)?;
+        let current_events = store.read_goal_events(session).map_err(to_string)?;
         let current = session_goal::stored_session_goal(&current_events);
         if !current
             .as_ref()
@@ -562,7 +561,7 @@ pub(super) fn run(
                     run.after_response(&response);
                 }
                 let current = session_goal::stored_session_goal(
-                    &store.read_context_events(session).map_err(to_string)?,
+                    &store.read_goal_events(session).map_err(to_string)?,
                 );
                 if current
                     .as_ref()
@@ -617,12 +616,10 @@ fn recoverable_request(
     else {
         return Ok(None);
     };
-    if store
-        .latest_provider_status_for_turn(session, turn)
-        .map_err(to_string)?
-        .is_some()
-        || provider_turn_has_unfinished_attempt(store, session, turn).map_err(to_string)?
-    {
+    let (status, unfinished) = store
+        .provider_turn_status_for_dispatch(session, turn)
+        .map_err(to_string)?;
+    if status.is_some() || unfinished {
         return Ok(None);
     }
     request.full_access = false;
@@ -632,7 +629,7 @@ fn recoverable_request(
 }
 
 pub(super) fn pause(store: &SessionStore, session: Uuid) -> Result<SessionEvent, String> {
-    let events = store.read_context_events(session).map_err(to_string)?;
+    let events = store.read_goal_events(session).map_err(to_string)?;
     let goal = session_goal::stored_session_goal(&events)
         .filter(|g| g.status == "active")
         .ok_or_else(|| "this chat has no active goal to pause".to_string())?;
@@ -655,7 +652,7 @@ pub(super) fn recover(app: tauri::AppHandle) {
             let store = open_store()?;
             let mut queued = Vec::new();
             for session in store.list_sessions().map_err(to_string)? {
-                let events = store.read_context_events(session.id).map_err(to_string)?;
+                let events = store.read_goal_events(session.id).map_err(to_string)?;
                 let Some(event) = latest_event(&events) else { continue; };
                 let Some(goal) = session_goal::stored_session_goal(&events).filter(|g| g.status == "active") else { continue; };
                 let Some(mut run) = stored_run(event).filter(|r| matches!(r.status.as_str(), "running" | "queued")) else { continue; };
@@ -679,7 +676,7 @@ pub(super) fn recover(app: tauri::AppHandle) {
                 if let Ok(store) = open_store() {
                     if let Ok(events) = Uuid::parse_str(&session_id)
                         .map_err(to_string)
-                        .and_then(|id| store.read_context_events(id).map_err(to_string))
+                        .and_then(|id| store.read_goal_events(id).map_err(to_string))
                     {
                         if let Some(mut run) = latest_event(&events)
                             .and_then(stored_run)

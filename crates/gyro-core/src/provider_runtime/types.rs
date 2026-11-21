@@ -53,6 +53,7 @@ pub struct ProviderChatRequest {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InternalRequestPurpose {
     CodeReview,
+    BrowserTrace,
     WorkflowExtraction,
     ChangeSummary,
     ContextSummary,
@@ -63,6 +64,7 @@ impl InternalRequestPurpose {
     pub fn label(self) -> &'static str {
         match self {
             Self::CodeReview => "code review",
+            Self::BrowserTrace => "browser trace",
             Self::WorkflowExtraction => "workflow extraction",
             Self::ChangeSummary => "file-change summary",
             Self::ContextSummary => "conversation checkpoint summary",

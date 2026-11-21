@@ -28,6 +28,7 @@ pub(crate) async fn get_project_capability_policy(
 
 #[tauri::command]
 pub(crate) async fn save_project_capability_policy(
+    app: tauri::AppHandle,
     request: SaveProjectCapabilityPolicyRequest,
 ) -> Result<ProjectCapabilityPolicy, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -36,9 +37,30 @@ pub(crate) async fn save_project_capability_policy(
         if request.policy.workspace_key != workspace_key {
             return Err("capability policy workspace changed; reload and try again".into());
         }
-        open_store()?
-            .save_project_capability_policy(request.policy, request.expected_revision)
-            .map_err(to_string)
+        use gyro_core::CapabilityClass::BrowserNavigate;
+        use tauri::Manager;
+        let store = open_store()?;
+        let current = store.get_project_capability_policy(&workspace_key).map_err(to_string)?;
+        let saved = store
+            .save_project_capability_policy(
+                request.policy,
+                request.expected_revision.or(Some(current.revision)),
+            )
+            .map_err(to_string)?;
+        let removed_origins: Vec<_> = current.grants.iter()
+            .filter(|grant| grant.class == BrowserNavigate && grant.scope_kind == "origin")
+            .filter(|grant| !saved.grants.iter().any(|remaining| {
+                remaining.class == BrowserNavigate
+                    && remaining.scope_kind == "origin"
+                    && remaining.scope_value == grant.scope_value
+            }))
+            .map(|grant| grant.scope_value.as_str())
+            .collect();
+        if !removed_origins.is_empty() {
+            app.state::<crate::session_browser::SessionBrowserManager>()
+                .forget_project_origins(&workspace_key, &removed_origins)?;
+        }
+        Ok(saved)
     })
     .await
     .map_err(|error| format!("capability policy save worker failed: {error}"))?

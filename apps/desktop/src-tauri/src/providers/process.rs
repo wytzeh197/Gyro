@@ -1,4 +1,4 @@
-use crate::{context_compaction, conversation_history::acp_conversation_history_text_for_session};
+use crate::{context_compaction, conversation_history::conversation_history_text_for_session};
 use gyro_core::augmented_gui_path;
 pub(crate) use gyro_core::provider_runtime::api_config::provider_adapter_for;
 use std::process::Command;
@@ -11,7 +11,7 @@ pub(crate) fn acp_conversation_history_text(
     if context_compaction::summary_stream_muted(session_id) {
         return None;
     }
-    acp_conversation_history_text_for_session(session_id)
+    conversation_history_text_for_session(session_id, None)
 }
 
 pub(crate) fn command_with_gui_path(command: &str) -> Command {

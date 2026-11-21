@@ -9,7 +9,7 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { SettingsEmptyState, SettingsGroup, SettingsSwitch } from "./settings-controls";
+import { SettingsEmptyState, SettingsGroup, SettingsRow, SettingsSwitch } from "./settings-controls";
 import gyroLogoLight from "./assets/gyro-logo.svg";
 import gyroLogoDark from "./assets/gyro-logo-white.svg";
 import type {
@@ -396,7 +396,11 @@ export function ProjectImportSettings({
   );
   return (
     <div className="gyro-project-import-settings">
-      <SettingsGroup id="import-sources" label="Import sources">
+      <SettingsGroup
+        id="import-sources"
+        label="Import sources"
+        description="Your projects stay in their current folders. Choose the chats you want to bring into Gyro."
+      >
         {loadingSources && (
           <div className="gyro-import-loading" role="status">
             <LoaderCircle aria-hidden="true" size={15} />
@@ -432,26 +436,21 @@ export function ProjectImportSettings({
             </button>
           </div>
         ))}
-      </SettingsGroup>
-      <div className="gyro-import-scan-controls">
-        <div className="gyro-import-archived">
-          <div>
-            <strong>Include archived chats</strong>
-            <span>Include archived Codex chats when you scan.</span>
-          </div>
+        <SettingsRow
+          label="Include archived chats"
+          detail="Include archived Codex chats when you scan."
+        >
           <SettingsSwitch
             checked={includeArchived}
             disabled={busy}
             label="Include archived chats"
             onChange={onIncludeArchivedChange}
           />
-        </div>
-        {scan ? scanAction : null}
-      </div>
-      <p className="gyro-import-helper">
-        Your projects stay in their current folders. Choose the chats you want
-        to bring into Gyro.
-      </p>
+        </SettingsRow>
+      </SettingsGroup>
+      {scan ? (
+        <div className="gyro-import-scan-controls">{scanAction}</div>
+      ) : null}
       {error && (
         <div className="gyro-import-error" role="alert">
           <span>{error}</span>

@@ -3,26 +3,40 @@
 //! https://openrouter.ai/docs/features/prompt-caching (checked 2026-11-02).
 use serde_json::{json, Value};
 pub fn apply(payload: &mut Value, endpoint: &url::Url, model: &str, enabled: bool) {
+    let fields = chat_cache_fields(endpoint, model, enabled, || {
+        super::cache_plan::openai_prefix_key(payload)
+    });
+    for (key, value) in fields {
+        payload[key] = value;
+    }
+}
+
+pub(crate) fn chat_cache_fields(
+    endpoint: &url::Url,
+    model: &str,
+    enabled: bool,
+    openai_key: impl FnOnce() -> String,
+) -> Vec<(&'static str, Value)> {
     if !enabled || endpoint.scheme() != "https" {
-        return;
+        return Vec::new();
     }
     let host = super::cache_plan::host_of(endpoint);
     let openrouter_claude = host == "openrouter.ai" && model.starts_with("anthropic/");
     if !openrouter_claude && !super::cache_plan::KEY_HOSTS.contains(&host) {
-        return;
+        return Vec::new();
     }
     let _measure =
         crate::timing::EfficiencyTimer::start(crate::timing::EfficiencyComponent::CacheControls);
     if openrouter_claude {
         // Claude routes cache nothing unless asked. OpenRouter keeps this one
         // breakpoint on the last cacheable block as the conversation grows.
-        payload["cache_control"] = json!({"type": "ephemeral"});
-        return;
+        return vec![("cache_control", json!({"type": "ephemeral"}))];
     }
-    payload["prompt_cache_key"] = json!(super::cache_plan::openai_prefix_key(payload));
+    let mut fields = vec![("prompt_cache_key", Value::String(openai_key()))];
     if let Some(options) = super::cache_plan::openai_cache_options(model) {
-        payload["prompt_cache_options"] = options;
+        fields.push(("prompt_cache_options", options));
     }
+    fields
 }
 #[cfg(test)]
 mod tests {

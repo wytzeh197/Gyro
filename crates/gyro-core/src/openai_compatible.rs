@@ -301,6 +301,19 @@ pub fn openai_compat_tool_chat_with_updates<F, U>(
     request: OpenAiCompatChatRequest<'_>,
     cancellation: &CancellationToken,
     on_delta: F,
+    on_usage: U,
+) -> Result<OpenAiCompatChatResponse>
+where
+    F: FnMut(&str),
+    U: FnMut(UsageTokens),
+{
+    openai_compat_tool_chat_ref(&request, cancellation, on_delta, on_usage)
+}
+
+pub(crate) fn openai_compat_tool_chat_ref<F, U>(
+    request: &OpenAiCompatChatRequest<'_>,
+    cancellation: &CancellationToken,
+    on_delta: F,
     mut on_usage: U,
 ) -> Result<OpenAiCompatChatResponse>
 where
@@ -311,7 +324,7 @@ where
         cancellation,
         |emit| {
             openai_compat_tool_chat_once_with_updates(
-                &request,
+                request,
                 cancellation,
                 emit,
                 &mut on_usage,
@@ -376,7 +389,7 @@ where
         if !state.saw_usage {
             return;
         }
-        let tokens = state.accounted_usage(0, 0, false);
+        let tokens = state.accounted_usage(|| 0, 0, false);
         if last_live_usage != Some(tokens) {
             last_live_usage = Some(tokens);
             on_usage(tokens);
@@ -398,13 +411,17 @@ where
     let initially_include_usage = include_usage;
     let mut observation = None;
     let mut receipt = UsageReceipt::start(cancellation);
+    let mut post = crate::chat_http::ChatPost::new(
+        &url,
+        api_key,
+        chat_payload(request, &endpoint, include_usage),
+        CHAT_IDLE_TIMEOUT,
+        openai_compat_host_is_loopback(&url),
+    );
+    let prompt_observation = crate::provider_observation::ChatObservation::new(post.payload());
     let response = crate::provider_retry::http_response(cancellation, || {
-        let mut payload = chat_payload(request, &endpoint, include_usage);
-        // Host check inside apply decides. api.openai.com keeps prompt_cache_key and
-        // OpenRouter's Claude routes gain cache_control; DeepSeek and Mistral gain neither.
-        crate::efficiency::cache::apply(&mut payload, &endpoint, model, true);
-        observation = Some(crate::provider_observation::Request::start(&payload));
-        let result = match post_chat(&url, api_key, &payload, &receipt.transport) {
+        observation = Some(prompt_observation.start(post.payload()));
+        let result = match post.send(&receipt.transport) {
             Err(ureq::Error::Status(400, response)) => {
                 observation.as_mut().unwrap().rejected();
                 let mut body = String::new();
@@ -416,10 +433,9 @@ where
                     && crate::provider_retry::compatibility_retry()
                 {
                     include_usage = false;
-                    let mut payload = chat_payload(request, &endpoint, false);
-                    crate::efficiency::cache::apply(&mut payload, &endpoint, model, true);
-                    observation = Some(crate::provider_observation::Request::start(&payload));
-                    post_chat(&url, api_key, &payload, &receipt.transport)
+                    post.remove_field("stream_options");
+                    observation = Some(prompt_observation.start(post.payload()));
+                    post.send(&receipt.transport)
                 } else {
                     Err(ureq::Error::Status(
                         400,
@@ -639,12 +655,11 @@ where
             .iter()
             .map(|call| call.name.chars().count() + call.arguments.chars().count())
             .sum::<usize>();
-    let input_chars = crate::provider_observation::text_size(
-        &serde_json::json!({"messages": request.messages, "tools": request.tools}),
-    )
-    .0;
-    let accounted_usage =
-        state.accounted_usage(input_chars, output_chars, receipt_completed && final_usage);
+    let accounted_usage = state.accounted_usage(
+        || crate::provider_observation::messages_and_tools_chars(&request.messages, &request.tools),
+        output_chars,
+        receipt_completed && final_usage,
+    );
     observation.accounted_usage(accounted_usage);
     // Accounting completion can precede a failed generation. Preserve the
     // final provider counts before returning an output-limit/error result.
@@ -774,33 +789,39 @@ pub fn openai_compat_list_model_metadata(
 
 const USER_AGENT: &str = concat!("gyro/", env!("CARGO_PKG_VERSION"));
 
-fn chat_payload(
-    request: &OpenAiCompatChatRequest<'_>,
+fn chat_payload<'a>(
+    request: &'a OpenAiCompatChatRequest<'_>,
     endpoint: &Url,
     include_optional_fields: bool,
-) -> serde_json::Value {
-    let mut payload = serde_json::json!({
-        "model": request.model.trim(),
-        "stream": true,
-        "messages": request.messages,
-    });
-    if !request.tools.is_empty()
-        && (request.allow_tool_calls || supports_disabled_tool_catalog(endpoint))
-    {
-        payload["tools"] = serde_json::Value::Array(request.tools.clone());
-        if !request.allow_tool_calls {
-            payload["tool_choice"] = serde_json::json!("none");
-        }
+) -> crate::chat_http::ChatPayload<'a> {
+    let model = request.model.trim();
+    let tools = (!request.tools.is_empty()
+        && (request.allow_tool_calls || supports_disabled_tool_catalog(endpoint)))
+    .then_some(request.tools.as_slice());
+    let mut payload = crate::chat_http::ChatPayload::new(&request.messages, tools);
+    payload.insert("model", model.into());
+    payload.insert("stream", true.into());
+    if tools.is_some() && !request.allow_tool_calls {
+        payload.insert("tool_choice", "none".into());
     }
     if include_optional_fields {
-        payload["stream_options"] = serde_json::json!({ "include_usage": true });
+        payload.insert(
+            "stream_options",
+            serde_json::json!({ "include_usage": true }),
+        );
     }
     if let Some(effort) = request
         .reasoning_effort
         .map(str::trim)
         .filter(|effort| !effort.is_empty())
     {
-        payload["reasoning_effort"] = serde_json::Value::String(effort.to_string());
+        payload.insert("reasoning_effort", effort.into());
+    }
+    let cache_fields = crate::efficiency::cache::chat_cache_fields(endpoint, model, true, || {
+        crate::efficiency::cache_plan::openai_prefix_key_for(&request.messages, &tools)
+    });
+    for (key, value) in cache_fields {
+        payload.insert(key, value);
     }
     payload
 }
@@ -816,22 +837,6 @@ fn supports_disabled_tool_catalog(endpoint: &Url) -> bool {
             (Some("api.deepseek.com"), "" | "/v1") => true,
             _ => false,
         }
-}
-
-fn post_chat(
-    url: &Url,
-    api_key: &str,
-    payload: &serde_json::Value,
-    cancellation: &CancellationToken,
-) -> std::result::Result<crate::chat_http::Response, ureq::Error> {
-    crate::chat_http::post(
-        url,
-        api_key,
-        payload,
-        cancellation,
-        CHAT_IDLE_TIMEOUT,
-        openai_compat_host_is_loopback(url),
-    )
 }
 
 /// Append a path segment to the configured base path, preserving any gateway
@@ -968,12 +973,12 @@ impl ChatAccumulator {
 
     fn accounted_usage(
         &self,
-        input_chars: usize,
+        estimate_input_chars: impl FnOnce() -> usize,
         output_chars: usize,
         receipt_complete: bool,
     ) -> UsageTokens {
         if !self.saw_usage {
-            return UsageTokens::estimated(input_chars, output_chars)
+            return UsageTokens::estimated(estimate_input_chars(), output_chars)
                 .partial(UsageReason::MissingUsage);
         }
         let mut tokens = self.usage.tokens();
@@ -1764,6 +1769,14 @@ mod tests {
         }
     }
 
+    fn payload_json(
+        request: &OpenAiCompatChatRequest<'_>,
+        endpoint: &Url,
+        include_usage: bool,
+    ) -> serde_json::Value {
+        serde_json::to_value(chat_payload(request, endpoint, include_usage)).unwrap()
+    }
+
     #[test]
     fn checkpoint_catalog_preserves_definitions_and_openai_cache_key() {
         for base in [
@@ -1774,13 +1787,11 @@ mod tests {
         ] {
             let endpoint = openai_compat_endpoint(base).unwrap();
             let mut request = checkpoint_request(base);
-            let mut working = chat_payload(&request, &endpoint, true);
-            crate::efficiency::cache::apply(&mut working, &endpoint, request.model.trim(), true);
+            let working = payload_json(&request, &endpoint, true);
             let original_messages = request.messages.clone();
             request.allow_tool_calls = false;
             request.messages.push(serde_json::json!({"role":"user","content":"Give the checkpoint; no further tools."}));
-            let mut checkpoint = chat_payload(&request, &endpoint, true);
-            crate::efficiency::cache::apply(&mut checkpoint, &endpoint, request.model.trim(), true);
+            let checkpoint = payload_json(&request, &endpoint, true);
             assert_eq!(checkpoint["tools"], working["tools"], "{base}");
             assert_eq!(checkpoint["tool_choice"], "none");
             assert!(working.get("tool_choice").is_none());
@@ -1817,8 +1828,8 @@ mod tests {
         let mut request = checkpoint_request("https://api.openai.com/v1");
         request.allow_tool_calls = false;
         let endpoint = openai_compat_endpoint(request.base_url).unwrap();
-        let with_usage = chat_payload(&request, &endpoint, true);
-        let without_usage = chat_payload(&request, &endpoint, false);
+        let with_usage = payload_json(&request, &endpoint, true);
+        let without_usage = payload_json(&request, &endpoint, false);
         assert!(without_usage.get("stream_options").is_none());
         for key in [
             "tools",
@@ -1850,11 +1861,11 @@ mod tests {
         ] {
             let endpoint = openai_compat_endpoint(base).unwrap();
             let mut request = checkpoint_request(base);
-            let working = chat_payload(&request, &endpoint, true);
+            let working = payload_json(&request, &endpoint, true);
             assert_eq!(working["tools"], serde_json::json!(request.tools), "{base}");
             assert!(working.get("tool_choice").is_none());
             request.allow_tool_calls = false;
-            let checkpoint = chat_payload(&request, &endpoint, true);
+            let checkpoint = payload_json(&request, &endpoint, true);
             assert!(checkpoint.get("tools").is_none(), "{base}");
             assert!(checkpoint.get("tool_choice").is_none(), "{base}");
             assert_eq!(checkpoint["reasoning_effort"], "high");
@@ -1868,7 +1879,7 @@ mod tests {
         let endpoint = openai_compat_endpoint(request.base_url).unwrap();
         for allow_calls in [false, true] {
             request.allow_tool_calls = allow_calls;
-            let payload = chat_payload(&request, &endpoint, true);
+            let payload = payload_json(&request, &endpoint, true);
             assert!(payload.get("tools").is_none());
             assert!(payload.get("tool_choice").is_none());
         }
@@ -2454,7 +2465,7 @@ mod tests {
                 ..Default::default()
             });
             for final_receipt in [true, false] {
-                let accounted = state.accounted_usage(0, 0, final_receipt);
+                let accounted = state.accounted_usage(|| 0, 0, final_receipt);
                 assert_eq!(accounted, tokens);
             }
         }
@@ -2752,7 +2763,8 @@ mod tests {
         }))
         .unwrap();
         state.record_usage(&frame);
-        let tokens = state.accounted_usage(80_000, 40_000, true);
+        let tokens =
+            state.accounted_usage(|| panic!("provider counts need no estimate"), 40_000, true);
         assert_eq!(
             (
                 tokens.input_tokens,

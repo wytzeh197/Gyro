@@ -181,6 +181,7 @@ export const CAPABILITY_UI = {
   "github-push": { label: "Push branch", row: "tool" },
 
   "web-fetch": { label: "Fetch page", row: "tool" },
+  "web-search": { label: "Search the web", row: "tool" },
   "memory-read": { label: "Read memory", row: "tool" },
   "memory-write": { label: "Remember", row: "tool" },
   "research-run": { label: "Research sub-agent", row: "tool" },

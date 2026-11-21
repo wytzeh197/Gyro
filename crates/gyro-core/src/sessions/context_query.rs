@@ -1,4 +1,13 @@
 //! Select the same durable context without a history scan for every old row.
+pub(super) const ALL_CONTEXT: &str = "
+    select event_json from session_context_events
+    where session_id = ?1 order by log_offset asc";
+
+pub(super) const GOAL_CONTEXT: &str = "
+    select event_json from session_context_events
+    where session_id = ?1 and json_extract(event_json, '$.kind') = 'goal-updated'
+    order by log_offset asc";
+
 pub(super) const EFFICIENCY_CONTEXT: &str = "
     with latest as (
         select json_extract(event_json, '$.kind') as kind, max(log_offset) as log_offset
@@ -122,6 +131,56 @@ mod tests {
         assert_eq!(after.last().unwrap().id, newest.id);
         assert_eq!(after.len(), before.len());
         assert_eq!(store.read_context_events(session.id).unwrap().len(), 25);
+    }
+
+    #[test]
+    fn goal_selection_keeps_revisions_across_the_first_read_and_reopen() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "goal history")
+            .unwrap();
+        let goal = store
+            .append_event(
+                session.id,
+                SessionEventKind::GoalUpdated,
+                "Goal set",
+                serde_json::json!({"action":"set","text":"Review the plan"}),
+            )
+            .unwrap();
+        let plan = store
+            .append_event(
+                session.id,
+                SessionEventKind::PlanUpdated,
+                "Plan updated",
+                serde_json::json!({"content":"Review the plan","kind":"goal-updated"}),
+            )
+            .unwrap();
+        let ids = |events: Vec<SessionEvent>| events.into_iter().map(|e| e.id).collect::<Vec<_>>();
+        assert_eq!(ids(store.read_goal_events(session.id).unwrap()), [goal.id]);
+        assert_eq!(
+            ids(store.read_context_events(session.id).unwrap()),
+            [goal.id, plan.id]
+        );
+
+        drop(store);
+        let store = SessionStore::open(paths).unwrap();
+        let clear = store
+            .append_event(
+                session.id,
+                SessionEventKind::GoalUpdated,
+                "Goal cleared",
+                serde_json::json!({"action":"clear"}),
+            )
+            .unwrap();
+        let events = store.read_goal_events(session.id).unwrap();
+        assert_eq!(events[1].payload, clear.payload);
+        assert_eq!(ids(events), [goal.id, clear.id]);
+        assert_eq!(
+            ids(store.read_context_events(session.id).unwrap()),
+            [goal.id, plan.id, clear.id]
+        );
     }
 
     #[test]

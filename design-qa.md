@@ -1,3 +1,40 @@
+# App-wide polish pass (sessions, workspace, settings, menus)
+
+**final result: passed with notes (2 pre-existing workbench-check failures and 1 flaky browser test; see Checks)**
+
+- Chat change summary: the per-file "Review" action is a quiet secondary in both themes (`--gyro-control-bg` / `--gyro-text`). Before, it was an ink-filled button that competed with the composer's send. The button and its file row are now vertically centred, not top-aligned (`chat.css`).
+- Slash menu: the command column is 112px wide instead of 92px, so longer command names no longer truncate (`chat.css`).
+- Sidebar session rows: legacy Gemini sessions show their provider logo again. `providerIdForSession` dropped `"gemini"` because it is no longer in the provider list (`workspace-sidebar.tsx`).
+- Source control: the light-theme repository chip no longer gets a second tint inside the panel head, and the panel's top action gets the compact gap below it (`styles.css`).
+- GitHub setup card: its button is a quiet secondary, because Commit is the source control panel's one primary action (`styles.css`).
+- Import projects: "Include archived chats" is a standard `SettingsRow` + `SettingsSwitch` instead of a one-off checkbox line. The Scan controls align right, and the dead `.gyro-import-archived` / `.gyro-import-helper` rules are removed (`project-import-settings.tsx`, `project-import-settings.css`, `quiet-controls.css`, `settings-design.css`, `settings-layout.css`).
+- CLI Profiles: the Saved profiles table head uses the same faint, tiny, uppercase head as the Providers table. Body rows get comfortable padding and commands use support-size mono (`settings-layout.css`).
+- Chat & agents: the Council disclosure group gets the section gap above it instead of sitting flush against the group above (`settings-layout.css`).
+- Usage & limits: the usage footnote moved inside the "Warnings & run controls" group, so it no longer floats under the page (`surfaces.tsx`).
+- Plan & billing: "Billing is not available in this build" is a regular settings row with a detail line (`billing-settings.tsx`).
+- Reviewed and left as is: the "Ready to commit" environment card dot uses `--gyro-attention` on purpose, because it means "needs you". Also left: menus (model rail, effort, approval, branch, add context), Models & accounts, Appearance, Permissions, Workspace, Tools and Gyro Cloud. The Usage scope spacing is left by design.
+- Checks:
+  - `pnpm --filter @gyro-dev/desktop typecheck` and the Vite build pass.
+  - `check-appearance-persistence.mjs`, `check-cloud-settings-render.mjs` and `check-settings-redesign.mjs` (73 layouts, 11 interactions) pass.
+  - `check-workbench-ui.mjs` reports two failures: "First send should create an optimistic thread" and "Reliability contract should cover ordered IPC". Both come from earlier uncommitted edits to `crates/gyro-core/src/sessions.rs`, which removed `read_recent_event_lines` (4 occurrences at HEAD, 0 in the working tree). They are not from this pass.
+  - `pnpm test:sidebar-design:browser` fails intermittently in the dark theme only: it times out at "workflows" right after the hide/restore sidebar step. The light theme passes. An instrumented copy with one extra step of delay passed both themes, and a fresh-load probe shows the Workflows click works. This pass changes no sidebar transition or width, so this is a timing race in the test.
+- review-screen:
+  - Raw values: the 112px slash column follows the existing `calc(Npx * var(--gyro-ui-scale))` pattern. `font-weight: 600` and `letter-spacing: 0.06em` copy the Providers table head; there are no weight or tracking tokens.
+  - No primitives or hex added.
+  - One primary per screen: improved, because the GitHub setup button is now secondary.
+  - Status colours are used only for status.
+  - Only existing components were used.
+  - Focus states are unchanged.
+  - Loading, empty and error states are unchanged.
+- Tokens only, no new components.
+- Evidence: `artifacts/screenshots/gyro-brand-pass/polish-pass-*.png` (after), `polish-pass-before-*.png` (before; settings dark and source control).
+- Not covered:
+  - The GitHub setup card, because the capture fixture doesn't render it, so its button change was not checked visually.
+  - The context menu, the tour, the terminal, dialogs and compact density.
+  - The real Tauri window.
+
+---
+
 # App-wide design detail pass
 
 **final result: passed (2 pre-existing workbench-check failures, see Checks)**

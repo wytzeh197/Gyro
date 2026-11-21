@@ -173,7 +173,7 @@ fn execute(app: &tauri::AppHandle, store: &SessionStore, id: Uuid) -> Result<()>
             &mut request,
             &session,
             &config,
-            store.paths(),
+            store,
         )
         .map_err(anyhow::Error::msg)?;
         let claimed =

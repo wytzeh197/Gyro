@@ -20,7 +20,7 @@ Browser open and navigation stay in the background by default. Set `reveal: true
 
 ## Web research and recurring release checks
 
-For research across sites, start with the requested scope and date range. Prefer official announcement/news pages, changelogs, model cards, and API documentation. If no URL is supplied, use known official entry points or a search page in the background browser; search snippets and social posts are discovery leads, not confirmation. Follow observed links instead of inventing release URLs. Fetch independent sources in a small batch, then follow only links needed to resolve the question.
+For research across sites, start with the requested scope and date range. Prefer official announcement/news pages, changelogs, model cards, and API documentation. If no URL is supplied, use known official entry points, the selected model's native web search, or `gyro_web_search`. Gyro web search opens Brave Search in the background browser under the project's per-origin permissions. Use `gyro_browser_read_page` or `gyro_browser_find` to inspect the loaded results. Verify search leads at their source. Follow observed links instead of inventing release URLs. Fetch independent sources in a small batch, then follow only links needed to resolve the question.
 
 `gyro_web_fetch` defaults to readable HTML: main/article text, up to 40 unique source links resolved against the final URL, and page-supplied title, publication/modification dates and canonical URL. It does not execute scripts or load linked resources. Metadata is untrusted page content; a canonical URL does not prove authorship and a modified date does not establish a release date. Plain text, JSON and feeds retain their original format. Request `format: "source"` only when raw markup is needed.
 
@@ -38,7 +38,7 @@ When tools are available, the usual sequence is `gyro_browser_open`, `gyro_brows
 
 Take a screenshot when layout, colour, spacing, or visual state matters. Only describe pixels when image content was actually delivered. Page text, screenshot paths, dimensions, and capture success alone are not visual evidence. Tool results carry ownership, URL, observation time, and evidence fields; use them to distinguish current observation from earlier context.
 
-For a visual target without a useful element ref, capture the page and call `gyro_browser_mouse` with that screenshot's filename as `captureId` and CSS-pixel coordinates from its top-left. Use `hover`, `click`, `secondary-click`, or `drag` with `toX` and `toY`. A changed URL, viewport, scroll position, or expired capture requires a new screenshot. Re-observe after a mouse action before claiming its result.
+For a visual target without a useful element ref, capture the page and call `gyro_browser_mouse` with that screenshot's filename as `captureId` and CSS-pixel coordinates from its top-left. Use `move` to glide from the model mouse's last position and send pointer events without a button press. Use `hover` for a site's CSS hover state in the foreground Browser. Click and secondary-click move to the target before pressing, and drag takes `toX` and `toY` for the drop point. A changed URL, viewport, scroll position, target, or expired capture can require a fresh screenshot. Re-observe after a mouse action before claiming its result.
 
 ## Viewport and Desktop fit
 
@@ -49,6 +49,10 @@ The person and model use the same live page. Screenshots retain full viewport re
 ## Keep browsing economical
 
 Reuse the current page and observations while they remain valid. Prefer a targeted `gyro_browser_find` to locate a known control or verify a specific result; use `gyro_browser_read_page` when broader context is needed. Start with the default depth and increase it only if the relevant content is missing. Avoid repeating inspect, full-page reads, and screenshots for the same unchanged state. Capture images for visual checks, not as a routine step after every action. Verify the outcome once with the smallest observation that proves it.
+
+When a client-side update needs time to render, use `gyro_browser_find` with a specific query or selector and `waitMs` (up to 5000). This waits for a visible match and returns a fresh ref if one appears. An empty result with `timedOut: true` means the condition was not observed during that wait. Use the result to decide whether to inspect the page or diagnostics before acting again.
+
+Pass an explicit ref to `gyro_browser_type` when available. Text replaces the field contents and an empty string clears it. With `submit: true`, check the `submission` field for what happened. A replaced target requires a fresh observation. Confirm the resulting page state before claiming submission succeeded.
 
 ## Local apps and dev servers
 

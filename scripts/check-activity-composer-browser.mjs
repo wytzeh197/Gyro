@@ -284,6 +284,45 @@ try {
     "Fixture action: Sent Fix duplicate saves. · Reviewer: claude-opus-5-5");
   assert.equal(await evaluate(`document.querySelector('button[aria-label^="Model: "]').ariaLabel`), builder);
   console.log("Reviewer provider filters, model ID and name search, fixed controls while scrolling, keyboard selection and draft restoration passed.");
+  await call("Emulation.setDeviceMetricsOverride", { width: 1100, height: 900, deviceScaleFactor: 1, mobile: false });
+  await call("Page.navigate", { url: (process.env.GYRO_TEST_ORIGIN ?? "http://127.0.0.1:1420") + "/council-composer-fixture.html?trace=1" });
+  const composer = 'textarea[data-tour="composer.input"]';
+  await until(() => evaluate(`!!document.querySelector(${JSON.stringify(composer)})`), "trace composer");
+  await click(composer);
+  await call("Input.insertText", { text: "/trac" });
+  await key("Enter", "Enter", 13);
+  await call("Input.insertText", { text: "Why won't this all-day event save?" });
+  await key("Enter", "Enter", 13);
+  await until(() => evaluate("!!document.querySelector('.gyro-trace-panel')"), "trace setup opens via the slash command");
+  assert.equal(await evaluate("window.traceFixture.sends"), 0, "trace setup does not send a chat turn");
+  const traceButton = async (label) => {
+    const expression = `[...document.querySelectorAll('.gyro-trace-panel button')].find(button => button.textContent.trim() === ${JSON.stringify(label)})`;
+    await until(() => evaluate(`Boolean((${expression}) && !(${expression}).disabled)`), label);
+    await evaluate(`(${expression}).click()`);
+  };
+  await traceButton("Choose browser model");
+  await until(() => evaluate("document.querySelectorAll('.gyro-trace-picker .gyro-reviewer-option').length >= 2"), "browser model options");
+  const browserModel = await evaluate("document.querySelector('.gyro-trace-picker .gyro-reviewer-option .gyro-reviewer-model-name').textContent");
+  await evaluate("document.querySelector('.gyro-trace-picker .gyro-reviewer-option').click()");
+  await traceButton("Choose source model");
+  await until(() => evaluate("!!document.querySelector('.gyro-trace-picker .gyro-reviewer-option')"), "source model options");
+  assert.equal(await evaluate(`[...document.querySelectorAll('.gyro-trace-picker .gyro-reviewer-model-name')].some(model => model.textContent === ${JSON.stringify(browserModel)})`), false);
+  await evaluate("document.querySelector('.gyro-trace-picker .gyro-reviewer-option').click()");
+  await traceButton("Start capture");
+  await traceButton("Prepare model payloads");
+  await until(() => evaluate("document.querySelector('.gyro-trace-panel pre')?.textContent.includes('/api/events')"), "frozen payload preview");
+  assert.equal(await evaluate("window.traceFixture.analyzed"), 0, "preview does not dispatch analysis");
+  await traceButton("Approve and analyze");
+  await until(() => evaluate("document.querySelector('.gyro-trace-panel')?.textContent.includes('Likely matches in local checkout')"), "source trail renders");
+  assert.equal(await evaluate("window.traceFixture.analyzed"), 1);
+  await traceButton("src/events.ts:42");
+  await until(() => evaluate("document.querySelector('.gyro-trace-panel')?.textContent.includes('Captured source')"), "stale source opens the captured excerpt");
+  await traceButton("Draft fix");
+  await until(() => evaluate(`document.querySelector(${JSON.stringify(composer)})?.value.includes('src/events.ts:42')`), "editable trace fix draft");
+  assert.equal(await evaluate("window.traceFixture.sends"), 0, "fix action does not send");
+  const { data: traceImage } = await call("Page.captureScreenshot", { format: "png" });
+  await writeFile(join(artifacts, "trace-report-fixture.png"), Buffer.from(traceImage, "base64"));
+  console.log("Trace slash entry, distinct model choices, review-before-send, stale citation and draft-only handoff passed with fixture transport.");
   await writeFile(
     join(artifacts, "browser-checks.json"),
     JSON.stringify(receipts, null, 2),

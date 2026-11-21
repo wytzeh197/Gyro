@@ -176,16 +176,49 @@ pub fn session_title_instruction(suggest_title: bool) -> &'static str {
 pub const CHAT_IMAGE_REPLY_INSTRUCTION: &str = "To show the user an image you already have (a screenshot you captured, a workspace image, or an attachment), put it in your reply as a standalone line: ![short description](/absolute/path.png). Only PNG, JPEG, or WebP files inside the selected workspace, the session's attachments, or Gyro's browser-captures directory are rendered; any other path stays as plain text. Never invent a path, and do not claim an image is shown unless you wrote that line.\n";
 pub const SIDE_PANEL_GUIDE: &str = include_str!("../../../../docs/product-knowledge/side-panel.md");
 
-/// Browse, Canvas, a URL, or a UI preview. A bare "preview" does not qualify.
+/// Canvas, app previews, or interaction with a web target need the surface guide.
+/// Plain link reading and research use the web reading instructions instead.
 pub fn needs_surface_guide(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
-    lower.contains("canvas")
-        || lower.contains("gyro_artifacts")
-        || lower.contains("http://")
+    [
+        "canvas",
+        "gyro_artifacts",
+        "ui preview",
+        "component preview",
+        "app preview",
+        "dev server",
+        "open http://",
+        "open https://",
+    ]
+    .iter()
+    .any(|cue| lower.contains(cue))
+        || (web_research_cue(&lower)
+            && [
+                "click",
+                "scroll",
+                "type into",
+                "fill in",
+                "submit",
+                "sign in",
+                "log in",
+                "screenshot",
+                "visual",
+                "render",
+                "viewport",
+                "localhost",
+                "127.0.0.1",
+            ]
+            .iter()
+            .any(|cue| lower.contains(cue)))
+}
+
+pub fn needs_web_research_guidance(message: &str) -> bool {
+    web_research_cue(&message.to_ascii_lowercase())
+}
+
+fn web_research_cue(lower: &str) -> bool {
+    lower.contains("http://")
         || lower.contains("https://")
-        || lower.contains("ui preview")
-        || lower.contains("component preview")
-        || lower.contains("dev server")
         || lower.contains("research")
         || lower.contains("web search")
         || lower.contains("browse the web")
@@ -330,3 +363,96 @@ pub fn sanitize_session_title_candidate(title: &str) -> Option<String> {
 }
 
 pub const GYRO_SESSION_TITLE_MARKER: &str = "GYRO_SESSION_TITLE:";
+pub const GYRO_PLAN_UPDATE_MARKER: &str = "GYRO_PLAN_UPDATE:";
+pub const GYRO_GOAL_UPDATE_MARKER: &str = "GYRO_GOAL_UPDATE:";
+pub const GYRO_AGENT_UPDATE_MARKER: &str = "GYRO_AGENT_UPDATE:";
+pub const GYRO_ARTIFACTS_MARKER: &str = "GYRO_ARTIFACTS:";
+pub const GYRO_QUESTIONS_MARKER: &str = "GYRO_QUESTIONS:";
+pub const GYRO_TASKS_MARKER: &str = "GYRO_TASKS:";
+pub const MAX_CONTROL_MARKER_JSON_BYTES: usize = 64 * 1024;
+
+/// A plan can end with complete metadata after the visible Markdown. Leave
+/// the original answer intact for marker handling and inspect only its prose
+/// when guessing whether an otherwise normal stop needs continuation.
+pub(crate) fn before_trailing_control_lines(text: &str) -> &str {
+    let markers = [
+        GYRO_PLAN_UPDATE_MARKER,
+        GYRO_GOAL_UPDATE_MARKER,
+        GYRO_AGENT_UPDATE_MARKER,
+        GYRO_ARTIFACTS_MARKER,
+        GYRO_QUESTIONS_MARKER,
+        GYRO_TASKS_MARKER,
+        crate::project_memory::MEMORY_CANDIDATE_MARKER,
+    ];
+    let mut text = text.trim_end();
+    loop {
+        let (body, last_line) = text.rsplit_once('\n').unwrap_or(("", text));
+        let last_line = last_line.trim_start();
+        let Some(payload) = markers
+            .iter()
+            .find_map(|marker| last_line.strip_prefix(marker))
+            .map(str::trim_start)
+        else {
+            return text;
+        };
+        if payload.len() > MAX_CONTROL_MARKER_JSON_BYTES
+            || !payload.starts_with(['{', '['])
+            || serde_json::from_str::<serde::de::IgnoredAny>(payload).is_err()
+        {
+            return text;
+        }
+        text = body.trim_end();
+    }
+}
+
+/// A normally stopped Plan reply can be waiting on a choice. Recognize only
+/// a complete control trailer with a question the client can render.
+pub(crate) fn has_complete_clarification(prose: &str, trailers: &str) -> bool {
+    fn nonempty_text(value: &serde_json::Value) -> bool {
+        value.as_str().is_some_and(|text| !text.trim().is_empty())
+    }
+    let Some(payload) = trailers
+        .lines()
+        .find_map(|line| line.trim().strip_prefix(GYRO_QUESTIONS_MARKER))
+    else {
+        return false;
+    };
+    let Ok(payload) = serde_json::from_str::<serde_json::Value>(payload) else {
+        return false;
+    };
+    let renderable = payload["questions"].as_array().is_some_and(|questions| {
+        questions.iter().any(|entry| {
+            (nonempty_text(&entry["question"]) || nonempty_text(&entry["title"]))
+                && entry["options"].as_array().is_some_and(|options| {
+                    let choices = options
+                        .iter()
+                        .filter(|option| nonempty_text(option) || nonempty_text(&option["label"]))
+                        .count();
+                    (2..=8).contains(&choices)
+                })
+        })
+    });
+    renderable && !ends_inside_code_fence(prose)
+}
+
+fn ends_inside_code_fence(prose: &str) -> bool {
+    let mut fence = None;
+    for line in prose.lines().map(str::trim_start) {
+        let Some(marker @ (b'`' | b'~')) = line.bytes().next() else {
+            continue;
+        };
+        let width = line.bytes().take_while(|byte| *byte == marker).count();
+        if width < 3 {
+            continue;
+        }
+        let rest = &line[width..];
+        match fence {
+            Some((opening, minimum)) if marker == opening && width >= minimum && rest.trim().is_empty() => {
+                fence = None;
+            }
+            None if marker == b'~' || !rest.contains('`') => fence = Some((marker, width)),
+            _ => {}
+        }
+    }
+    fence.is_some()
+}

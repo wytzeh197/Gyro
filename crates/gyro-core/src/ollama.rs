@@ -8,11 +8,16 @@ use crate::usage::{UsageReason, UsageTokens};
 use crate::CancellationToken;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::io::BufReader;
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use url::{Host, Url};
 mod context;
-use context::{context_overflow_message, request_context_window, OllamaContextOverflow};
+use context::{
+    context_overflow_message, request_context_window, resident_context_window,
+    OllamaContextOverflow,
+};
 
 pub const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434/api";
 pub const OLLAMA_CANCELLED_MESSAGE: &str = "Ollama chat cancelled";
@@ -22,6 +27,10 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 // This is the longest silence between bytes, not a limit on the whole answer.
 const CHAT_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const MAX_DISCOVERED_MODELS: usize = 100;
+const MODEL_METADATA_TTL: Duration = Duration::from_secs(120);
+const MAX_CACHED_MODEL_METADATA: usize = 64;
+
+static MODEL_METADATA: Mutex<VecDeque<CachedModelMetadata>> = Mutex::new(VecDeque::new());
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -170,7 +179,21 @@ pub fn discover_ollama_model_with_cancellation(
     model: &str,
     cancellation: &CancellationToken,
 ) -> Result<Option<OllamaModel>> {
-    let result = discover_selected_model(base_url, model, cancellation);
+    discover_selected_model(base_url, model, cancellation)
+        .map(|selected| selected.map(|selected| selected.model))
+}
+
+pub(crate) struct SelectedOllamaModel {
+    pub(crate) model: OllamaModel,
+    pub(crate) digest: Option<String>,
+}
+
+pub(crate) fn discover_selected_model(
+    base_url: Option<&str>,
+    model: &str,
+    cancellation: &CancellationToken,
+) -> Result<Option<SelectedOllamaModel>> {
+    let result = read_selected_model(base_url, model, cancellation);
     if cancellation.is_cancelled() {
         Err(anyhow!(OLLAMA_CANCELLED_MESSAGE))
     } else {
@@ -178,11 +201,11 @@ pub fn discover_ollama_model_with_cancellation(
     }
 }
 
-fn discover_selected_model(
+fn read_selected_model(
     base_url: Option<&str>,
     model: &str,
     cancellation: &CancellationToken,
-) -> Result<Option<OllamaModel>> {
+) -> Result<Option<SelectedOllamaModel>> {
     if cancellation.is_cancelled() {
         return Err(anyhow!(OLLAMA_CANCELLED_MESSAGE));
     }
@@ -197,21 +220,22 @@ fn discover_selected_model(
     let Some(tag) = tags.models.into_iter().find(|tag| tag.name == model) else {
         return Ok(None);
     };
-    let show = crate::chat_http::post_with_deadline(
-        &endpoint.join("show")?,
-        &ureq::json!({ "model": tag.name }),
-        cancellation,
-        REQUEST_TIMEOUT,
-    )
-    .ok()
-    .and_then(|response| {
+    let digest = tag.local_digest().map(str::to_owned);
+    let model = resolve_tag(&endpoint, tag, |name| {
+        let response = crate::chat_http::post_with_deadline(
+            &endpoint.join("show").ok()?,
+            &ureq::json!({ "model": name }),
+            cancellation,
+            REQUEST_TIMEOUT,
+        )
+        .ok()?;
         ensure_loopback_response_url(response.get_url(), &endpoint).ok()?;
-        read_metadata::<OllamaShowResponse>(response.into_reader()).ok()
+        read_metadata(response.into_reader()).ok()
     });
     if cancellation.is_cancelled() {
         return Err(anyhow!(OLLAMA_CANCELLED_MESSAGE));
     }
-    Ok(Some(model_from_show(tag, show)))
+    Ok(Some(SelectedOllamaModel { model, digest }))
 }
 
 fn read_metadata<T: serde::de::DeserializeOwned>(reader: impl std::io::Read) -> Result<T> {
@@ -282,18 +306,34 @@ pub fn ollama_tool_chat_with_updates<F, U>(
     request: OllamaToolChatRequest<'_>,
     cancellation: &CancellationToken,
     on_delta: F,
+    on_usage: U,
+) -> Result<OllamaChatResponse>
+where
+    F: FnMut(&str),
+    U: FnMut(UsageTokens, Option<u64>),
+{
+    ollama_tool_chat_ref(&request, None, cancellation, on_delta, on_usage)
+}
+
+pub(crate) fn ollama_tool_chat_ref<F, U>(
+    request: &OllamaToolChatRequest<'_>,
+    model_digest: Option<&str>,
+    cancellation: &CancellationToken,
+    on_delta: F,
     mut on_usage: U,
 ) -> Result<OllamaChatResponse>
 where
     F: FnMut(&str),
     U: FnMut(UsageTokens, Option<u64>),
 {
-    let mut window = request_context_window(&request)?;
+    let estimated_window = request_context_window(request)?;
+    let mut window = resident_context_window(request, estimated_window, model_digest, cancellation)
+        .or(estimated_window);
     crate::provider_retry::stream_response(
         cancellation,
         |mut emit| loop {
             match ollama_tool_chat_once_with_updates(
-                &request,
+                request,
                 window,
                 cancellation,
                 &mut emit,
@@ -359,28 +399,25 @@ where
     }
     let endpoint = ollama_endpoint(request.base_url)?;
     let url = endpoint.join("chat")?;
-    let mut payload = ureq::json!({"model": model, "stream": true,
-        "messages": request.messages, "tools": request.tools,
-        "truncate": false, "shift": false});
+    let mut payload = crate::chat_http::ChatPayload::new(&request.messages, Some(&request.tools));
+    payload.insert("model", model.into());
+    payload.insert("stream", true.into());
+    payload.insert("truncate", false.into());
+    payload.insert("shift", false.into());
     if let Some(window) = window {
         anyhow::ensure!(
             window > 0 && window <= i32::MAX as u64,
             "Ollama model returned an invalid context window"
         );
-        payload["options"] = ureq::json!({ "num_ctx": window });
+        payload.insert("options", ureq::json!({ "num_ctx": window }));
     }
     let mut observation = None;
     let mut receipt = crate::openai_compatible::UsageReceipt::start(cancellation);
+    let mut post = crate::chat_http::ChatPost::new(&url, "", payload, CHAT_IDLE_TIMEOUT, true);
+    let prompt_observation = crate::provider_observation::ChatObservation::new(post.payload());
     let response = crate::provider_retry::http_response(cancellation, || {
-        observation = Some(crate::provider_observation::Request::start(&payload));
-        let response = crate::chat_http::post(
-            &url,
-            "",
-            &payload,
-            &receipt.transport,
-            CHAT_IDLE_TIMEOUT,
-            true,
-        );
+        observation = Some(prompt_observation.start(post.payload()));
+        let response = post.send(&receipt.transport);
         if matches!(&response, Err(ureq::Error::Status(400..=499, _))) {
             observation.as_mut().unwrap().rejected();
         }
@@ -537,7 +574,7 @@ where
         input_tokens,
         output_tokens,
         cached_input_tokens,
-        crate::provider_observation::text_size(&payload).0,
+        observation.input_chars(),
         output_chars,
         receipt_completed && (final_usage || !is_stream),
     );
@@ -688,8 +725,34 @@ struct OllamaTagsResponse {
 #[derive(Deserialize)]
 struct OllamaTag {
     name: String,
+    digest: Option<String>,
+    capabilities: Option<Vec<String>>,
+    remote_model: Option<String>,
+    remote_host: Option<String>,
     #[serde(default)]
     details: OllamaModelDetails,
+}
+
+impl OllamaTag {
+    fn is_local(&self) -> bool {
+        self.remote_model.as_deref().unwrap_or("").is_empty()
+            && self.remote_host.as_deref().unwrap_or("").is_empty()
+    }
+
+    fn local_digest(&self) -> Option<&str> {
+        self.digest
+            .as_deref()
+            .map(normalize_digest)
+            .filter(|digest| {
+                self.is_local()
+                    && digest.len() == 64
+                    && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+    }
+}
+
+fn normalize_digest(digest: &str) -> &str {
+    digest.strip_prefix("sha256:").unwrap_or(digest)
 }
 
 #[derive(Default, Deserialize)]
@@ -697,6 +760,7 @@ struct OllamaModelDetails {
     family: Option<String>,
     parameter_size: Option<String>,
     quantization_level: Option<String>,
+    context_length: Option<u64>,
 }
 
 #[derive(Default, Deserialize)]
@@ -705,6 +769,36 @@ struct OllamaShowResponse {
     capabilities: Vec<String>,
     #[serde(default)]
     model_info: serde_json::Value,
+}
+
+#[derive(Default, Clone, Copy)]
+struct ModelMetadata {
+    supports_tools: bool,
+    supports_images: bool,
+    context_window_tokens: Option<u64>,
+}
+
+impl ModelMetadata {
+    fn new(capabilities: &[String], context_window_tokens: Option<u64>) -> Self {
+        Self {
+            supports_tools: capabilities.iter().any(|capability| capability == "tools"),
+            supports_images: capabilities.iter().any(|capability| capability == "vision"),
+            context_window_tokens,
+        }
+    }
+}
+
+#[derive(PartialEq, Eq)]
+struct ModelMetadataKey {
+    endpoint: Url,
+    name: String,
+    digest: String,
+}
+
+struct CachedModelMetadata {
+    key: ModelMetadataKey,
+    metadata: ModelMetadata,
+    observed_at: Instant,
 }
 
 #[derive(Default, Deserialize)]
@@ -766,33 +860,34 @@ struct OllamaToolFunctionWire {
 }
 
 fn enrich_model(endpoint: &Url, tag: OllamaTag) -> OllamaModel {
-    let show = endpoint.join("show").ok().and_then(|url| {
+    resolve_tag(endpoint, tag, |name| {
+        let url = endpoint.join("show").ok()?;
         let response = agent()
             .post(url.as_str())
-            .send_json(ureq::json!({ "model": tag.name }));
-        let response = response.ok()?;
+            .send_json(ureq::json!({ "model": name }))
+            .ok()?;
         ensure_loopback_response(&response, endpoint).ok()?;
-        response.into_json::<OllamaShowResponse>().ok()
-    });
-    model_from_show(tag, show)
+        response.into_json().ok()
+    })
 }
 
-fn model_from_show(tag: OllamaTag, show: Option<OllamaShowResponse>) -> OllamaModel {
+fn resolve_tag(
+    endpoint: &Url,
+    tag: OllamaTag,
+    show: impl FnOnce(&str) -> Option<OllamaShowResponse>,
+) -> OllamaModel {
+    let metadata = resolve_tag_metadata(endpoint, &tag, show);
     let fallback_description = tag
         .details
         .family
         .as_deref()
         .map(|family| format!("Local {family} model through Ollama."))
         .unwrap_or_else(|| "Local model through Ollama.".into());
-    let supports_tools = show.as_ref().is_some_and(|value| {
-        value
-            .capabilities
-            .iter()
-            .any(|capability| capability == "tools")
-    });
-    let context_window_tokens = show
-        .as_ref()
-        .and_then(|value| model_context_window(&value.model_info));
+    let ModelMetadata {
+        supports_tools,
+        supports_images,
+        context_window_tokens,
+    } = metadata;
     OllamaModel {
         display_name: tag.name.clone(),
         id: tag.name,
@@ -805,13 +900,62 @@ fn model_from_show(tag: OllamaTag, show: Option<OllamaShowResponse>) -> OllamaMo
         quantization_level: tag.details.quantization_level,
         context_window_tokens,
         supports_tools,
-        supports_images: show.as_ref().is_some_and(|value| {
-            value
-                .capabilities
-                .iter()
-                .any(|capability| capability == "vision")
-        }),
+        supports_images,
     }
+}
+
+fn resolve_tag_metadata(
+    endpoint: &Url,
+    tag: &OllamaTag,
+    show: impl FnOnce(&str) -> Option<OllamaShowResponse>,
+) -> ModelMetadata {
+    let valid_window = |window: &u64| (1..=i32::MAX as u64).contains(window);
+    let capabilities = tag.capabilities.as_deref().unwrap_or_default();
+    let window = tag.details.context_length.filter(valid_window);
+    if tag.is_local() && !capabilities.is_empty() && window.is_some() {
+        return ModelMetadata::new(capabilities, window);
+    }
+
+    // Only reuse successful /show metadata for a manifest the current /tags
+    // response still identifies. Remote aliases and legacy rows without a
+    // full digest still probe the daemon on each lookup.
+    let key = tag.local_digest().map(|digest| ModelMetadataKey {
+        endpoint: endpoint.clone(),
+        name: tag.name.clone(),
+        digest: digest.to_owned(),
+    });
+    if let Some(metadata) = key.as_ref().and_then(|key| {
+        let entries = MODEL_METADATA.lock().ok()?;
+        entries
+            .iter()
+            .rev()
+            .find(|entry| &entry.key == key && entry.observed_at.elapsed() < MODEL_METADATA_TTL)
+            .map(|entry| entry.metadata)
+    }) {
+        return metadata;
+    }
+
+    let Some(show) = show(&tag.name) else {
+        return ModelMetadata::default();
+    };
+    let window = model_context_window(&show.model_info);
+    let metadata = ModelMetadata::new(&show.capabilities, window);
+    if !show.capabilities.is_empty() && window.filter(valid_window).is_some() {
+        if let (Some(key), Ok(mut entries)) = (key, MODEL_METADATA.lock()) {
+            entries.retain(|entry| {
+                entry.key != key && entry.observed_at.elapsed() < MODEL_METADATA_TTL
+            });
+            if entries.len() >= MAX_CACHED_MODEL_METADATA {
+                entries.pop_front();
+            }
+            entries.push_back(CachedModelMetadata {
+                key,
+                metadata,
+                observed_at: Instant::now(),
+            });
+        }
+    }
+    metadata
 }
 
 fn model_context_window(value: &serde_json::Value) -> Option<u64> {
@@ -831,12 +975,17 @@ mod tests {
     use std::net::{Shutdown, TcpListener};
 
     fn read_payload(stream: &mut std::net::TcpStream) -> serde_json::Value {
+        read_request(stream).1
+    }
+
+    fn read_request(stream: &mut std::net::TcpStream) -> (String, serde_json::Value) {
         stream
             .set_read_timeout(Some(Duration::from_secs(2)))
             .unwrap();
         let mut reader = BufReader::new(stream);
+        let mut request_line = String::new();
+        reader.read_line(&mut request_line).unwrap();
         let mut header = String::new();
-        reader.read_line(&mut header).unwrap();
         let mut length = 0;
         loop {
             header.clear();
@@ -852,10 +1001,64 @@ mod tests {
         }
         let mut body = vec![0; length];
         reader.read_exact(&mut body).unwrap();
-        if body.is_empty() {
+        let payload = if body.is_empty() {
             serde_json::Value::Null
         } else {
             serde_json::from_slice(&body).unwrap()
+        };
+        (request_line, payload)
+    }
+
+    #[test]
+    fn the_first_chat_round_reuses_only_the_selected_live_model_window() {
+        let digest = "a".repeat(64);
+        for (same_manifest, ttl_seconds, loaded_window, expected) in [
+            (true, 60, 16384, 16384),
+            (false, 60, 16384, 4096),
+            (true, 0, 16384, 4096),
+            (true, 60, 65536, 4096),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let running = serde_json::json!({"models":[{
+                "name":"fixture",
+                "digest": if same_manifest { digest.clone() } else { "b".repeat(64) },
+                "context_length":loaded_window,
+                "expires_at":chrono::Utc::now() + chrono::Duration::seconds(ttl_seconds),
+            }]});
+            let server = std::thread::spawn(move || {
+                let (mut status, _) = listener.accept().unwrap();
+                assert!(read_request(&mut status).0.starts_with("GET /api/ps "));
+                let body = running.to_string();
+                write!(status, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                let (mut chat, _) = listener.accept().unwrap();
+                let (route, payload) = read_request(&mut chat);
+                assert!(route.starts_with("POST /api/chat "));
+                assert_eq!(payload["options"]["num_ctx"], expected);
+                assert_eq!(payload["truncate"], false);
+                assert_eq!(payload["shift"], false);
+                assert_eq!(payload["messages"][0]["content"], "Original request");
+                let body = r#"{"message":{"content":"ready"},"done":true,"prompt_eval_count":5,"eval_count":2}"#;
+                write!(chat, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            });
+            let response = ollama_tool_chat_ref(
+                &OllamaToolChatRequest {
+                    base_url: Some(&format!("http://{address}/api")),
+                    model: "fixture",
+                    messages: vec![serde_json::json!({"role":"user","content":"Original request"})],
+                    tools: Vec::new(),
+                    context_window_tokens: Some(32768),
+                    minimum_context_window_tokens: None,
+                },
+                Some(&digest),
+                &CancellationToken::default(),
+                |_| {},
+                |_, _| {},
+            )
+            .unwrap();
+            server.join().unwrap();
+            assert_eq!(response.context_window_tokens, Some(expected));
+            assert_eq!(response.input_tokens, Some(5));
         }
     }
 
@@ -1564,6 +1767,80 @@ mod tests {
         assert!(requests[1].starts_with("POST /api/show"));
         assert!(model.supports_tools && model.supports_images);
         assert_eq!(model.context_window_tokens, Some(32768));
+    }
+
+    #[test]
+    fn model_metadata_reuses_current_digests_and_prefers_complete_tags() {
+        use serde_json::{json, Value};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let first_digest = "a".repeat(64);
+        let next_digest = "b".repeat(64);
+        let first = json!({"models":[{"name":"chosen", "digest":first_digest}]});
+        let changed = json!({"models":[{"name":"chosen", "digest":next_digest}]});
+        let inline = json!({"models":[{
+            "name":"chosen", "digest":next_digest, "capabilities":["completion","tools"],
+            "details":{"context_length":98304}
+        }]});
+        let show_original = json!({
+            "capabilities":["completion","tools","vision"], "model_info":{"model.context_length":32768}
+        });
+        let show_updated = json!({
+            "capabilities":["completion"], "model_info":{"model.context_length":65536}
+        });
+        let server = std::thread::spawn(move || {
+            let responses: [(bool, u16, Value); 9] = [
+                (false, 200, first.clone()),
+                (true, 200, show_original),
+                (false, 200, first),
+                (false, 200, changed.clone()),
+                (true, 503, json!({"error":"show unavailable"})),
+                (false, 200, changed),
+                (true, 200, show_updated),
+                (false, 200, inline),
+                (false, 200, json!({"models":[]})),
+            ];
+            for (show, status, payload) in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                let request = read_payload(&mut stream);
+                assert_eq!(
+                    request,
+                    if show {
+                        json!({"model":"chosen"})
+                    } else {
+                        Value::Null
+                    }
+                );
+                let body = payload.to_string();
+                write!(
+                    stream,
+                    "HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len(),
+                )
+                .unwrap();
+            }
+        });
+        let endpoint = format!("http://{address}");
+        let discover = || discover_ollama_model(Some(&endpoint), "chosen").unwrap();
+        for (tools, images, context) in [
+            (true, true, Some(32768)),
+            (true, true, Some(32768)),
+            (false, false, None),
+            (false, false, Some(65536)),
+            (true, false, Some(98304)),
+        ] {
+            let model = discover().unwrap();
+            assert_eq!(
+                (
+                    model.supports_tools,
+                    model.supports_images,
+                    model.context_window_tokens
+                ),
+                (tools, images, context)
+            );
+        }
+        assert!(discover().is_none());
+        server.join().unwrap();
     }
 
     #[test]

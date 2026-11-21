@@ -59,6 +59,7 @@ pub(crate) fn provider_context_message_with_tool_support(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn provider_context_message_with_capabilities(
     request: &ProviderChatRequest,
     conversation_history: Option<&str>,
@@ -81,8 +82,52 @@ pub(crate) fn provider_context_message_with_capabilities_for_turn(
     supports_images: bool,
     turn: PromptTurn,
 ) -> String {
+    let (mut stable, mut context) = provider_context_parts(
+        request,
+        conversation_history,
+        supports_tools,
+        supports_images,
+        turn,
+    );
+    stable.append(&mut context);
+    format!(
+        "{}\n\nUser message:\n{}",
+        stable.join("\n"),
+        request.message
+    )
+}
+
+pub(crate) fn provider_context_sections(
+    request: &ProviderChatRequest,
+    conversation_history: Option<&str>,
+    supports_tools: bool,
+    supports_images: bool,
+) -> (String, String) {
+    let (stable, context) = provider_context_parts(
+        request,
+        conversation_history,
+        supports_tools,
+        supports_images,
+        PromptTurn::default(),
+    );
+    let mut dynamic = context.join("\n");
+    if !dynamic.is_empty() {
+        dynamic.push_str("\n\n");
+    }
+    dynamic.push_str("User message:\n");
+    dynamic.push_str(&request.message);
+    (stable.join("\n"), dynamic)
+}
+
+fn provider_context_parts(
+    request: &ProviderChatRequest,
+    conversation_history: Option<&str>,
+    supports_tools: bool,
+    supports_images: bool,
+    turn: PromptTurn,
+) -> (Vec<String>, Vec<String>) {
     if let Some(purpose) = isolated_internal_purpose(request) {
-        return internal_request_message(request, purpose);
+        return (vec![internal_request_instructions(purpose)], Vec::new());
     }
     // `stable` is the byte-identical prefix owned runners cache. `context` is
     // the per-turn tail (mode, history, path, check, goal, plan, attachments).
@@ -103,15 +148,14 @@ pub(crate) fn provider_context_message_with_capabilities_for_turn(
     if !turn.resumed {
         stable.push(CHAT_IMAGE_REPLY_INSTRUCTION.trim_end().to_string());
     }
-    // The full guide and contract cost ~3K tokens, so they travel in the tail
-    // with an actual browse, canvas, URL, or preview, not every turn.
-    let browser_task =
-        user_requests_gyro_browser(delegated_agents::browser_task_message(&request.message))
-            || request
-                .attachments
-                .iter()
-                .any(|item| item.kind == "browser-snapshot");
-    let surface_needed = browser_task || browser_knowledge::needs_surface_guide(&request.message);
+    let task = delegated_agents::browser_task_message(&request.message);
+    let explicit_browser = user_requests_gyro_browser(task);
+    let surface_needed = explicit_browser
+        || request
+            .attachments
+            .iter()
+            .any(|item| item.kind == "browser-snapshot")
+        || browser_knowledge::needs_surface_guide(task);
     if surface_needed {
         context.push(browser_knowledge::context(
             supports_tools,
@@ -119,6 +163,11 @@ pub(crate) fn provider_context_message_with_capabilities_for_turn(
             mode_name,
             true,
         ));
+    } else if supports_tools
+        && request.mode != ChatMode::Council
+        && browser_knowledge::needs_web_research_guidance(task)
+    {
+        context.push(browser_knowledge::web_research_context().into());
     } else if turn.resumed {
         context.push(browser_knowledge::RESUMED_REVEAL_GUIDANCE.into());
     } else {
@@ -193,7 +242,7 @@ pub(crate) fn provider_context_message_with_capabilities_for_turn(
             // ending the turn drops the work, and waiting is not permission.
             stable.push("Your turn ends the moment you reply without a tool call, and nothing reports back afterwards: never end with a promise to report later. For a long command, stay in the turn and call gyro_terminal_wait once for a long wait. Waiting does not authorize publishing or other actions beyond the user’s request.".into());
         }
-        if user_requests_gyro_browser(&request.message) {
+        if explicit_browser {
             context.push("Requested surface: Gyro Browser. Follow the shared browser guide and current capability contract for this live task.".into());
         }
         // The file the user happens to have open in Workspace is not context.
@@ -355,37 +404,25 @@ pub(crate) fn provider_context_message_with_capabilities_for_turn(
         }
     }
     gyro_core::provider_observation::prepared_context(attribution);
-    efficiency::record_prompt_sections(&stable, &context, &request.message);
-    let mut ordered = stable;
-    ordered.extend(context);
-    format!(
-        "{}\n\nUser message:\n{}",
-        ordered.join("\n"),
-        request.message
-    )
+    (stable, context)
 }
 
-/// The whole prompt for one of Gyro's own text-only calls.
+/// The stable instructions for one of Gyro's own text-only calls.
 ///
 /// The message already holds the task instructions and every byte of input
 /// (diffs, transcript, or task text). Chat history, chat-only markers, browser
 /// and workspace guidance would only be paid for and could pull the reply off
 /// task, so none of it is attached. The stable line stays byte-identical so a
 /// provider can still cache it across calls of the same kind.
-pub(crate) fn internal_request_message(
-    request: &ProviderChatRequest,
-    purpose: InternalRequestPurpose,
-) -> String {
-    let stable = vec![format!(
+fn internal_request_instructions(purpose: InternalRequestPurpose) -> String {
+    let stable = format!(
         "Gyro internal request: {}. Answer only from the input in the message. Do not use tools, read or change files, run commands, request approvals, or add hidden control lines.",
         purpose.label()
-    )];
-    let context: Vec<String> = Vec::new();
+    );
     let mut attribution = gyro_core::efficiency::context::Attribution::default();
-    attribution.instructions = stable[0].chars().count() as u64;
+    attribution.instructions = stable.chars().count() as u64;
     gyro_core::provider_observation::prepared_context(attribution);
-    efficiency::record_prompt_sections(&stable, &context, &request.message);
-    format!("{}\n\nUser message:\n{}", stable[0], request.message)
+    stable
 }
 
 /// Render the plan for the model as a checklist rather than as raw JSON.

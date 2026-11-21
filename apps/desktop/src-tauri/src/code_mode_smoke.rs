@@ -84,7 +84,7 @@ fn run(app: &tauri::AppHandle, directory: &Path) -> anyhow::Result<Value> {
             &store.get_project_capability_policy(&workspace.display().to_string())?,
             CapabilityRunMode::Normal,
         ),
-        workspace_context: WorkspaceContextSnapshot::empty(workspace.display().to_string()),
+        workspace_context: WorkspaceContextSnapshot::empty(workspace.display().to_string()).into(),
         workspace_check: gyro_core::check_workspace(&workspace),
     };
     let control = Arc::new(ProviderRunControl::default());

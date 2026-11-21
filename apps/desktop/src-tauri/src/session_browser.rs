@@ -30,6 +30,7 @@ const MAX_NETWORK_ENTRIES: usize = 100;
 const MAX_ENTRY_CHARS: usize = 2_000;
 const MAX_TREE_CHARS: usize = 48_000;
 const MAX_FIND_RESULTS: usize = 40;
+pub(crate) const MAX_FIND_WAIT_MS: u64 = 5_000;
 const AGENT_CALL_TIMEOUT: Duration = Duration::from_secs(8);
 const MAIN_WINDOW_LABEL: &str = "main";
 const BRIDGE_SCHEME: &str = "gyro-bridge";
@@ -162,7 +163,6 @@ struct SessionBrowserSlot {
     host_bounds: SessionBrowserBounds,
     viewport_request: BrowserViewportRequest,
     viewport: BrowserViewportState,
-    approved_origins: HashSet<String>,
     pointer_reference: Option<BrowserPointerReference>,
     console: VecDeque<BrowserConsoleEntry>,
     network: VecDeque<BrowserNetworkEntry>,
@@ -171,7 +171,21 @@ struct SessionBrowserSlot {
 #[derive(Default)]
 pub struct SessionBrowserManager {
     inner: Mutex<HashMap<String, SessionBrowserSlot>>,
+    approved_origins: Mutex<HashMap<(String, String), HashSet<String>>>,
     layout: Mutex<()>,
+    model_pointers: Mutex<HashSet<String>>,
+}
+
+pub(crate) struct ModelPointerLease<'a> {
+    manager: &'a SessionBrowserManager,
+    resource_id: String,
+}
+impl Drop for ModelPointerLease<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut pointers) = self.manager.model_pointers.lock() {
+            pointers.remove(&self.resource_id);
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -220,17 +234,34 @@ struct BrowserNavigationRequest {
 }
 
 #[derive(Clone)]
-struct BrowserDocumentLease {
+pub(crate) struct BrowserDocumentLease {
     resource: BrowserLease,
     navigation_id: u64,
 }
 impl BrowserDocumentLease {
-    fn validate(&self, manager: &SessionBrowserManager) -> Result<(), String> {
+    pub(crate) fn validate(&self, manager: &SessionBrowserManager) -> Result<(), String> {
         manager.with_document_mut(self, |_| ())
     }
 }
 
 impl SessionBrowserManager {
+    pub(crate) fn begin_model_pointer(
+        &self,
+        resource_id: &str,
+    ) -> Result<ModelPointerLease<'_>, String> {
+        let mut pointers = self
+            .model_pointers
+            .lock()
+            .map_err(|_| "browser pointer state is unavailable")?;
+        if !pointers.insert(resource_id.to_owned()) {
+            return Err("the model mouse is already moving in this Browser".into());
+        }
+        Ok(ModelPointerLease {
+            manager: self,
+            resource_id: resource_id.into(),
+        })
+    }
+
     #[cfg(all(debug_assertions, feature = "native-browser-events-smoke"))]
     pub(crate) fn fixture_layout_is_busy(&self) -> bool {
         self.layout.try_lock().is_err()
@@ -523,7 +554,7 @@ impl SessionBrowserManager {
         })?
     }
 
-    fn capture_document(
+    pub(crate) fn capture_document(
         &self,
         session_id: &str,
     ) -> Result<(BrowserDocumentLease, SessionBrowserSnapshot), String> {
@@ -566,20 +597,27 @@ impl SessionBrowserManager {
         ) {
             return Err("browser observation cannot dispatch a page action".into());
         }
+        let match_wait = if method == "find" {
+            Duration::from_millis(args["waitMs"].as_u64().unwrap_or(0).min(MAX_FIND_WAIT_MS))
+        } else {
+            Duration::ZERO
+        };
         let pending = PendingCall::new(
-            AGENT_CALL_TIMEOUT,
+            AGENT_CALL_TIMEOUT + match_wait,
             "browser document is not ready for observation; inspect the browser for navigation status",
         )?;
         let guard = pending.guard();
         // Only whole-page observations can follow redirects. Element refs and
         // evidence checks remain bound to their original document.
-        let follow_navigation = method != "checkRead" && args.get("ref").is_none();
+        let follow_navigation = method != "checkRead" && args["ref"].is_null();
         let initial = if follow_navigation {
             self.capture_resource(session_id)?.1
         } else {
             self.wait_for_document(session_id)?
         };
         let resource = BrowserLease::from_snapshot(&initial);
+        let mut match_deadline = None;
+        let mut ready_navigation = None;
         loop {
             guard.check()?;
             let snapshot = self.with_resource_mut(&resource, |slot| Self::snapshot_locked(slot))?;
@@ -604,33 +642,48 @@ impl SessionBrowserManager {
             };
             let result: Result<Option<Value>, String> = (|| {
                 lease.validate(self)?;
-                let status = evaluate(
-                    lease.clone(),
-                    snapshot.clone(),
-                    "status",
-                    serde_json::json!({}),
-                )?;
-                guard.check()?;
-                lease.validate(self)?;
-                // DOMContentLoaded is sufficient. Images and long-lived
-                // requests must not block observing usable pages.
-                if !matches!(
-                    status.get("readyState").and_then(Value::as_str),
-                    Some("interactive" | "complete")
-                ) {
-                    return Ok(None);
+                if ready_navigation != Some(lease.navigation_id) {
+                    let status = evaluate(
+                        lease.clone(),
+                        snapshot.clone(),
+                        "status",
+                        serde_json::json!({}),
+                    )?;
+                    guard.check()?;
+                    lease.validate(self)?;
+                    // DOMContentLoaded is sufficient. Images and long-lived
+                    // requests must not block observing usable pages.
+                    if !matches!(
+                        status.get("readyState").and_then(Value::as_str),
+                        Some("interactive" | "complete")
+                    ) {
+                        return Ok(None);
+                    }
+                    if method == "status" {
+                        return Ok(Some(status));
+                    }
+                    ready_navigation = Some(lease.navigation_id);
                 }
-                let value = if method == "status" {
-                    status
-                } else {
-                    evaluate(lease.clone(), snapshot, method, args.clone())?
-                };
+                let value = evaluate(lease.clone(), snapshot, method, args.clone())?;
                 guard.check()?;
                 lease.validate(self)?;
                 Ok(Some(value))
             })();
             match result {
-                Ok(Some(value)) => return Ok(value),
+                Ok(Some(mut value)) => {
+                    if match_wait.is_zero() {
+                        return Ok(value);
+                    }
+                    let empty = value["results"].as_array().is_some_and(Vec::is_empty);
+                    let now = Instant::now();
+                    let deadline = *match_deadline.get_or_insert(now + match_wait);
+                    if !empty || now >= deadline {
+                        value["timedOut"] = Value::Bool(empty);
+                        return Ok(value);
+                    }
+                    std::thread::sleep((deadline - now).min(Duration::from_millis(125)));
+                    continue;
+                }
                 Ok(None) => {}
                 Err(error) => {
                     guard.check()?;
@@ -815,14 +868,45 @@ impl SessionBrowserManager {
         Ok(Self::snapshot_locked(slot))
     }
 
-    pub fn is_origin_approved(&self, session_id: &str, origin: &str) -> Result<bool, String> {
-        self.with_slot_mut(session_id, |slot| slot.approved_origins.contains(origin))
+    pub fn is_origin_approved(
+        &self,
+        session_id: &str,
+        workspace_key: &str,
+        origin: &str,
+    ) -> Result<bool, String> {
+        let grants = self.approved_origins.lock().map_err(|_| "browser approvals are unavailable")?;
+        Ok(grants
+            .get(&(session_id.to_string(), workspace_key.to_string()))
+            .is_some_and(|origins| origins.contains(origin)))
     }
 
-    pub fn approve_origin(&self, session_id: &str, origin: &str) -> Result<(), String> {
-        self.with_slot_mut(session_id, |slot| {
-            slot.approved_origins.insert(origin.to_string());
-        })
+    pub fn approve_origin(
+        &self,
+        session_id: &str,
+        workspace_key: &str,
+        origin: &str,
+    ) -> Result<(), String> {
+        let mut grants = self.approved_origins.lock().map_err(|_| "browser approvals are unavailable")?;
+        grants
+            .entry((session_id.to_string(), workspace_key.to_string()))
+            .or_default()
+            .insert(origin.to_string());
+        Ok(())
+    }
+
+    pub(crate) fn forget_project_origins(
+        &self,
+        workspace_key: &str,
+        removed: &[&str],
+    ) -> Result<(), String> {
+        let mut grants = self.approved_origins.lock().map_err(|_| "browser approvals are unavailable")?;
+        grants.retain(|(_, key), origins| {
+            if key == workspace_key {
+                origins.retain(|origin| !removed.contains(&origin.as_str()));
+            }
+            !origins.is_empty()
+        });
+        Ok(())
     }
 
     pub fn remember_pointer_capture(
@@ -1117,6 +1201,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     let background_pointer = include_str!("browser_background_pointer.js")
         .trim()
         .trim_end_matches(';');
+    let trace_capture = include_str!("browser_trace_capture.js").trim();
     let annotations = include_str!("browser_annotations.js")
         .trim()
         .trim_end_matches(';');
@@ -1136,6 +1221,8 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
   let refCounter = 0;
   const refPrefix = "ref_" + Math.random().toString(36).slice(2) + "_";
   const refMap = new Map();
+  let pointerTokenCounter = 0;
+  const pointerTokens = new WeakMap();
 
   const textOf = (value) => {{
     try {{
@@ -1163,6 +1250,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     }} catch (_) {{}}
   }};
 
+  const trace = {trace_capture}(postBridge);
   const pushConsole = (kind, values, source, line, column) => {{
     const message = values.map(textOf).join(" ").slice(0, MAX_MSG);
     if (!message) return;
@@ -1176,6 +1264,8 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     if (consoleBuf.length >= MAX_CONSOLE) consoleBuf.shift();
     consoleBuf.push(entry);
     postBridge({{ kind: "console", entry }});
+    const traceMessage = values.find(value => typeof value === "string" || value instanceof Error);
+    if (traceMessage !== undefined) trace.consoleError({{ ...entry, message: textOf(traceMessage) }});
   }};
 
   const original = {{
@@ -1197,13 +1287,15 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     pushConsole("unhandled-rejection", [event.reason || "Unhandled promise rejection"]);
   }}, true);
 
-  const recordNetwork = (entry) => {{
+  const recordNetwork = (entry, startedAt) => {{
     if (networkBuf.length >= MAX_NETWORK) networkBuf.shift();
     networkBuf.push(entry);
     postBridge({{ kind: "network", entry }});
+    trace.network(entry, startedAt);
   }};
 
   window.fetch = async function(input, init) {{
+    const startedAt = performance.now();
     const method = (init && init.method) || (input && input.method) || "GET";
     let url = "";
     try {{
@@ -1219,7 +1311,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
         status: response.status,
         ok: response.ok,
         resourceType: "fetch",
-      }});
+      }}, startedAt);
       return response;
     }} catch (error) {{
       recordNetwork({{
@@ -1228,7 +1320,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
         status: null,
         ok: false,
         resourceType: "fetch",
-      }});
+      }}, startedAt);
       throw error;
     }}
   }};
@@ -1243,6 +1335,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       return open.apply(this, arguments);
     }};
     XO.prototype.send = function() {{
+      const startedAt = performance.now();
       this.addEventListener("loadend", () => {{
         recordNetwork({{
           method: String(this.__gyroMethod || "GET").toUpperCase(),
@@ -1250,8 +1343,8 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
           status: this.status || null,
           ok: this.status >= 200 && this.status < 400,
           resourceType: "xhr",
-        }});
-      }});
+        }}, startedAt);
+      }}, {{ once: true }});
       return send.apply(this, arguments);
     }};
   }}
@@ -1324,13 +1417,14 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     return /password|passwd|pwd|one-time|otp|totp|2fa|credit.?card|cc-number|cvc|cvv|ssn/.test(name);
   }};
 
+  const elementRefs = new WeakMap();
   const assignRef = (el) => {{
     if (!el) return null;
-    if (!el.__gyroRef || !el.__gyroRef.startsWith(refPrefix)) {{
-      refCounter += 1;
-      el.__gyroRef = refPrefix + refCounter;
+    let ref = elementRefs.get(el);
+    if (!ref) {{
+      ref = refPrefix + (++refCounter);
+      elementRefs.set(el, ref);
     }}
-    const ref = el.__gyroRef;
     refMap.delete(ref);
     refMap.set(ref, el);
     // Bound retained DOM nodes on long-lived pages; recently observed refs survive.
@@ -1395,7 +1489,11 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     if (el.getAttribute("href")) node.href = String(el.getAttribute("href")).slice(0, 200);
     if (el.getAttribute("type")) node.inputType = el.getAttribute("type");
     if (tag === "input" || tag === "textarea" || tag === "select") {{
-      node.value = isCredentialField(el) ? "[redacted-credential]" : String(el.value || "").slice(0, 120);
+      const protectedField = isCredentialField(el);
+      const value = protectedField ? "[redacted-credential]" : String(el.value ?? "");
+      node.value = value.slice(0, 120);
+      if (value.length > 120) node.valueTruncated = true;
+      if (!protectedField && tag === "input" && (el.type === "checkbox" || el.type === "radio")) node.checked = el.checked;
     }}
     // Retain the existing traversal budget: deduplication must not hide more of the page.
     budget.left -= 64;
@@ -1424,8 +1522,11 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
   const dispatch = (el, type, init) => {{
     const EventClass = type.startsWith("key") ? KeyboardEvent : Event;
     const event = new EventClass(type, Object.assign({{ bubbles: true, cancelable: true }}, init || {{}}));
-    el.dispatchEvent(event);
+    return el.dispatchEvent(event);
   }};
+
+  const isDisabled = (el) => el.matches(":disabled") || !!el.closest('[inert],[aria-disabled="true"]');
+  const staleRef = () => ({{ ok: false, error: "element ref is stale; use gyro_browser_find or gyro_browser_read_page to locate it again" }});
 
   const clickEl = (el, options) => {{
     el.scrollIntoView({{ block: "center", inline: "nearest", behavior: "instant" }});
@@ -1442,41 +1543,61 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     if (isCredentialField(el)) {{
       return {{ ok: false, error: "credential fields are not writable by the model" }};
     }}
-    if (el.matches(":disabled") || el.readOnly || el.getAttribute("aria-disabled") === "true" ||
-        !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el.isContentEditable)) {{
+    if (!isVisible(el) || isDisabled(el) || el.readOnly ||
+        !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el.isContentEditable) ||
+        (el instanceof HTMLInputElement && /^(button|checkbox|file|hidden|image|radio|reset|submit)$/.test(el.type))) {{
       return {{ ok: false, error: "target is not an editable text field" }};
     }}
-    // Updating a field does not require keyboard ownership. Focusing a hidden
-    // WKWebView can take the native responder away from the person's composer.
-    if (document.hasFocus()) el.focus({{ preventScroll: true }});
     const value = String(text ?? "");
-    if ("value" in el) {{
-      const proto = el.tagName.toLowerCase() === "textarea"
-        ? window.HTMLTextAreaElement.prototype
-        : window.HTMLInputElement.prototype;
-      const descriptor = Object.getOwnPropertyDescriptor(proto, "value");
-      if (descriptor && descriptor.set) descriptor.set.call(el, value);
-      else el.value = value;
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {{
+      const textarea = el instanceof HTMLTextAreaElement;
+      const proto = textarea ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setValue = Object.getOwnPropertyDescriptor(proto, "value").set;
+      const previous = el.value;
+      setValue.call(el, value);
+      const expected = textarea ? value.replace(/\r\n?/g, "\n") : value;
+      if (el.value !== expected) {{
+        setValue.call(el, previous);
+        return {{ ok: false, error: "the field rejected that value; check its input type and expected format" }};
+      }}
     }} else if (el.isContentEditable) {{
       el.textContent = value;
     }}
+    // Only a foreground document may move focus to the edited field.
+    if (document.hasFocus()) el.focus({{ preventScroll: true }});
     dispatch(el, "input");
     dispatch(el, "change");
+    const result = {{ ok: true }};
     if (submit) {{
-      dispatch(el, "keydown", {{ key: "Enter", code: "Enter", keyCode: 13 }});
       const form = el.form || el.closest("form");
-      if (form && typeof form.requestSubmit === "function") form.requestSubmit();
+      if (!el.isConnected) {{
+        result.submission = "target-replaced";
+      }} else if (!dispatch(el, "keydown", {{ key: "Enter", code: "Enter", keyCode: 13 }})) {{
+        result.submission = "enter-handled-by-page";
+      }} else if (el.isConnected && form?.isConnected) {{
+        HTMLFormElement.prototype.requestSubmit.call(form);
+        result.submission = "requested";
+      }} else {{
+        result.submission = "enter-dispatched";
+      }}
     }}
-    return {{ ok: true }};
+    return result;
   }};
 
   const pointerFeedback = {pointer_feedback}(window, document);
+  let pointerPosition = null;
   const clearHighlight = () => pointerFeedback.clear();
   const flashTarget = (el, options = {{}}) => pointerFeedback.show(el, options);
 
   const annotations = {annotations}(window, document, {{ assignRef, resolveRef, roleOf, nameOf, isCredentialField, isVisible, pageState, pointerFeedback, epoch: refPrefix }});
   window.__gyroBrowserAgent = {{
+    setPointerScale(scale) {{
+      pointerFeedback.setDisplayScale(scale);
+    }},
     annotate(options) {{ return annotations.request(options); }},
+    traceArm(options) {{ return trace.arm(options); }},
+    traceSnapshot() {{ return trace.snapshot(); }},
+    traceStop(options) {{ return trace.stop(options); }},
     clearHighlight() {{
       clearHighlight();
       return {{ ok: true }};
@@ -1494,12 +1615,32 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       if (options.url !== location.href) return {{ ok: true }};
       const dragging = options.action === "drag" && options.phase !== "move";
       const el = document.elementFromPoint(dragging ? options.toX : options.x, dragging ? options.toY : options.y);
-      if (el) flashTarget(el, options);
+      if (el) {{
+        pointerPosition = dragging ? {{ x: options.toX, y: options.toY }} : {{ x: options.x, y: options.y }};
+        flashTarget(el, options);
+      }}
+      return {{ ok: true }};
+    }},
+    movePointer(options) {{
+      const viewport = pageState().viewport;
+      if (location.href !== options.url ||
+          !Object.keys(viewport).every(key => viewport[key] === options.viewport[key])) {{
+        return {{ ok: false, error: "browser page or viewport changed while moving; take a new screenshot" }};
+      }}
+      const {{ x, y }} = options;
+      pointerPosition = {{ x, y }};
+      window.__gyroBrowserAgent.backgroundPointer({{ action: "move", x, y }});
+      if (options.visible && (options.final || !window.matchMedia("(prefers-reduced-motion: reduce)").matches)) {{
+        const el = document.elementFromPoint(x, y);
+        if (el) flashTarget(el, {{
+          x, y, actor: options.actor, action: "move", sample: true, first: options.first, final: options.final,
+        }});
+      }}
       return {{ ok: true }};
     }},
     readPage(options) {{
       const root = options && options.ref ? resolveRef(options.ref) : (document.body || document.documentElement);
-      if (!root) return {{ ok: false, error: "element ref is stale; use find to locate it again" }};
+      if (!root) return staleRef();
       pruneRefs();
       const maxDepth = Math.min(8, Math.max(1, (options && options.maxDepth) || 4));
       const maxChars = Math.min({MAX_TREE_CHARS}, Math.max(1024, (options && options.maxChars) || 6000));
@@ -1560,7 +1701,8 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
         try {{ candidates = Array.from(document.querySelectorAll(selector)); }}
         catch (error) {{ return {{ ok: false, error: "invalid selector" }}; }}
       }} else {{
-        candidates = Array.from(document.querySelectorAll("a,button,input,textarea,select,[role],[onclick],h1,h2,h3,h4,h5,h6,label,summary"));
+        const controls = "a,button,input,textarea,select,[role],[onclick],[contenteditable],h1,h2,h3,h4,h5,h6,label,summary";
+        candidates = document.querySelectorAll(controls + (query ? ",p,li,output,dt,dd" : ""));
       }}
       const needle = query.toLowerCase();
       for (const el of candidates) {{
@@ -1576,6 +1718,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
           role: roleOf(el),
           name,
           tag: el.tagName.toLowerCase(),
+          ...(isDisabled(el) ? {{ disabled: true }} : {{}}),
           rect: {{
             x: Math.round(rect.x),
             y: Math.round(rect.y),
@@ -1587,7 +1730,7 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       }}
       const hasMore = results.length > limit;
       if (hasMore) results.pop();
-      return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", results, offset, hasMore, nextOffset: hasMore ? offset + results.length : null }};
+      return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", url: location.href, results, offset, hasMore, nextOffset: hasMore ? offset + results.length : null }};
     }},
     pointerTarget(options) {{
       const x = Number(options && options.x);
@@ -1599,17 +1742,37 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       const hit = document.elementFromPoint(x, y);
       if (!hit) return {{ ok: false, error: "no page target at pointer coordinates" }};
       const el = hit.closest("a,button,input,textarea,select,[role],[onclick],form") || hit;
+      const embedded = hit.tagName.toLowerCase() === "iframe";
+      const blocked = embedded || isCredentialField(el);
+      if (options.movement) return {{ ok: true, blocked }};
       const name = targetName(el);
-      const form = el.closest("form");
+      const form = el.form || el.closest("form");
       const formName = form ? targetName(form) : "";
+      const role = roleOf(el);
+      const disabled = isDisabled(el);
       const sensitive = /\b(buy|checkout|purchase|pay|send|submit|publish|delete|remove|transfer|book|confirm)\b/i.test(name + " " + formName);
+      // A framework can reuse a node for a different action. Compare the
+      // action's semantics as well as its DOM identity during pointer travel.
+      const signature = JSON.stringify([
+        role, name, disabled, blocked, formName, el.getAttribute("href"),
+        el.getAttribute("type"), el.getAttribute("formaction"), form?.getAttribute("action"),
+        form?.getAttribute("method"),
+      ]);
+      let entry = pointerTokens.get(el);
+      if (!entry || entry.signature !== signature || entry.form !== form) {{
+        entry = {{ signature, form, token: refPrefix + "pointer_" + (++pointerTokenCounter) }};
+        pointerTokens.set(el, entry);
+      }}
       return {{
         ok: true,
+        ref: assignRef(el),
+        targetToken: entry.token,
         name,
-        role: roleOf(el),
+        role,
         tag: el.tagName.toLowerCase(),
-        blocked: isCredentialField(el) || el.tagName.toLowerCase() === "iframe",
-        blockedReason: el.tagName.toLowerCase() === "iframe"
+        disabled,
+        blocked,
+        blockedReason: embedded
           ? "embedded frames need user takeover in the Browser"
           : "credential fields cannot be targeted by the model",
         sensitive,
@@ -1617,10 +1780,10 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
         viewport: pageState().viewport,
       }};
     }},
-        click(options) {{
+    click(options) {{
       const el = resolveRef(options && options.ref);
-      if (!el) return {{ ok: false, error: "unknown or stale ref" }};
-      if (!isVisible(el) || el.matches(":disabled") || el.getAttribute("aria-disabled") === "true") {{
+      if (!el) return staleRef();
+      if (!isVisible(el) || isDisabled(el)) {{
         return {{ ok: false, error: "target is hidden or disabled" }};
       }}
       clickEl(el, options);
@@ -1628,49 +1791,64 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
     }},
     type(options) {{
       const el = options && options.ref ? resolveRef(options.ref) : document.activeElement;
-      if (!el) return {{ ok: false, error: "no target element" }};
-      const typed = Object.assign({{ ref: el.__gyroRef || null, name: targetName(el) }}, typeInto(el, options && options.text, !!(options && options.submit)));
+      if (!el) return staleRef();
+      const typed = Object.assign({{ ref: elementRefs.get(el) || null, name: targetName(el) }}, typeInto(el, options && options.text, !!(options && options.submit)));
       if (typed.ok) flashTarget(el, options);
       return typed;
     }},
     formInput(options) {{
       const el = resolveRef(options && options.ref);
-      if (!el) return {{ ok: false, error: "unknown or stale ref" }};
-      if (el.matches(":disabled") || el.readOnly || el.getAttribute("aria-disabled") === "true") {{
-        return {{ ok: false, error: "target is disabled or read-only" }};
+      if (!el) return staleRef();
+      if (!isVisible(el) || isDisabled(el) || el.readOnly) {{
+        return {{ ok: false, error: "target is hidden, disabled, or read-only" }};
       }}
       if (isCredentialField(el)) {{
         return {{ ok: false, error: "credential fields are not writable by the model" }};
       }}
       const name = targetName(el);
-      flashTarget(el, options);
       const value = String((options && options.value) ?? "");
-      if (el.tagName.toLowerCase() === "select") {{
+      if (el instanceof HTMLSelectElement) {{
         const option = Array.from(el.options).find(option => option.value === value);
-        if (!option || option.disabled || (option.parentElement.tagName === "OPTGROUP" && option.parentElement.disabled)) {{
+        if (!option || option.disabled || option.closest("optgroup:disabled")) {{
           return {{ ok: false, error: "select option is unavailable" }};
         }}
-        el.value = value;
-        dispatch(el, "input");
-        dispatch(el, "change");
-        return {{ ok: true, ref: options.ref, name }};
-      }}
-      if (el.tagName.toLowerCase() === "input") {{
-        const type = (el.getAttribute("type") || "text").toLowerCase();
-        if (type === "checkbox" || type === "radio") {{
-          el.checked = value === "true" || value === "1" || value === "on" || value === "checked";
-          dispatch(el, "input");
-          dispatch(el, "change");
-          return {{ ok: true, ref: options.ref, name }};
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(el, value);
+      }} else if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) {{
+        const state = value.trim().toLowerCase();
+        const checked = /^(true|1|on|checked)$/.test(state);
+        if (!checked && !/^(false|0|off|unchecked)$/.test(state)) {{
+          return {{ ok: false, error: "use true or false for a checkbox or radio button" }};
         }}
+        if (el.checked !== checked) {{
+          if (el.type === "checkbox" || checked) {{
+            // Native activation sends the click event used by controlled inputs.
+            HTMLElement.prototype.click.call(el);
+          }} else {{
+            Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "checked").set.call(el, false);
+            dispatch(el, "input");
+            dispatch(el, "change");
+          }}
+        }}
+        if (el.isConnected && el.checked !== checked) {{
+          return {{ ok: false, error: "the page did not accept the requested checked state; observe it again" }};
+        }}
+        flashTarget(el, options);
+        return {{ ok: true, ref: options.ref, name }};
+      }} else {{
+        const result = typeInto(el, value, false);
+        if (result.ok) flashTarget(el, options);
+        return Object.assign({{ ref: options.ref, name }}, result);
       }}
-      return Object.assign({{ ref: options.ref, name }}, typeInto(el, value, false));
+      dispatch(el, "input");
+      dispatch(el, "change");
+      flashTarget(el, options);
+      return {{ ok: true, ref: options.ref, name }};
     }},
     scroll(options) {{
       const dx = Number((options && options.dx) || 0);
       const dy = Number((options && options.dy) || 0);
       const el = options && options.ref ? resolveRef(options.ref) : null;
-      if (options && options.ref && !el) return {{ ok: false, error: "unknown or stale ref" }};
+      if (options && options.ref && !el) return staleRef();
       if (el) {{
         el.scrollBy({{ left: dx, top: dy, behavior: "instant" }});
       }} else {{
@@ -1691,10 +1869,17 @@ fn agent_initialization_script(bridge_nonce: &str) -> String {
       return {{ ok: true, framing: "OBSERVED_PAGE_CONTENT_UNTRUSTED", entries, offset, total: networkBuf.length, order: "newest-first" }};
     }},
     status() {{
-      return Object.assign({{ ok: true, annotationState: annotations.state() }}, pageState());
+      return Object.assign({{ ok: true, annotationState: annotations.state(), pointerPosition }}, pageState());
     }},
   }};
-  window.__gyroBrowserAgent.backgroundPointer = {background_pointer}(window.__gyroBrowserAgent, window, document);
+  const pagePointer = {background_pointer}(window.__gyroBrowserAgent, window, document);
+  window.__gyroBrowserAgent.backgroundPointer = (options) => {{
+    const result = pagePointer(options);
+    if (result.ok) pointerPosition = options.action === "drag"
+      ? {{ x: options.toX, y: options.toY }}
+      : {{ x: options.x, y: options.y }};
+    return result;
+  }};
 }})();"#
     )
 }
@@ -1774,6 +1959,12 @@ fn handle_bridge_body<R: Runtime>(app: &AppHandle<R>, body: &[u8]) -> Result<(),
 
     let kind = value.get("kind").and_then(Value::as_str).unwrap_or("");
     match kind {
+        "trace" => {
+            if let Some(state) = app.try_state::<crate::browser_trace::TraceManager>() {
+                state.observe(&session_id, &lease.resource_id, &value["trace"]);
+            }
+            return Ok(());
+        }
         "console" => {
             if let Some(entry) = value.get("entry") {
                 let message = entry
@@ -1913,6 +2104,12 @@ fn apply_session_browser_layout_for<R: Runtime>(
         return Err("browser resource changed during layout".into());
     }
     if changed && !snapshot.background_only {
+        if previous.display_scale != snapshot.viewport.display_scale {
+            let _ = webview.eval(format!(
+                "window.__gyroBrowserAgent?.setPointerScale({});",
+                snapshot.viewport.display_scale,
+            ));
+        }
         let _ = app.emit(
             "session-browser-event",
             serde_json::json!({
@@ -2061,7 +2258,9 @@ fn open_browser_resource<R: Runtime>(
                 manager.set_visible_flag(&request.session_id, visible)?;
                 reclaim_stranded_keyboard(app);
             }
-            let _ = manager.approve_origin(&request.session_id, &origin);
+            if !operation::is_model_operation() {
+                manager.approve_origin(&request.session_id, &request.workspace_key, &origin)?;
+            }
             return manager
                 .get_snapshot(&request.session_id)?
                 .ok_or_else(|| "browser disappeared during open".to_string());
@@ -2284,9 +2483,6 @@ fn open_browser_resource<R: Runtime>(
         reclaim_stranded_keyboard(app);
     }
 
-    let mut approved = HashSet::new();
-    approved.insert(origin);
-
     let mut guard = manager
         .inner
         .lock()
@@ -2313,7 +2509,6 @@ fn open_browser_resource<R: Runtime>(
             host_bounds: bounds,
             viewport_request,
             viewport: geometry.state,
-            approved_origins: approved,
             pointer_reference: None,
             console: VecDeque::new(),
             network: VecDeque::new(),
@@ -2324,6 +2519,9 @@ fn open_browser_resource<R: Runtime>(
         .map(SessionBrowserManager::snapshot_locked)
         .expect("just inserted");
     drop(guard);
+    if !check_only && !operation::is_model_operation() {
+        manager.approve_origin(&session_id, &request.workspace_key, &origin)?;
+    }
     // A very fast first page may commit before add_child/layout return and the
     // slot exists. Reconcile once without delaying Open or trusting about:blank.
     let probe_lease = BrowserDocumentLease {
@@ -2479,7 +2677,9 @@ pub fn navigate_session_browser<R: Runtime>(
         BrowserNavigationCommand::Navigate(url.clone()),
     )?;
     apply_session_browser_layout_for(app, session_id, None, None, Some(&lease))?;
-    let _ = manager.approve_origin(session_id, &url.origin().ascii_serialization());
+    if !operation::is_model_operation() {
+        manager.approve_origin(session_id, &previous.workspace_key, &url.origin().ascii_serialization())?;
+    }
     manager
         .get_snapshot(session_id)?
         .ok_or_else(|| "browser disappeared during navigate".to_string())
@@ -2652,7 +2852,7 @@ pub fn call_agent<R: Runtime>(
     call_agent_for(app, lease, snapshot, method, args)
 }
 
-fn call_agent_for<R: Runtime>(
+pub(crate) fn call_agent_for<R: Runtime>(
     app: &AppHandle<R>,
     lease: BrowserDocumentLease,
     snapshot: SessionBrowserSnapshot,
@@ -2669,19 +2869,31 @@ fn call_agent_for<R: Runtime>(
     // independent of the page's CSP, CORS, custom-scheme fetch, or patched fetch.
     let method_json = serde_json::to_string(method).map_err(|error| error.to_string())?;
     let args_json = serde_json::to_string(&args).map_err(|error| error.to_string())?;
-    let script = format!(
+    let updates_pointer = matches!(
+        method,
+        "movePointer" | "showPointer" | "annotate" | "click" | "type" | "formInput"
+    );
+    let script = move |display_scale: f64| {
+        let pointer_scale = if updates_pointer {
+            format!("agent.setPointerScale({display_scale});")
+        } else {
+            String::new()
+        };
+        format!(
         r#"(function() {{
   try {{
     const agent = window.__gyroBrowserAgent;
     if (!agent || typeof agent[{method_json}] !== "function") {{
       return {{ error: "browser agent is not ready" }};
     }}
+    {pointer_scale}
     return {{ result: agent[{method_json}]({args_json}) }};
   }} catch (error) {{
     return {{ error: String(error && error.message || error) }};
   }}
 }})();"#
-    );
+        )
+    };
     let pending = PendingCall::new(AGENT_CALL_TIMEOUT, "browser agent call timed out")?;
     let dispatch = pending.guard();
     let (sender, receiver) = mpsc::channel();
@@ -2690,14 +2902,20 @@ fn call_agent_for<R: Runtime>(
     let dispatch_lease = lease.clone();
     webview
         .run_on_main_thread(move || {
-            if let Err(error) = dispatch.check().and_then(|_| {
-                dispatch_lease.validate(&dispatch_app.state::<SessionBrowserManager>())
-            }) {
-                let _ = sender.send(Err(error));
-                return;
-            }
+            let scale = dispatch.check().and_then(|_| {
+                dispatch_app
+                    .state::<SessionBrowserManager>()
+                    .with_document_mut(&dispatch_lease, |slot| slot.viewport.display_scale)
+            });
+            let scale = match scale {
+                Ok(scale) => scale,
+                Err(error) => {
+                    let _ = sender.send(Err(error));
+                    return;
+                }
+            };
             let callback_sender = sender.clone();
-            if let Err(error) = evaluator.eval_with_callback(script, move |result| {
+            if let Err(error) = evaluator.eval_with_callback(script(scale), move |result| {
                 let _ = callback_sender.send(Ok(result));
             }) {
                 let _ = sender.send(Err(format!("could not run browser agent: {error}")));
@@ -2741,14 +2959,30 @@ pub fn mouse_session_browser<R: Runtime>(
     to_x: f64,
     to_y: f64,
 ) -> Result<(), String> {
+    let (lease, snapshot) = app
+        .state::<SessionBrowserManager>()
+        .capture_document(session_id)?;
+    mouse_session_browser_for(app, lease, snapshot, action, x, y, to_x, to_y, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn mouse_session_browser_for<R: Runtime>(
+    app: &AppHandle<R>,
+    lease: BrowserDocumentLease,
+    snapshot: SessionBrowserSnapshot,
+    action: &str,
+    x: f64,
+    y: f64,
+    to_x: f64,
+    to_y: f64,
+    expectation: Option<Value>,
+) -> Result<(), String> {
     if ![x, y, to_x, to_y].iter().all(|value| value.is_finite()) {
         return Err("browser pointer coordinates must be finite".into());
     }
     if !matches!(action, "hover" | "click" | "secondary-click" | "drag") {
         return Err("unsupported browser pointer action".into());
     }
-    let manager = app.state::<SessionBrowserManager>();
-    let (lease, snapshot) = manager.capture_document(session_id)?;
     if snapshot.background_only || !snapshot.visible {
         return call_agent_for(
             app,
@@ -2756,14 +2990,13 @@ pub fn mouse_session_browser<R: Runtime>(
             snapshot,
             "backgroundPointer",
             serde_json::json!({
-                "action": action, "x": x, "y": y, "toX": to_x, "toY": to_y,
+                "action": action, "x": x, "y": y, "toX": to_x, "toY": to_y, "expected": expectation,
             }),
         )
         .map(|_| ());
     }
-    let label = manager.webview_label_for(session_id)?;
     let webview = app
-        .get_webview(&label)
+        .get_webview(&snapshot.label)
         .ok_or_else(|| "browser webview is not available".to_string())?;
 
     #[cfg(target_os = "macos")]
@@ -2772,6 +3005,7 @@ pub fn mouse_session_browser<R: Runtime>(
         let pending = PendingCall::new(AGENT_CALL_TIMEOUT, "browser mouse action timed out")?;
         let dispatch = pending.guard();
         let dispatch_app = app.clone();
+        let viewport = snapshot.viewport;
         let (sender, receiver) = mpsc::channel();
         webview
             .with_webview(move |platform| unsafe {
@@ -2784,7 +3018,11 @@ pub fn mouse_session_browser<R: Runtime>(
 
                 let result = (|| -> Result<(), String> {
                     dispatch.check()?;
-                    lease.validate(&dispatch_app.state::<SessionBrowserManager>())?;
+                    let layout_matches = dispatch_app.state::<SessionBrowserManager>()
+                        .with_document_mut(&lease, |slot| slot.visible && !slot.background_only && slot.viewport == viewport)?;
+                    if !layout_matches {
+                        return Err("browser viewport or visibility changed; observe the Browser before retrying".into());
+                    }
                     let webview: &WKWebView = &*platform.inner().cast();
                     let view: &NSView = webview;
                     let window = view
@@ -2819,7 +3057,7 @@ pub fn mouse_session_browser<R: Runtime>(
                     };
                     let start = point(x, y)?;
                     let end = point(to_x, to_y)?;
-                    if !objc2_core_graphics::CGPreflightPostEventAccess() {
+                    if action != "hover" && !objc2_core_graphics::CGPreflightPostEventAccess() {
                         return Err("Gyro needs macOS Accessibility permission to send browser mouse input".into());
                     }
                     let mtm = objc2::MainThreadMarker::new()
@@ -2930,14 +3168,22 @@ pub(crate) fn restore_pointer_feedback<R: Runtime>(
 }
 
 fn sanitize_agent_result(method: &str, value: Value) -> Result<Value, String> {
-    fn walk(value: Value) -> Value {
+    fn walk(value: Value, preserve_whitespace: bool) -> Value {
         match value {
+            Value::String(text) if preserve_whitespace => {
+                Value::String(truncate_chars(&redact_secrets(&text), MAX_ENTRY_CHARS))
+            }
             Value::String(text) => Value::String(sanitize_text(&text)),
-            Value::Array(items) => Value::Array(items.into_iter().map(walk).collect()),
+            Value::Array(items) => Value::Array(
+                items
+                    .into_iter()
+                    .map(|item| walk(item, preserve_whitespace))
+                    .collect(),
+            ),
             Value::Object(map) => {
                 let mut out = serde_json::Map::new();
                 for (key, child) in map {
-                    out.insert(key, walk(child));
+                    out.insert(key, walk(child, preserve_whitespace));
                 }
                 Value::Object(out)
             }
@@ -2949,7 +3195,7 @@ fn sanitize_agent_result(method: &str, value: Value) -> Result<Value, String> {
     } else {
         None
     };
-    let sanitized = walk(value);
+    let sanitized = walk(value, method == "readPage");
     // Filtering protects privacy, but its replacement text is not observed
     // evidence. Never let a redaction/truncation collision create a verdict.
     if method == "checkRead" && check_values.as_ref() != sanitized.get("values") {

@@ -13,7 +13,9 @@ pub(crate) fn isolated_internal_purpose(
     request.internal_purpose.filter(|purpose| {
         matches!(
             purpose,
-            InternalRequestPurpose::CodeReview | InternalRequestPurpose::WorkflowExtraction
+            InternalRequestPurpose::CodeReview
+                | InternalRequestPurpose::BrowserTrace
+                | InternalRequestPurpose::WorkflowExtraction
         ) || !efficiency::config().full_context_internal_requests
     })
 }

@@ -46,8 +46,12 @@
 }
 :root[data-theme="light"] {
   --gyro-chat-raised: var(--gyro-surface-soft);
-  --gyro-chat-review-action-bg: color-mix(in srgb, var(--gyro-ink-bg) 75%, var(--gyro-surface));
-  --gyro-chat-review-action-text: var(--gyro-ink-text);
+}
+/* The card's review action is a quiet secondary in both themes: a soft
+   control fill, never an ink pill that reads as the screen's primary. */
+:root[data-theme] {
+  --gyro-chat-review-action-bg: var(--gyro-control-bg);
+  --gyro-chat-review-action-text: var(--gyro-text);
 }
 /* Shared block decisions. Pane rules below own geometry and state, not new design values. */
 .gyro-composer-shell {
@@ -7984,6 +7988,7 @@
 .gyro-change-summary-file > :is(button, .gyro-change-summary-file-static)
   > .gyro-change-summary-file-review {
   align-items: center;
+  align-self: center;
   display: inline-flex;
   gap: var(--gyro-chat-space-1);
   color: var(--gyro-muted);
@@ -8115,8 +8120,10 @@
   border-bottom: 0;
 }
 
+/* Centered so a single-line row sits on the row's midline once the compact
+   28px min-height applies; two-line rows still fill the row. */
 .gyro-change-summary-file.is-reviewable > button {
-  align-items: start;
+  align-items: center;
   border-bottom: 0;
   min-height: 44px;
   padding: calc(var(--gyro-chat-space-1) * 2.5) var(--gyro-chat-space-1)
@@ -9794,7 +9801,7 @@ button.gyro-response-changed-files:hover {
   flex: none;
   font: inherit;
   gap: calc(var(--gyro-chat-space-1) * 2.5);
-  grid-template-columns: 16px calc(92px * var(--gyro-ui-scale, 1)) minmax(
+  grid-template-columns: 16px calc(112px * var(--gyro-ui-scale, 1)) minmax(
       0,
       1fr
     );
@@ -19529,10 +19536,10 @@ button.gyro-response-changed-files:hover {
   color: var(--gyro-primary-text);
 }
 
-/* Browser: polish the controls only. Native host geometry remains flush. */
+/* Keep the location field flexible as the companion narrows. */
 :root[data-theme] .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-browser-preview-toolbar {
-  gap: var(--gyro-space-standard);
-  padding-inline: var(--gyro-space-comfortable);
+  gap: var(--gyro-space-compact);
+  padding-inline: var(--gyro-space-standard);
 }
 :root[data-theme] .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-url-bar {
   border: 1px solid var(--gyro-border-soft);
@@ -19545,6 +19552,24 @@ button.gyro-response-changed-files:hover {
 }
 :root[data-theme] .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-url-bar input {
   font-size: var(--gyro-font-support);
+}
+.gyro-chat-companion .gyro-browser-preview.is-chat .gyro-browser-actions > .gyro-browser-external-button {
+  display: none;
+}
+@container gyro-browser (max-width: 380px) {
+  :root[data-theme] .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-browser-preview-toolbar {
+    column-gap: 4px;
+    padding-inline: 6px;
+  }
+  :root[data-theme] .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-url-bar {
+    padding-inline: 6px 2px;
+  }
+  .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-url-bar > .gyro-browser-address-external {
+    display: none;
+  }
+  .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-browser-actions > .gyro-browser-external-button {
+    display: inline-flex;
+  }
 }
 :root[data-theme] .gyro-chat-companion .gyro-browser-new-tab {
   gap: var(--gyro-space-standard);

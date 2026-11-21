@@ -20,7 +20,8 @@ if (process.platform !== "darwin")
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const geometryInputReview = process.argv.includes("--geometry-input-review");
 const geometryOnly = process.argv.includes("--geometry") || geometryInputReview;
-const navigationOnly = process.argv.includes("--navigation") || geometryOnly;
+const sitePermissionsOnly = process.argv.includes("--site-permissions");
+const navigationOnly = process.argv.includes("--navigation") || geometryOnly || sitePermissionsOnly;
 const root = await realpath(
   await mkdtemp(join(tmpdir(), "gyro-browser-events-native-")),
 );
@@ -42,6 +43,7 @@ const env = {
   GYRO_BROWSER_FRONTEND_SMOKE: "1",
   GYRO_BROWSER_NAVIGATION_SMOKE: navigationOnly ? "1" : "0",
   GYRO_BROWSER_GEOMETRY_SMOKE: geometryOnly ? "1" : "0",
+  GYRO_BROWSER_SITE_PERMISSIONS_SMOKE: sitePermissionsOnly ? "1" : "0",
   GYRO_BROWSER_GEOMETRY_INPUT_REVIEW: geometryInputReview ? "1" : "0",
   GYRO_BROWSER_FRONTEND_VISUAL_REVIEW: geometryInputReview
     ? "1"
@@ -110,7 +112,8 @@ manifest.build = "passed";
 let nativeExecutable = manifest.binary;
 if (
   env.GYRO_BROWSER_FRONTEND_VISUAL_REVIEW === "1" ||
-  env.GYRO_BROWSER_FRONTEND_BUNDLED === "1"
+  env.GYRO_BROWSER_FRONTEND_BUNDLED === "1" ||
+  sitePermissionsOnly
 ) {
   // A standalone Mach-O has no distinct app identity for native accessibility.
   // Stage this already-built executable in this run's temporary directory.
@@ -173,13 +176,38 @@ const pageNavigationFixture = (html) =>
     <button id="nav-spa" type="button">Same-document route</button>
     <a id="nav-hash" href="#current">Same-document fragment</a>
     <button id="nav-frame" type="button">Load frame</button>
-    <a id="nav-blocked" href="#">Blocked credential URL</a><output id="nav-state">Initial</output></nav>`,
+    <a id="nav-blocked" href="#">Blocked credential URL</a><output id="nav-state">Initial</output>
+    <button id="show-delayed" type="button">Show delayed status</button></nav>
+    <div id="model-mouse-track" style="position:relative;margin-top:10px;width:360px;height:24px;background:CanvasText">
+      <button id="model-mouse-replace" type="button" style="position:absolute;right:4px">Reset sample</button>
+    </div>
+    <output id="model-mouse-samples"></output><output id="model-mouse-clicks">0</output>`,
         )
         .replace(
           "</body>",
           `<script>
     document.getElementById('nav-script').onclick=()=>location.assign('?label=Provisional');
     document.getElementById('nav-prevent').onclick=(event)=>{event.preventDefault();document.getElementById('nav-state').textContent='Prevented';};
+    document.getElementById('show-delayed').onclick=()=>window.setTimeout(()=>{
+      const status=document.createElement('p');
+      status.textContent='Delayed browser status ready';
+      document.getElementById('show-delayed').after(status);
+    },500);
+    const track = document.getElementById('model-mouse-track');
+    const samples = [];
+    track.addEventListener('pointermove', event => {
+      if (samples.length < 100) samples.push([event.clientX, event.timeStamp]);
+      document.getElementById('model-mouse-samples').textContent=JSON.stringify({
+        n:samples.length, first:samples[0][0], end:event.clientX,
+        ms:Math.round(event.timeStamp-samples[0][1]),
+        forward:samples.every(([x],index)=>index===0||x>=samples[index-1][0]),
+      });
+      if (event.target.id === 'model-mouse-replace') {
+        const clone = event.target.cloneNode(true);
+        clone.onclick = () => document.getElementById('model-mouse-clicks').textContent = '1';
+        event.target.replaceWith(clone);
+      }
+    });
     document.getElementById('nav-spa').onclick=()=>{history.pushState({},'', '?label=Original&view=spa');};
     document.getElementById('nav-frame').onclick=()=>{const frame=document.createElement('iframe');frame.hidden=true;frame.src='/held-frame.html';document.body.append(frame);};
     const blocked=new URL(location.href);blocked.username='fixture';blocked.password='fixture';blocked.search='?label=BlockedCredentials';document.getElementById('nav-blocked').href=blocked.href;
@@ -392,7 +420,11 @@ try {
   );
   assert.equal(report.passed, true, report.error ?? "native fixture failed");
   assert.equal(report.nativeBuild, "debug-embedded-tauri-production-handlers");
-  if (geometryOnly) {
+  if (sitePermissionsOnly) {
+    assert.equal(report.mode, "site-permissions");
+    assert.equal(report.checks.length, 3);
+    assert.ok(report.checks.every((check) => check.passed));
+  } else if (geometryOnly) {
     assert.ok(report.checks.length >= 70);
     assert.ok(report.checks.every((check) => check.passed));
     await run(

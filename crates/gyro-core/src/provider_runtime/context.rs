@@ -341,6 +341,26 @@ pub fn should_auto_compact_session(
     catalog_window: Option<u64>,
     signals: &[SessionContextSignal],
 ) -> bool {
+    should_auto_compact_session_with_transcript(
+        percent,
+        provider_id,
+        model_id,
+        catalog_window,
+        signals,
+        None,
+    )
+}
+
+/// Where Gyro rebuilds the prompt, the bounded transcript size replaces the
+/// raw-event estimate. Provider-reported context readings still apply.
+pub fn should_auto_compact_session_with_transcript(
+    percent: u32,
+    provider_id: &str,
+    model_id: Option<&str>,
+    catalog_window: Option<u64>,
+    signals: &[SessionContextSignal],
+    transcript_characters: Option<u64>,
+) -> bool {
     if percent == 0 {
         return false;
     }
@@ -372,6 +392,7 @@ pub fn should_auto_compact_session(
     // system prompt and the provider's own tools. Taking the larger of the two
     // fills therefore never compacts earlier than the session itself has
     // reached the share, and it keeps a silent adapter from never compacting.
+    let carried = transcript_characters.unwrap_or(carried);
     let estimated = (carried > 0).then(|| estimated_tokens(carried));
     let input_tokens = match (measured, estimated) {
         (Some(measured), Some(estimated)) => Some(measured.max(estimated)),

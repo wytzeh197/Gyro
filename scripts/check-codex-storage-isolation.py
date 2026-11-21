@@ -49,11 +49,12 @@ def main():
             for directory in [home, shared, data, workspace]:
                 directory.mkdir()
             (shared / "config.toml").write_text(
-                'check_for_update_on_startup=false\nweb_search="disabled"\n'
+                'check_for_update_on_startup=false\n'
                 f'openai_base_url="http://127.0.0.1:{server.server_port}/v1"\n')
             (shared / "auth.json").write_text(json.dumps({"OPENAI_API_KEY": "sk-local-fixture-not-a-real-key"}))
             (data / "config.json").write_text(json.dumps({
                 "telemetryEnabled": False, "requireCommandApproval": False, "requireFileEditApproval": False,
+                "fullAccess": False,
                 "modelProviders": [{"id": "openai", "displayName": "Codex", "apiKeyRef": "provider:openai", "enabled": True}],
                 "commandProfiles": [{"id": "codex-test", "displayName": "Codex test", "command": codex,
                     "args": [], "providerId": "openai", "defaultModel": "gpt-6.1-sol", "readiness": "ready"}],
@@ -84,7 +85,14 @@ def main():
             # The second native request contains the first answer: this really
             # resumed Codex's own context, rather than just a UI cursor.
             assert b"Storage is isolated." in requests[1]
-            print("PASS: real Codex completed two local fixture turns; private storage and native resume verified")
+            # Both turns use the workspace sandbox. Hosted search should still
+            # be advertised with access to the search index.
+            for body in requests:
+                tools = json.loads(body)["tools"]
+                search = next((tool for tool in tools if tool["type"] == "web_search"), None)
+                assert search is not None, "Workspace access did not advertise web search"
+                assert search.get("external_web_access") is False, search
+            print("PASS: private storage, native resume, and cached web search under Workspace access")
     finally:
         server.shutdown()
 

@@ -59,7 +59,7 @@ esac
     );
     let path = test_path(&[&alias_bin, &shadowed.join("bin"), Path::new("/usr/bin")]);
 
-    let report = check_cli_updates_on_path(&path).unwrap();
+    let report = check_cli_updates_on_path(&path, None).unwrap();
     assert_eq!(report.offers.len(), 1);
     let offer = &report.offers[0];
     assert_eq!(offer.current_version.as_deref(), Some("1.0.0"));
@@ -72,7 +72,7 @@ esac
         .unwrap()
         .contains("1.0.0"));
 
-    let results = apply_cli_updates_on_path(&["gemini".into(), "gemini".into()], &path);
+    let results = apply_cli_updates_on_path(&["gemini".into(), "gemini".into()], &path, None);
     assert_eq!(results.len(), 1);
     assert!(results[0].ok, "{results:?}");
     assert!(fs::read_to_string(&selected_launcher)
@@ -81,8 +81,11 @@ esac
     assert!(fs::read_to_string(&shadowed_launcher)
         .unwrap()
         .contains("0.9.0"));
-    assert!(check_cli_updates_on_path(&path).unwrap().offers.is_empty());
-    let current = apply_cli_updates_on_path(&["gemini".into()], &path);
+    assert!(check_cli_updates_on_path(&path, None)
+        .unwrap()
+        .offers
+        .is_empty());
+    let current = apply_cli_updates_on_path(&["gemini".into()], &path, None);
     assert!(current[0].ok && current[0].message.contains("already up to date"));
 }
 
@@ -97,8 +100,11 @@ fn standalone_gemini_cannot_update_a_shadowed_npm_installation() {
     executable(&npm_bin.join("npm"), "exit 99");
     let path = test_path(&[&active_bin, &npm_bin]);
 
-    assert!(check_cli_updates_on_path(&path).unwrap().offers.is_empty());
-    let results = apply_cli_updates_on_path(&["gemini".into()], &path);
+    assert!(check_cli_updates_on_path(&path, None)
+        .unwrap()
+        .offers
+        .is_empty());
+    let results = apply_cli_updates_on_path(&["gemini".into()], &path, None);
     assert!(!results[0].ok);
     assert!(results[0].message.contains("supported update route"));
 }
@@ -134,10 +140,13 @@ fn targeted_updates_distinguish_probe_failure_and_missing_clis_from_current() {
     );
     let path = test_path(&[bin]);
 
-    let failed_check = check_cli_updates_on_path(&path).unwrap_err();
+    let failed_check = check_cli_updates_on_path(&path, None).unwrap_err();
     assert!(failed_check.to_string().contains("registry unavailable"));
-    let results =
-        apply_cli_updates_on_path(&["anthropic".into(), "xai".into(), "unknown".into()], &path);
+    let results = apply_cli_updates_on_path(
+        &["anthropic".into(), "xai".into(), "unknown".into()],
+        &path,
+        None,
+    );
     assert_eq!(results.len(), 3);
     assert!(results.iter().all(|result| !result.ok));
     assert!(results[0].message.contains("registry unavailable"));
@@ -165,13 +174,96 @@ esac
 "#,
     );
     let path = test_path(&[bin]);
-    let report = check_cli_updates_on_path(&path).unwrap();
+    let report = check_cli_updates_on_path(&path, None).unwrap();
     assert_eq!(report.offers[0].check_source, "native");
-    let results = apply_cli_updates_on_path(&["xai".into()], &path);
+    let results = apply_cli_updates_on_path(&["xai".into()], &path, None);
     assert!(!results[0].ok);
     assert!(results[0]
         .message
         .contains("still uses 1.0.0 (expected 1.1.0)"));
+}
+
+#[test]
+fn a_grok_npm_link_conflict_updates_the_active_managed_copy() {
+    let fixture = tempfile::tempdir().unwrap();
+    let grok_home = fixture.path().join("custom-grok-home");
+    let managed_bin = grok_home.join("bin");
+    let alias_bin = fixture.path().join(".local/bin");
+    executable(
+        &managed_bin.join("grok-1.0.0"),
+        r#"
+case "$*" in
+  --version) printf 'grok 1.0.0\n' ;;
+  'update --check --json')
+    if [ "$GROK_INSTALLER" = internal ]; then
+        printf '{"installer":"internal","updateAvailable":true,"latestVersion":"1.1.0"}\n'
+    else
+        printf '{"installer":"npm","updateAvailable":true,"latestVersion":"2.0.0"}\n'
+    fi
+    ;;
+  update)
+    if [ "$GROK_INSTALLER" != internal ]; then
+        printf 'npm error EEXIST: file already exists at %s\n' "$0" >&2
+        exit 1
+    fi
+    managed_link="$(readlink "$0")"
+    ln -sfn grok-1.1.0 "$managed_link"
+    ;;
+  *) exit 51 ;;
+esac
+"#,
+    );
+    executable(
+        &managed_bin.join("grok-1.1.0"),
+        r#"
+case "$*" in
+  --version) printf 'grok 1.1.0\n' ;;
+  'update --check --json')
+    printf '{"installer":"internal","updateAvailable":false,"latestVersion":"1.1.0"}\n'
+    ;;
+  *) exit 52 ;;
+esac
+"#,
+    );
+    symlink("grok-1.0.0", managed_bin.join("grok")).unwrap();
+    executable(
+        &alias_bin.join("npm"),
+        r#"
+[ "$*" = "prefix --global" ] || exit 53
+dirname "$(dirname "$0")"
+"#,
+    );
+    let alias = alias_bin.join("grok");
+    symlink(managed_bin.join("grok"), &alias).unwrap();
+    let path = test_path(&[
+        &alias_bin,
+        &managed_bin,
+        Path::new("/usr/bin"),
+        Path::new("/bin"),
+    ]);
+
+    let report = check_cli_updates_on_path(&path, Some(&grok_home)).unwrap();
+    assert_eq!(report.offers.len(), 1);
+    let offer = &report.offers[0];
+    assert_eq!(offer.current_version.as_deref(), Some("1.0.0"));
+    assert_eq!(offer.latest_version.as_deref(), Some("1.1.0"));
+    assert_eq!(
+        offer.update_command[..2],
+        ["env", "GROK_INSTALLER=internal"]
+    );
+
+    let results = apply_cli_updates_on_path(&["xai".into()], &path, Some(&grok_home));
+    assert!(results[0].ok, "{results:?}");
+    assert!(results[0].message.contains("Grok updated to 1.1.0"));
+    assert_eq!(fs::read_link(&alias).unwrap(), managed_bin.join("grok"));
+    assert_eq!(
+        fs::read_link(managed_bin.join("grok")).unwrap(),
+        Path::new("grok-1.1.0")
+    );
+    assert!(check_cli_updates_on_path(&path, Some(&grok_home))
+        .unwrap()
+        .offers
+        .is_empty());
 }
 
 #[test]
@@ -196,7 +288,7 @@ printf '"2.0.0"\n'
 "#,
     );
     let path = test_path(&[&prefix.join("bin"), Path::new("/usr/bin")]);
-    let results = apply_cli_updates_on_path(&["openai".into()], &path);
+    let results = apply_cli_updates_on_path(&["openai".into()], &path, None);
     assert!(results[0].ok, "{results:?}");
     assert!(results[0].message.contains("already up to date (3.0.0)"));
     assert_eq!(fs::read_to_string(version).unwrap(), "3.0.0\n");

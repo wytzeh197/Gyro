@@ -452,6 +452,21 @@ assert.deepEqual(
   sessionApprovalCounts(attentionSessions, {
     first: [
       ...attentionEvents,
+      {
+        ...attentionUser,
+        id: "recovered-turn",
+        kind: "system-event",
+        payload: { kind: "provider-status", status: "failed", recoveryKind: "interrupted" },
+      },
+    ],
+  }),
+  { first: 1 },
+  "restart clears provider and capability approvals while leaving guarded file reviews actionable",
+);
+assert.deepEqual(
+  sessionApprovalCounts(attentionSessions, {
+    first: [
+      ...attentionEvents,
       { ...attentionUser, id: "next-user", turnId: "next-turn" },
       attentionProvider,
     ],

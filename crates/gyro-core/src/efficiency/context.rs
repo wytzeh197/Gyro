@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Attribution {
@@ -84,54 +84,62 @@ impl GenerationAttempts {
 }
 impl Attribution {
     pub fn from_request(payload: &Value) -> Self {
+        Self::from_parts(
+            payload["messages"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+            payload.get("tools"),
+        )
+    }
+
+    pub(crate) fn from_parts<T: Serialize + ?Sized>(messages: &[Value], tools: Option<&T>) -> Self {
         let mut a = Self::default();
         // Compact JSON length in characters, counted while serializing. The
         // previous `to_string` copied every tool schema on each observed request.
-        a.tool_schemas = payload.get("tools").map(json_chars).unwrap_or(0);
-        if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
-            for message in messages {
-                let role = message["role"].as_str().unwrap_or_default();
-                let content = &message["content"];
-                let counted = counted_content(content);
-                if counted.hidden {
-                    a.hidden_content = true;
-                }
-                if message
-                    .get("images")
-                    .and_then(Value::as_array)
-                    .is_some_and(|x| !x.is_empty())
-                {
-                    a.hidden_content = true;
-                }
-                let n = counted.chars;
-                match role {
-                    "system" | "developer" => a.instructions += n,
-                    "tool" => {
-                        // A string body is borrowed. Multipart tool text is joined
-                        // only here, which is the same string the classifier used
-                        // to parse after copying every message.
-                        let source = if let Some(text) = counted.whole {
-                            tool_text_is_source(text)
-                        } else if content.as_array().is_some() {
-                            tool_text_is_source(&joined_text_parts(content))
-                        } else {
-                            false
-                        };
-                        if source {
-                            a.source_excerpts += n;
-                        } else {
-                            a.tool_results += n;
-                        }
+        a.tool_schemas = tools.map(json_chars).unwrap_or(0);
+        for message in messages {
+            let role = message["role"].as_str().unwrap_or_default();
+            let content = &message["content"];
+            let counted = counted_content(content);
+            if counted.hidden {
+                a.hidden_content = true;
+            }
+            if message
+                .get("images")
+                .and_then(Value::as_array)
+                .is_some_and(|x| !x.is_empty())
+            {
+                a.hidden_content = true;
+            }
+            let n = counted.chars;
+            match role {
+                "system" | "developer" => a.instructions += n,
+                "tool" => {
+                    // A string body is borrowed. Multipart tool text is joined
+                    // only here, which is the same string the classifier used
+                    // to parse after copying every message.
+                    let source = if let Some(text) = counted.whole {
+                        tool_text_is_source(text)
+                    } else if content.as_array().is_some() {
+                        tool_text_is_source(&joined_text_parts(content))
+                    } else {
+                        false
+                    };
+                    if source {
+                        a.source_excerpts += n;
+                    } else {
+                        a.tool_results += n;
                     }
-                    "assistant" => a.history += n,
-                    _ => {
-                        // Only typed Gyro blocks carry a reliable category. Do not classify arbitrary source by keywords.
-                        match message.get("gyroCategory").and_then(Value::as_str) {
-                            Some("source") => a.source_excerpts += n,
-                            Some("task-state") => a.task_state += n,
-                            Some("history") => a.history += n,
-                            _ => a.other_text += n,
-                        }
+                }
+                "assistant" => a.history += n,
+                _ => {
+                    // Only typed Gyro blocks carry a reliable category. Do not classify arbitrary source by keywords.
+                    match message.get("gyroCategory").and_then(Value::as_str) {
+                        Some("source") => a.source_excerpts += n,
+                        Some("task-state") => a.task_state += n,
+                        Some("history") => a.history += n,
+                        _ => a.other_text += n,
                     }
                 }
             }
@@ -233,14 +241,26 @@ fn char_len(text: &str) -> u64 {
 }
 
 fn tool_text_is_source(text: &str) -> bool {
-    let Ok(value) = serde_json::from_str::<Value>(text) else {
-        return false;
-    };
+    use crate::CapabilityId;
+
+    #[derive(Deserialize)]
+    struct Evidence {
+        #[serde(rename = "capabilityId")]
+        capability: CapabilityId,
+    }
+
+    #[derive(Deserialize)]
+    struct Envelope {
+        result: Evidence,
+    }
+
+    // The rest of the envelope can include a whole source file or command
+    // output. Deserialize only its identity instead of allocating those fields.
     matches!(
-        value
-            .pointer("/result/capabilityId")
-            .and_then(Value::as_str),
-        Some("workspace-read" | "workspace-read-range" | "workspace-read-editor")
+        serde_json::from_str::<Envelope>(text).map(|value| value.result.capability),
+        Ok(CapabilityId::WorkspaceRead
+            | CapabilityId::WorkspaceReadRange
+            | CapabilityId::WorkspaceReadEditor)
     )
 }
 
@@ -250,7 +270,7 @@ fn tool_text_is_source(text: &str) -> bool {
 /// counts the same scalars. ASCII chunks use their byte length. A scalar split
 /// across writes is finished when its continuation bytes arrive. A failed
 /// write counts as zero, which is what `unwrap_or_default` did.
-fn json_chars(value: &Value) -> u64 {
+fn json_chars<T: Serialize + ?Sized>(value: &T) -> u64 {
     let mut counter = Utf8CharCounter { chars: 0, need: 0 };
     match serde_json::to_writer(&mut counter, value) {
         Ok(()) => counter.chars as u64,
@@ -327,19 +347,25 @@ pub fn stable_tools(tools: &mut [Value]) {
 /// everything after it, which costs far more than the copy it removes.
 pub fn compact_duplicate_reads(messages: &mut [Value]) -> usize {
     use std::collections::HashMap;
+    let start = messages
+        .iter()
+        .rposition(|message| message["role"] == "assistant")
+        .map_or(0, |index| index + 1);
+    let exchange = &mut messages[start..];
+    // A single candidate has nothing to compare against. Avoid decoding and
+    // hashing what is often a full source excerpt in a one-tool round.
+    if exchange
+        .iter()
+        .filter_map(duplicate_read_candidate)
+        .nth(1)
+        .is_none()
+    {
+        return 0;
+    }
     let mut latest = HashMap::<[u8; 32], String>::new();
     let mut saved = 0;
-    for message in messages.iter_mut().rev() {
-        if message["role"] == "assistant" {
-            break;
-        }
-        if message["role"] != "tool" {
-            continue;
-        }
-        let Some(text) = message["content"]
-            .as_str()
-            .filter(|text| text.len() >= 2048)
-        else {
+    for message in exchange.iter_mut().rev() {
+        let Some(text) = duplicate_read_candidate(message) else {
             continue;
         };
         let Ok(mut payload) = serde_json::from_str::<Value>(text) else {
@@ -382,6 +408,15 @@ pub fn compact_duplicate_reads(messages: &mut [Value]) -> usize {
         }
     }
     saved
+}
+
+fn duplicate_read_candidate(message: &Value) -> Option<&str> {
+    if message["role"] != "tool" {
+        return None;
+    }
+    message["content"]
+        .as_str()
+        .filter(|text| text.len() >= STALE_RESULT_BYTES)
 }
 
 /// SHA-256 of the same compact JSON `serde_json::to_vec` would produce.
@@ -432,7 +467,15 @@ pub fn prepare_owned_model_request_with_policy(
     messages: &mut [Value],
     policy: EvidencePolicy,
 ) -> usize {
-    retire_with_policy(messages, policy) + compact_duplicate_reads(messages)
+    prepare_owned_model_request_for_task(messages, policy, "")
+}
+
+pub fn prepare_owned_model_request_for_task(
+    messages: &mut [Value],
+    policy: EvidencePolicy,
+    task: &str,
+) -> usize {
+    retire_with_policy(messages, policy, task) + compact_duplicate_reads(messages)
 }
 
 /// Replace tool results older than the newest assistant exchange once they
@@ -442,15 +485,23 @@ pub fn prepare_owned_model_request_with_policy(
 /// a spill before large file bodies are omitted; identifiers and failed calls
 /// stay intact. A second pass saves nothing.
 pub fn retire_stale_tool_results(messages: &mut [Value]) -> usize {
-    retire_with_policy(messages, EvidencePolicy::Preview)
+    retire_with_policy(messages, EvidencePolicy::Preview, "")
 }
 
-fn retire_with_policy(messages: &mut [Value], policy: EvidencePolicy) -> usize {
+pub(super) fn retire_with_policy(
+    messages: &mut [Value],
+    policy: EvidencePolicy,
+    task: &str,
+) -> usize {
     let newest = messages
         .iter()
         .rposition(|message| message["role"] == "assistant")
         .unwrap_or(messages.len());
+    if newest <= 2 {
+        return 0;
+    }
     let mut saved = super::arguments::retire(messages, newest, super::spill::persist);
+    let search_terms = task_search_terms(task);
     for (index, message) in messages.iter_mut().enumerate() {
         if index < 2 || index >= newest {
             continue;
@@ -470,9 +521,9 @@ fn retire_with_policy(messages: &mut [Value], policy: EvidencePolicy) -> usize {
         let replaced = if role == "user" && text.starts_with(COMPAT_CATALOG_PREFIX) {
             None
         } else if role == "tool" {
-            stub_tool_content(text, policy)
+            stub_tool_content(text, policy, &search_terms)
         } else if role == "user" && text.starts_with(COMPAT_TOOL_PREFIX) {
-            stub_compat_content(text, policy)
+            stub_compat_content(text, policy, &search_terms)
         } else {
             None
         };
@@ -561,7 +612,11 @@ fn append_image_note(message: &mut Value) {
     }
 }
 
-fn stub_tool_content(text: &str, policy: EvidencePolicy) -> Option<String> {
+fn stub_tool_content(
+    text: &str,
+    policy: EvidencePolicy,
+    search_terms: &BTreeSet<&str>,
+) -> Option<String> {
     let mut payload: Value = serde_json::from_str(text).ok()?;
     if payload
         .pointer("/result/capabilityId")
@@ -570,15 +625,19 @@ fn stub_tool_content(text: &str, policy: EvidencePolicy) -> Option<String> {
     {
         return None;
     }
-    apply_stub(&mut payload, policy)?;
+    apply_stub(&mut payload, policy, search_terms)?;
     serde_json::to_string(&payload).ok()
 }
 
-fn stub_compat_content(text: &str, policy: EvidencePolicy) -> Option<String> {
+fn stub_compat_content(
+    text: &str,
+    policy: EvidencePolicy,
+    search_terms: &BTreeSet<&str>,
+) -> Option<String> {
     let json_at = text.find(COMPAT_JSON_MARKER)? + COMPAT_JSON_MARKER.len();
     let (prefix, json) = text.split_at(json_at);
     let mut payload: Value = serde_json::from_str(json.trim()).ok()?;
-    apply_stub(&mut payload, policy)?;
+    apply_stub(&mut payload, policy, search_terms)?;
     Some(format!("{prefix}{}", serde_json::to_string(&payload).ok()?))
 }
 
@@ -590,7 +649,11 @@ fn already_omitted(payload: &Value) -> bool {
             .is_some()
 }
 
-fn apply_stub(payload: &mut Value, policy: EvidencePolicy) -> Option<()> {
+fn apply_stub(
+    payload: &mut Value,
+    policy: EvidencePolicy,
+    search_terms: &BTreeSet<&str>,
+) -> Option<()> {
     if already_omitted(payload) || payload.get("result").is_none() {
         return None;
     }
@@ -599,11 +662,24 @@ fn apply_stub(payload: &mut Value, policy: EvidencePolicy) -> Option<()> {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_owned();
+    let structured_read = payload["status"] == "completed"
+        && payload["error"].is_null()
+        && matches!(
+            capability.as_str(),
+            "workspace-list" | "workspace-search" | "browser-read-page" | "browser-find"
+        )
+        // Some hosts only expose their own tool-specific copies. Require a
+        // session-bound store before replacing evidence with a spill address.
+        && super::spill::has_session_scope();
+    let matching_terms =
+        (structured_read && capability == "workspace-search").then_some(search_terms);
     let slim = match policy {
         // Persist before replacing the body: a failed spill must retain evidence.
         EvidencePolicy::Recoverable => recoverable_data(
             payload.pointer("/result/data").unwrap_or(&Value::Null),
             &capability,
+            super::spill::SPILL_MIN_BYTES,
+            matching_terms,
             super::spill::persist,
         )?,
         EvidencePolicy::Tight => tight_data(
@@ -618,6 +694,20 @@ fn apply_stub(payload: &mut Value, policy: EvidencePolicy) -> Option<()> {
                 None => Value::Null,
             };
             slim_data(&data, &capability)
+                .or_else(|| {
+                    if structured_read {
+                        recoverable_data(
+                            &data,
+                            &capability,
+                            super::spill::SPILL_READ_WINDOW,
+                            matching_terms,
+                            super::spill::persist,
+                        )
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(data)
         }
     };
     payload["result"]["data"] = slim;
@@ -626,104 +716,130 @@ fn apply_stub(payload: &mut Value, policy: EvidencePolicy) -> Option<()> {
     Some(())
 }
 
-fn slim_data(data: &Value, capability: &str) -> Value {
-    let mut kept = serde_json::Map::new();
-    let mut spilled_address = None;
-    if let Some(object) = data.as_object() {
-        for key in [
-            "path",
-            "contentHash",
-            "line",
-            "endLine",
-            "startLine",
-            "column",
-            "endColumn",
-            "nextLine",
-            "nextColumn",
-            "truncated",
-            "unchanged",
-            "exitCode",
-            "id",
-            "outputId",
-            "rootId",
-        ] {
-            if let Some(value) = object.get(key).filter(|value| !value.is_null()) {
-                if value.as_str().is_none_or(|text| text.len() <= 200) {
-                    kept.insert(key.to_string(), value.clone());
-                }
-            }
-        }
-        for (key, value) in object {
-            if key == "window" || key.ends_with("Window") {
-                if let Some(slim) = slim_window(value) {
-                    kept.insert(key.clone(), slim);
-                }
-            }
-        }
-        // Spill instead of retire: keep a head/tail preview plus an addressable full copy, so a
-        // retired payload never costs a second full read to recover.
-        let label = if capability.is_empty() {
-            "tool"
-        } else {
-            capability
-        };
-        for key in ["content", "stdout", "stderr", "output", "text"] {
-            let Some(text) = object.get(key).and_then(Value::as_str) else {
-                continue;
-            };
-            let preview = super::spill::preview(label, key, text);
-            if !preview.spilled() {
-                continue;
-            }
-            let elided = preview.elided_bytes();
-            // The address in the preview is a promise until the copy is actually on disk, so this
-            // runs before the address is handed to the model as a place to re-read from.
-            if !super::spill::persist(&preview.address, text) {
-                crate::provider_observation::efficiency_event(|e| {
-                    e.spill_failures = e.spill_failures.saturating_add(1)
-                });
-                return data.clone();
-            }
-            kept.insert(key.to_owned(), Value::String(preview.text));
-            kept.insert("elidedBytes".into(), Value::Number(elided.into()));
-            kept.insert("spill".into(), Value::String(preview.address.clone()));
-            spilled_address = Some(preview.address);
-            break;
-        }
-    }
-    if spilled_address.is_none() {
-        return data.clone();
-    }
-    let Ok(full) = serde_json::to_string(data) else {
-        return data.clone();
+fn slim_data(data: &Value, capability: &str) -> Option<Value> {
+    let object = data.as_object()?;
+    let (field, text) = crate::provider_runtime::tool_batch::SPILL_TEXT_FIELDS
+        .iter()
+        .find_map(|&field| {
+            let text = object.get(field)?.as_str()?;
+            (text.len() >= super::spill::SPILL_MIN_BYTES).then_some((field, text))
+        })?;
+    let label = if capability.is_empty() {
+        "tool"
+    } else {
+        capability
     };
+    let preview = super::spill::preview(label, field, text);
+    let elided = preview.elided_bytes();
+    let full = serde_json::to_string(data).ok()?;
     let address = super::spill::address(capability, "result-data", &full);
-    if !super::spill::persist(&address, &full) {
+    if !super::spill::persist(&preview.address, text) || !super::spill::persist(&address, &full) {
         crate::provider_observation::efficiency_event(|e| {
             e.spill_failures = e.spill_failures.saturating_add(1)
         });
-        return data.clone();
+        return None;
     }
-    kept.insert("spill".into(), address.clone().into());
-    spilled_address = Some(address);
-    // Point at the spill copy. Telling the model to call the original tool
-    // again sends the same bytes back into the next request.
-    let note = if let Some(address) = spilled_address {
-        kept.insert(
-            "retrievalHint".into(),
-            Value::String(format!(
-                "Read {address} with gyro_workspace_read and offset for the next window of this same copy. Repeat the original call only for a newer observation."
-            )),
-        );
-        "Same copy is at the spill address. Pass it to gyro_workspace_read with offset. Repeat the original call only for a newer observation."
-    } else if matches!(capability, "workspace-read" | "workspace-read-range") {
-        "Re-read with gyro_workspace_read_range if you still need this text."
-    } else {
-        "Earlier evidence is unavailable here. Inspect current state if needed; never repeat an action merely to recover its output."
-    };
+    let mut kept = serde_json::Map::new();
+    for key in [
+        "path",
+        "contentHash",
+        "line",
+        "endLine",
+        "startLine",
+        "column",
+        "endColumn",
+        "nextLine",
+        "nextColumn",
+        "truncated",
+        "unchanged",
+        "exitCode",
+        "id",
+        "outputId",
+        "rootId",
+    ] {
+        if let Some(value) = object.get(key).filter(|value| !value.is_null()) {
+            if value.as_str().is_none_or(|text| text.len() <= 200) {
+                kept.insert(key.to_string(), value.clone());
+            }
+        }
+    }
+    for (key, value) in object {
+        if key == "window" || key.ends_with("Window") {
+            if let Some(slim) = slim_window(value) {
+                kept.insert(key.clone(), slim);
+            }
+        }
+    }
+    kept.insert(field.to_owned(), Value::String(preview.text));
+    kept.insert("elidedBytes".into(), Value::Number(elided.into()));
+    kept.insert("retrievalHint".into(), format!("Read {address} with gyro_workspace_read and offset for the next window of this same copy. Repeat the original call only for a newer observation.").into());
+    kept.insert("spill".into(), address.into());
     kept.insert("evidenceOmitted".into(), Value::Bool(true));
-    kept.insert("note".into(), Value::String(note.to_owned()));
-    Value::Object(kept)
+    kept.insert("note".into(), "Same copy is at the spill address. Pass it to gyro_workspace_read with offset. Repeat the original call only for a newer observation.".into());
+    Some(Value::Object(kept))
+}
+
+fn identifier_separator(character: char) -> bool {
+    !character.is_ascii_alphanumeric() && character != '_'
+}
+
+// Narrow the focus to explicit code names: ordinary prose and the assembled
+// conversation should not make unrelated search matches look relevant.
+fn task_search_terms(task: &str) -> BTreeSet<&str> {
+    const MAX_TERMS: usize = 16;
+    let valid = |term: &&str| {
+        (3..=96).contains(&term.len())
+            && !term.starts_with(|character: char| character.is_ascii_digit())
+    };
+    let quoted = task
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .filter(|term| valid(term) && !term.contains(identifier_separator));
+    let symbols = task.split(identifier_separator).filter(|term| {
+        valid(term)
+            && (term.contains('_')
+                || term
+                    .as_bytes()
+                    .windows(2)
+                    .any(|pair| pair[0].is_ascii_lowercase() && pair[1].is_ascii_uppercase()))
+    });
+    let mut terms = BTreeSet::new();
+    for term in quoted.chain(symbols) {
+        terms.insert(term);
+        if terms.len() == MAX_TERMS {
+            break;
+        }
+    }
+    terms
+}
+
+fn matching_search_lines(data: &Value, terms: &BTreeSet<&str>) -> Vec<Value> {
+    if terms.is_empty() {
+        return Vec::new();
+    }
+    let Some(matches) = data.as_array().or_else(|| data["matches"].as_array()) else {
+        return Vec::new();
+    };
+    // Use the normal head/tail allowance for exact rows, including their
+    // paths and line numbers. Do not increase the preview's byte budget.
+    let mut available = super::spill::SPILL_HEAD_BYTES + super::spill::SPILL_TAIL_BYTES - 2;
+    let mut kept = Vec::new();
+    for row in matches {
+        let line = row["line"].as_str().or_else(|| row["text"].as_str());
+        if !line.is_some_and(|line| {
+            line.split(identifier_separator)
+                .any(|word| terms.contains(word))
+        }) {
+            continue;
+        }
+        let bytes = super::compaction::message_bytes(row) + usize::from(!kept.is_empty());
+        if bytes <= available {
+            kept.push(row.clone());
+            available -= bytes;
+        }
+    }
+    kept
 }
 
 /// Save the whole JSON value, including nested output and every stream, before
@@ -731,9 +847,14 @@ fn slim_data(data: &Value, capability: &str) -> Value {
 fn recoverable_data(
     data: &Value,
     capability: &str,
+    min_bytes: usize,
+    search_terms: Option<&BTreeSet<&str>>,
     persist: impl FnOnce(&str, &str) -> bool,
 ) -> Option<Value> {
     let text = serde_json::to_string(data).ok()?;
+    if text.len() < min_bytes {
+        return None;
+    }
     let preview = super::spill::preview(capability, "result-data", &text);
     if !preview.spilled() {
         return None;
@@ -765,10 +886,24 @@ fn recoverable_data(
             kept.insert(key.into(), value.clone());
         }
     }
+    for key in ["url", "framing"] {
+        if let Some(value) = data
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|value| value.len() <= 500)
+        {
+            kept.insert(key.into(), value.into());
+        }
+    }
     kept.insert("evidenceOmitted".into(), true.into());
-    kept.insert("preview".into(), preview.text.into());
+    let matching = search_terms.map_or_else(Vec::new, |terms| matching_search_lines(data, terms));
+    if matching.is_empty() {
+        kept.insert("preview".into(), preview.text.into());
+    } else {
+        kept.insert("matches".into(), matching.into());
+    }
     kept.insert("spill".into(), preview.address.clone().into());
-    kept.insert("retrievalHint".into(), format!("Read {} with gyro_workspace_read and offset for the complete historical JSON data. It is the observation at execution time, not current state. Never repeat an action to recover its output; revalidate file hashes before editing.", preview.address).into());
+    kept.insert("retrievalHint".into(), format!("Read {} with gyro_workspace_read. Pass nextOffset as offset and raise maxBytes if you need a larger page. This is historical JSON. Never repeat an action to recover its output; revalidate file hashes before editing.", preview.address).into());
     Some(Value::Object(kept))
 }
 
@@ -911,6 +1046,7 @@ mod tests {
         assert_eq!(reference["result"]["data"]["sameEvidenceAsCallId"], "last");
         assert_eq!(compact_duplicate_reads(&mut messages), 0);
     }
+
     #[test]
     fn evidence_fingerprint_matches_the_compact_json_bytes() {
         use sha2::{Digest, Sha256};
@@ -1494,9 +1630,13 @@ mod tests {
             "matches":[{"text":"界".repeat(2000)}]});
         let dir = tempfile::tempdir().unwrap();
         let store = super::super::spill::SpillStore::new(dir.path());
-        let compact = recoverable_data(&data, "workspace-run-task", |address, text| {
-            store.save(address, text).is_ok()
-        })
+        let compact = recoverable_data(
+            &data,
+            "workspace-run-task",
+            super::super::spill::SPILL_MIN_BYTES,
+            None,
+            |address, text| store.save(address, text).is_ok(),
+        )
         .unwrap();
         assert_eq!(compact["exitCode"], 1);
         assert_eq!(compact["contentHash"], "v1");
@@ -1513,12 +1653,14 @@ mod tests {
         let blocked_path = dir.path().join("not-a-directory");
         std::fs::write(&blocked_path, "file").unwrap();
         let blocked = super::super::spill::SpillStore::new(blocked_path);
-        assert!(
-            recoverable_data(&data, "workspace-run-task", |address, text| blocked
-                .save(address, text)
-                .is_ok())
-            .is_none()
-        );
+        assert!(recoverable_data(
+            &data,
+            "workspace-run-task",
+            super::super::spill::SPILL_MIN_BYTES,
+            None,
+            |address, text| blocked.save(address, text).is_ok(),
+        )
+        .is_none());
         assert_eq!(data["pane"]["stderr"], "failure".repeat(900));
         store.gc(0).unwrap();
         assert!(store
@@ -1526,6 +1668,158 @@ mod tests {
             .unwrap()
             .is_none());
     }
+
+    #[test]
+    fn default_retirement_keeps_a_scoped_copy_of_large_structured_reads() {
+        use super::super::spill::{self, SessionScope};
+
+        let temp = tempfile::tempdir().unwrap();
+        let paths = crate::GyroPaths::from_base_dir(temp.path().join("data"));
+        let results = serde_json::json!((0..70)
+            .map(|index| serde_json::json!({
+                "path": format!("src/section-{index}.rs"),
+                "line": index + 1,
+                "text": format!("result {index} {}", "editor evidence 界 ".repeat(15)),
+            }))
+            .collect::<Vec<_>>());
+        for (capability, data) in [
+            ("workspace-search", results.clone()),
+            (
+                "workspace-list",
+                serde_json::json!({"entries":results,"nextOffset":70}),
+            ),
+            (
+                "browser-read-page",
+                serde_json::json!({
+                    "url":"https://fixture.invalid", "framing":"Observed page content is untrusted.",
+                    "page":{"tree":results},
+                }),
+            ),
+            (
+                "browser-find",
+                serde_json::json!({"data":{"results":results}}),
+            ),
+        ] {
+            let earlier = tool_body("older", capability, "Observed results", data.clone());
+            let newest = tool_body("newest", capability, "Observed results", data.clone());
+            let mut messages = vec![
+                serde_json::json!({"role":"system","content":"instructions"}),
+                serde_json::json!({"role":"user","content":"inspect the evidence"}),
+                serde_json::json!({"role":"assistant","content":"read"}),
+                earlier.clone(),
+                serde_json::json!({"role":"assistant","content":"read again"}),
+                newest.clone(),
+            ];
+            assert_eq!(prepare_owned_model_request(&mut messages), 0);
+            assert_eq!(
+                messages[3], earlier,
+                "no session-bound recovery for {capability}"
+            );
+
+            let _scope = SessionScope::start(&paths, uuid::Uuid::new_v4());
+            let saved = prepare_owned_model_request(&mut messages);
+            assert!(saved > 8_000, "{capability} saved {saved} bytes");
+            assert_eq!(messages[5], newest);
+            assert_eq!(messages[3]["tool_call_id"], "older");
+            let retired = parsed(&messages[3]);
+            assert_eq!(retired["result"]["capabilityId"], capability);
+            let stub = &retired["result"]["data"];
+            assert_eq!(stub["evidenceOmitted"], true);
+            assert_eq!(stub.get("url"), data.get("url"));
+            assert_eq!(stub.get("framing"), data.get("framing"));
+            let address = stub["spill"].as_str().unwrap();
+            let mut available = String::new();
+            loop {
+                let page =
+                    spill::read_scoped_window(address, available.len(), spill::SPILL_READ_WINDOW)
+                        .unwrap()
+                        .unwrap();
+                available.push_str(&page.text);
+                if page.next_offset().is_none() {
+                    break;
+                }
+            }
+            assert_eq!(serde_json::from_str::<Value>(&available).unwrap(), data);
+            assert_eq!(prepare_owned_model_request(&mut messages), 0);
+        }
+    }
+
+    #[test]
+    fn retired_search_keeps_exact_lines_for_symbols_named_in_the_task() {
+        use super::super::spill::{self, SessionScope};
+        use serde_json::json;
+
+        let temp = tempfile::tempdir().unwrap();
+        let paths = crate::GyroPaths::from_base_dir(temp.path().join("data"));
+        let _scope = SessionScope::start(&paths, uuid::Uuid::new_v4());
+        let hit = json!({
+            "path": "src/lease.rs", "lineNumber": 41,
+            "line": "fn resolve_lease_owner() -> &'static str { \"teal\" }",
+            "ranges": [{"startColumn": 3, "endColumn": 22}],
+        });
+        let mut results = (0..100)
+            .map(|index| json!({
+                "path": format!("src/lease-{index}.rs"), "lineNumber": 10,
+                "line": format!("fn resolve_lease_owner_backup() {{ {} }}", "noise(); ".repeat(15)),
+            }))
+            .collect::<Vec<_>>();
+        results.insert(52, hit.clone());
+        let data = json!(results);
+        let earlier = tool_body(
+            "earlier",
+            "workspace-search",
+            "Search results",
+            data.clone(),
+        );
+        let newest = tool_body("newest", "workspace-search", "Newest", data.clone());
+        let messages = vec![
+            json!({"role":"system","content":"instructions"}),
+            json!({"role":"user","content":"inspect the evidence"}),
+            json!({"role":"assistant","content":"search"}),
+            earlier,
+            json!({"role":"assistant","content":"search another scope"}),
+            newest.clone(),
+        ];
+        let mut selected = messages.clone();
+        assert!(
+            prepare_owned_model_request_for_task(
+                &mut selected,
+                EvidencePolicy::Preview,
+                "What does resolve_lease_owner return?",
+            ) > 8_000
+        );
+        let retired = parsed(&selected[3]);
+        let stub = &retired["result"]["data"];
+        assert_eq!(stub["matches"], json!([hit]));
+        assert!(stub.get("preview").is_none());
+        assert_eq!(selected[5], newest);
+        assert_eq!(selected[3]["tool_call_id"], "earlier");
+
+        let address = stub["spill"].as_str().unwrap();
+        let mut recovered = String::new();
+        loop {
+            let page =
+                spill::read_scoped_window(address, recovered.len(), spill::SPILL_READ_WINDOW)
+                    .unwrap()
+                    .unwrap();
+            recovered.push_str(&page.text);
+            if page.next_offset().is_none() {
+                break;
+            }
+        }
+        assert_eq!(serde_json::from_str::<Value>(&recovered).unwrap(), data);
+
+        let mut ordinary = messages;
+        prepare_owned_model_request_for_task(
+            &mut ordinary,
+            EvidencePolicy::Preview,
+            "Which worker owns the lease?",
+        );
+        let retired = parsed(&ordinary[3]);
+        assert!(retired["result"]["data"]["preview"].is_string());
+        assert!(retired["result"]["data"].get("matches").is_none());
+    }
+
     #[test]
     fn recovery_policy_keeps_head_newest_and_protocol_identity() {
         let old = read_message("old", "v1", 1, &"x".repeat(8000));

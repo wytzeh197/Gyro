@@ -4,6 +4,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { readFile, mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createServer } from "node:http";
 
 const baseline = process.argv.includes("--baseline");
 const sourcePath = "apps/desktop/src-tauri/src/session_browser.rs";
@@ -30,6 +31,7 @@ for (const [key, value] of Object.entries({
   MAX_ENTRY_CHARS: 2000,
   MAX_TREE_CHARS: 48000,
   MAX_FIND_RESULTS: 40,
+  trace_capture: await readFile("apps/desktop/src-tauri/src/browser_trace_capture.js", "utf8"),
   annotations: await readFile(
     "apps/desktop/src-tauri/src/browser_annotations.js",
     "utf8",
@@ -188,12 +190,175 @@ try {
     return result.results.some(item => item.tag === 'input' && item.name === 'Project name');
   })()`,
   );
+  if (!baseline) {
+    await check(
+      "moving the model mouse delivers enter, movement, and leave without pressing a button or focusing",
+      `(() => {
+        const row = document.createElement('div');
+        row.innerHTML = '<button>First</button><input type="password"><button>Last</button>';
+        document.body.prepend(row);
+        const [first, protectedField, last] = row.children;
+        const initialFocus = document.activeElement;
+        const events = [];
+        for (const element of row.children) {
+          for (const type of ['pointerenter','pointerleave','pointermove','pointerdown','click']) {
+            element.addEventListener(type, event => events.push([element === first ? 'first' : element === last ? 'last' : 'protected', event.type]));
+          }
+        }
+        const move = element => {
+          const rect = element.getBoundingClientRect();
+          return __gyroBrowserAgent.movePointer({
+            url: location.href, viewport: __gyroBrowserAgent.status().viewport,
+            x: rect.x + rect.width / 2, y: rect.y + rect.height / 2,
+          });
+        };
+        const arrived = [first, protectedField, last].every(element => move(element).ok);
+        const stale = __gyroBrowserAgent.movePointer({
+          url: location.href, viewport: {width:0}, x:0, y:0,
+        });
+        row.remove();
+        return arrived && !stale.ok && document.activeElement === initialFocus
+          && JSON.stringify(events) === JSON.stringify([
+            ['first','pointerenter'], ['first','pointermove'], ['first','pointerleave'],
+            ['last','pointerenter'], ['last','pointermove'],
+          ]);
+      })()`,
+    );
+    await check(
+      "background press rechecks semantics when hover repurposes the same element",
+      `(() => {
+        const link = document.createElement('a');
+        link.style.cssText = 'position:fixed;left:10px;top:10px;width:100px;height:40px;z-index:999';
+        link.textContent = 'Open item';
+        link.href = '#first-item';
+        document.body.append(link);
+        const agent = __gyroBrowserAgent;
+        const x = 20, y = 20;
+        const before = agent.pointerTarget({ x, y });
+        const expected = { url: before.url, viewport: before.viewport, source: before.targetToken };
+        let presses = 0;
+        link.addEventListener('pointerdown', () => presses++);
+        link.addEventListener('click', event => event.preventDefault());
+        link.addEventListener('pointermove', () => { link.href = '#another-item'; }, { once: true });
+        try {
+          const blocked = agent.backgroundPointer({ action: 'click', x, y, expected });
+          const updated = agent.pointerTarget({ x, y });
+          if (blocked.ok || !blocked.error.includes('target changed') ||
+              before.ref !== updated.ref || before.targetToken === updated.targetToken || presses !== 0) return false;
+          return agent.backgroundPointer({
+            action: 'click', x, y, expected: { ...expected, source: updated.targetToken },
+          }).ok && presses === 1;
+        } finally {
+          link.remove();
+        }
+      })()`,
+    );
+  }
   await check(
     "find resolves aria-labelledby in order",
     `(() => {
     const result = __gyroBrowserAgent.find({selector:'#labelled'});
     return result.results[0].name === 'Launch preview';
   })()`,
+  );
+  await check(
+    "find can verify visible status text and identify a disabled control",
+    `(() => {
+      const status = document.createElement('p');
+      status.textContent = 'Project saved successfully';
+      document.body.append(status);
+      const found = __gyroBrowserAgent.find({query:'project saved successfully'});
+      const disabled = __gyroBrowserAgent.find({selector:'#disabled-button'});
+      status.remove();
+      return found.url === location.href && found.results[0]?.tag === 'p'
+        && disabled.results[0]?.disabled === true;
+    })()`,
+  );
+  await check(
+    "refs cannot alias two nodes through a stale element property",
+    `(() => {
+      const keep = document.querySelector('#keep');
+      const original = __gyroBrowserAgent.find({selector:'#keep'}).results[0].ref;
+      const other = document.createElement('button');
+      other.id = 'other';
+      other.textContent = 'Another target';
+      other.__gyroRef = original;
+      document.body.append(other);
+      const ref = __gyroBrowserAgent.find({selector:'#other'}).results[0].ref;
+      const clicked = __gyroBrowserAgent.click({ref:original});
+      other.remove();
+      return ref !== original && clicked.name === keep.textContent;
+    })()`,
+  );
+  await check(
+    "typing and form input preserve whitespace and can clear a field",
+    `(() => {
+      const field = document.querySelector('#project');
+      const ref = __gyroBrowserAgent.find({selector:'#project'}).results[0].ref;
+      const typed = __gyroBrowserAgent.type({ref,text:'  indented  '});
+      const exact = field.value === '  indented  ';
+      const cleared = __gyroBrowserAgent.formInput({ref,value:''});
+      return typed.ok && exact && cleared.ok && field.value === '';
+    })()`,
+  );
+  await check(
+    "invalid form writes preserve the old value and emit no change",
+    `(() => {
+      const section = document.createElement('section');
+      section.innerHTML = '<input id="number-field" type="number" value="27"><input id="check-field" type="checkbox" checked><input id="secret-field" type="password" value="private"><input id="file-field" type="file">';
+      document.body.append(section);
+      const ref = id => __gyroBrowserAgent.find({selector:id}).results[0].ref;
+      let changes = 0;
+      section.addEventListener('change', () => changes++);
+      const invalidNumber = __gyroBrowserAgent.type({ref:ref('#number-field'),text:'invalid'});
+      const invalidCheck = __gyroBrowserAgent.formInput({ref:ref('#check-field'),value:'maybe'});
+      const protectedField = __gyroBrowserAgent.type({ref:ref('#secret-field'),text:'invalid'});
+      let file;
+      try { file = __gyroBrowserAgent.type({ref:ref('#file-field'),text:'invalid'}); }
+      catch (_) { file = {ok:true}; }
+      const passed = !invalidNumber.ok && !invalidCheck.ok && !protectedField.ok && !file.ok
+        && section.querySelector('#number-field').value === '27'
+        && section.querySelector('#check-field').checked
+        && section.querySelector('#secret-field').value === 'private' && changes === 0;
+      section.remove();
+      return passed;
+    })()`,
+  );
+  await check(
+    "setting a checkbox dispatches one activation and read_page reports the checked state",
+    `(() => {
+      const field = document.createElement('input');
+      field.type = 'checkbox';
+      field.id = 'activation-field';
+      document.body.append(field);
+      let activations = 0;
+      field.addEventListener('click', () => activations++);
+      const ref = __gyroBrowserAgent.find({selector:'#activation-field'}).results[0].ref;
+      const change = __gyroBrowserAgent.formInput({ref,value:'true'});
+      const same = __gyroBrowserAgent.formInput({ref,value:'true'});
+      const read = __gyroBrowserAgent.readPage({ref});
+      field.remove();
+      return change.ok && same.ok && activations === 1 && read.tree.checked === true;
+    })()`,
+  );
+  await check(
+    "submit honors a custom Enter handler and requests native submit only once",
+    `(() => {
+      const form = document.createElement('form');
+      form.innerHTML = '<input id="submit-field" required><button name="requestSubmit">Save</button>';
+      document.body.append(form);
+      let submitted = 0;
+      form.addEventListener('submit', event => { event.preventDefault(); submitted++; });
+      const field = form.querySelector('#submit-field');
+      const ref = __gyroBrowserAgent.find({selector:'#submit-field'}).results[0].ref;
+      field.addEventListener('keydown', event => { if (event.key === 'Enter') event.preventDefault(); }, {once:true});
+      const custom = __gyroBrowserAgent.type({ref,text:'first',submit:true});
+      const ignored = submitted === 0;
+      const native = __gyroBrowserAgent.type({ref,text:'second',submit:true});
+      form.remove();
+      return ignored && custom.submission === 'enter-handled-by-page'
+        && native.submission === 'requested' && submitted === 1;
+    })()`,
   );
   await check(
     "subtree reads preserve other connected refs",
@@ -506,6 +671,49 @@ try {
       "artifacts/browser-annotations/hover.png",
       Buffer.from(shot.data, "base64"),
     );
+  }
+  if (!baseline) {
+    const calendar = createServer((request, response) => {
+      const url = new URL(request.url, "http://fixture");
+      if (url.pathname === "/api/events") {
+        response.writeHead(400, { "content-type": "application/json" });
+        return response.end(JSON.stringify({ error: "startTime is required" }));
+      }
+      response.setHeader("content-type", "text/html");
+      response.end(`<!doctype html><button id="save">Save</button><script>
+        document.querySelector("#save").onclick = async () => {
+          const result = await fetch("/api/events?secret=hidden", { method: "POST", body: '{"allDay":true,"title":"private-form-value"}' });
+          if (!result.ok) console.error((await result.json()).error);
+        };
+      </script>`);
+    });
+    await new Promise((resolve) => calendar.listen(0, "127.0.0.1", resolve));
+    try {
+      const origin = `http://127.0.0.1:${calendar.address().port}`;
+      await call("Page.navigate", { url: origin });
+      for (let attempt = 0; attempt < 80; attempt++) {
+        if (await evaluate('!!document.querySelector("#save")')) break;
+        await pause(50);
+      }
+      await evaluate(agent);
+      await check("trace starts only on the selected origin", `__gyroBrowserAgent.traceArm({id:'wrong',origin:'https://different.invalid'}).ok === false && __gyroBrowserAgent.traceArm({id:'calendar',origin:location.origin}).ok`);
+      await check("trace ignores synthetic clicks", `document.querySelector('#save').click(); __gyroBrowserAgent.traceSnapshot().click === null`);
+      await pause(100);
+      const { x, y } = await evaluate(`(() => { const box = document.querySelector('#save').getBoundingClientRect(); return { x: box.x + 5, y: box.y + 5 }; })()`);
+      await call("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", x, y, clickCount: 1 });
+      await call("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", x, y, clickCount: 1 });
+      await pause(5200);
+      await check("trace captures a real Save click, 400 response, and console error without form or URL query values", `(() => {
+        const trace = __gyroBrowserAgent.traceSnapshot();
+        const encoded = JSON.stringify(trace);
+        return trace.done && trace.click.label === 'Save' && trace.events.length === 2
+          && trace.events.some((event) => event.method === 'POST' && event.path === '/api/events' && event.status === 400)
+          && trace.events.some((event) => event.kind === 'console' && event.message === 'startTime is required')
+          && !encoded.includes('private-form-value') && !encoded.includes('secret=hidden');
+      })()`);
+    } finally {
+      await new Promise((resolve) => calendar.close(resolve));
+    }
   }
   console.log(JSON.stringify({ baseline, checks, performance }, null, 2));
 } finally {

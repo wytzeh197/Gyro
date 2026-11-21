@@ -107,6 +107,11 @@ assert.equal(pointer.lastChild.textContent, "Codex");
 assert.match(pointer.style.cssText, /pointer-events:none/);
 assert.equal(pointer.attributes["aria-hidden"], "true");
 assert.equal(pointer.firstChild.style.transformOrigin, "2px 2px", "press pulse keeps the arrow tip anchored");
+f.feedback.setDisplayScale(0.33);
+at(pointer, 120, 90);
+assert.match(pointer.style.transform, /scale\(3\.03/, "fitted pages keep a readable cursor");
+assert.match(pointer.style.cssText, /transform-origin:2px 2px/, "fit scaling leaves the hotspot fixed");
+f.feedback.setDisplayScale(1);
 
 showMove(f, 600, 300);
 at(pointer, 120, 90);

@@ -1,9 +1,13 @@
 //! Numeric observations of generation requests and native provider attempts. The collector follows a
 //! blocking turn worker and survives error paths; it never retains request text.
-use crate::{timing, UsageTokens};
+use crate::{
+    chat_http::{ChatField, ChatPayload},
+    efficiency::context::Attribution,
+    timing, UsageTokens,
+};
 use serde::Serialize;
 use serde_json::Value;
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::collections::BTreeMap;
 
 thread_local! { static ACTIVE: RefCell<Option<Summary>> = const { RefCell::new(None) }; }
@@ -73,13 +77,30 @@ pub fn attempt() {
 /// Only the prompt actually dispatched to the native agent belongs here.
 /// Its own history, schemas and internal tool loops remain provider-owned.
 pub fn native_prompt(payload: &Value) {
+    record_native_prompt(|| {
+        (
+            text_size(payload).0,
+            crate::efficiency::context::Attribution::from_request(payload),
+        )
+    });
+}
+
+pub(crate) fn native_text_prompt(text: &str) {
+    record_native_prompt(|| (text_string_size(text).0, Default::default()));
+}
+
+pub(crate) fn native_prompt_parts(parts: &[Value]) {
+    record_native_prompt(|| (text_array_size(parts).0, Default::default()));
+}
+
+fn record_native_prompt(
+    measure: impl FnOnce() -> (usize, crate::efficiency::context::Attribution),
+) {
     ACTIVE.with(|slot| {
         if let Some(summary) = slot.borrow_mut().as_mut() {
-            summary.native.prompt_chars = text_size(payload).0;
-            let mut attribution = categorize_prompt(
-                crate::efficiency::context::Attribution::from_request(payload),
-                &summary.prepared_context,
-            );
+            let (chars, attribution) = measure();
+            summary.native.prompt_chars = chars;
+            let mut attribution = categorize_prompt(attribution, &summary.prepared_context);
             attribution.hidden_content = true;
             if attribution.estimated_tokens == 0 {
                 attribution.other_text = summary.native.prompt_chars as u64;
@@ -280,8 +301,79 @@ pub struct Request {
     cache_write: Option<u64>,
     accounted_receipt: Option<UsageTokens>,
 }
+
+/// The arrays are immutable for one HTTP exchange, including its retries.
+/// Each wire attempt still gets its own receipt and envelope measurement.
+pub(crate) struct ChatObservation<'a> {
+    messages: &'a [Value],
+    tools: Option<&'a [Value]>,
+    array_size: OnceCell<(usize, bool)>,
+    attribution: OnceCell<Attribution>,
+}
+
+impl<'a> ChatObservation<'a> {
+    pub(crate) fn new(payload: &ChatPayload<'a>) -> Self {
+        Self {
+            messages: payload.array("messages").unwrap_or_default(),
+            tools: payload.array("tools"),
+            array_size: OnceCell::new(),
+            attribution: OnceCell::new(),
+        }
+    }
+
+    pub(crate) fn start(&self, payload: &ChatPayload<'a>) -> Request {
+        Request::start_observed(
+            || {
+                let array_size = *self.array_size.get_or_init(|| {
+                    [
+                        Some(("messages", self.messages)),
+                        self.tools.map(|tools| ("tools", tools)),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .fold(
+                        (2usize, false),
+                        |(chars, unknown), (key, values)| {
+                            let (size, hidden) = text_array_size(values);
+                            (
+                                chars.saturating_add(key.len() + 4).saturating_add(size),
+                                unknown || hidden,
+                            )
+                        },
+                    )
+                });
+                payload
+                    .fields
+                    .iter()
+                    .fold(array_size, |(chars, unknown), (key, field)| {
+                        let ChatField::Value(value) = field else {
+                            return (chars, unknown);
+                        };
+                        let (size, hidden) = text_size(value);
+                        (
+                            chars.saturating_add(key.len() + 4).saturating_add(size),
+                            unknown || hidden,
+                        )
+                    })
+            },
+            || {
+                self.attribution
+                    .get_or_init(|| Attribution::from_parts(self.messages, self.tools))
+                    .clone()
+            },
+        )
+    }
+}
+
 impl Request {
     pub fn start(payload: &Value) -> Self {
+        Self::start_observed(|| text_size(payload), || Attribution::from_request(payload))
+    }
+
+    fn start_observed(
+        size: impl FnOnce() -> (usize, bool),
+        attribute: impl FnOnce() -> Attribution,
+    ) -> Self {
         let index = ACTIVE.with(|slot| {
             slot.borrow_mut().as_mut().map_or(0, |summary| {
                 summary.requests = summary.requests.saturating_add(1);
@@ -294,15 +386,12 @@ impl Request {
                     summary.pending_retired_bytes = 0;
                     summary.pending_retirement_observed = false;
                 }
-                let attribution = categorize_prompt(
-                    crate::efficiency::context::Attribution::from_request(payload),
-                    &summary.prepared_context,
-                );
+                let attribution = categorize_prompt(attribute(), &summary.prepared_context);
                 summary.context_attribution.combine(&attribution);
                 summary.requests
             })
         });
-        let (input_chars, unmeasured_content) = text_size(payload);
+        let (input_chars, unmeasured_content) = size();
         timing::request(timing::Stage::RequestStart, index);
         Self {
             index,
@@ -325,6 +414,9 @@ impl Request {
         if !text.is_empty() {
             timing::mark(timing::Stage::FirstToken);
         }
+    }
+    pub(crate) fn input_chars(&self) -> usize {
+        self.input_chars
     }
     pub fn complete(&mut self, input: Option<u64>, output: Option<u64>, output_chars: usize) {
         self.complete = true;
@@ -416,14 +508,8 @@ pub fn add_usage(total: &mut Option<UsageTokens>, tokens: UsageTokens) {
 /// bytes are excluded rather than treated as text tokens.
 pub fn text_size(value: &Value) -> (usize, bool) {
     match value {
-        Value::String(text) if text.starts_with("data:image/") => (0, true),
-        Value::String(text) => (text_chars(text).saturating_add(2), false),
-        Value::Array(items) => items
-            .iter()
-            .map(text_size)
-            .fold((2, false), |(n, u), (s, v)| {
-                (n.saturating_add(s + 1), u || v)
-            }),
+        Value::String(text) => text_string_size(text),
+        Value::Array(items) => text_array_size(items),
         Value::Object(fields) => fields.iter().fold((2usize, false), |(n, u), (key, value)| {
             let (size, unknown) = if matches!(key.as_str(), "images" | "image_url")
                 || (matches!(key.as_str(), "data" | "blob")
@@ -440,6 +526,34 @@ pub fn text_size(value: &Value) -> (usize, bool) {
         }),
         _ => (value.to_string().len(), false),
     }
+}
+
+fn text_string_size(text: &str) -> (usize, bool) {
+    if text.starts_with("data:image/") {
+        (0, true)
+    } else {
+        (text_chars(text).saturating_add(2), false)
+    }
+}
+
+fn text_array_size(items: &[Value]) -> (usize, bool) {
+    items
+        .iter()
+        .map(text_size)
+        .fold((2, false), |(n, u), (s, v)| {
+            (n.saturating_add(s + 1), u || v)
+        })
+}
+
+/// Same estimate as the messages and tools JSON object, without copying it.
+pub(crate) fn messages_and_tools_chars(messages: &[Value], tools: &[Value]) -> usize {
+    [("messages", messages), ("tools", tools)]
+        .iter()
+        .fold(2usize, |chars, (key, values)| {
+            chars
+                .saturating_add(key.len() + 4)
+                .saturating_add(text_array_size(values).0)
+        })
 }
 
 /// Character count used as the token estimate.
@@ -707,6 +821,86 @@ mod tests {
             + ("note".len() + 4 + note.chars().count() + 2);
         assert_eq!(object_chars, expected);
     }
+
+    #[test]
+    fn borrowed_prompt_accounting_matches_json_accounting() {
+        let parts = vec![
+            serde_json::json!({"type":"text","text":"Inspect café 🦀."}),
+            serde_json::json!({"type":"image","data":"x".repeat(16384),"mimeType":"image/png"}),
+        ];
+        let messages = vec![serde_json::json!({"role":"user","content":parts})];
+        let tools = vec![serde_json::json!({"name":"lookup","description":"example schema"})];
+        let payload = serde_json::json!({"messages":messages,"tools":tools});
+        assert!(text_size(&payload).1);
+        assert_eq!(
+            messages_and_tools_chars(&messages, &tools),
+            text_size(&payload).0
+        );
+
+        let summary = |record: &dyn Fn()| {
+            let _scope = Scope::start();
+            attempt();
+            record();
+            serde_json::to_value(snapshot().unwrap()).unwrap()
+        };
+        assert_eq!(
+            summary(&|| native_prompt_parts(&parts)),
+            summary(&|| native_prompt(&serde_json::json!(parts)))
+        );
+        let text = "Inspect café 🦀.";
+        assert_eq!(
+            summary(&|| native_text_prompt(text)),
+            summary(&|| native_prompt(&serde_json::json!(text)))
+        );
+    }
+
+    #[test]
+    fn borrowed_chat_payload_preserves_wire_bytes_and_usage_estimates() {
+        let messages = vec![serde_json::json!({"role":"user","content":[
+            {"type":"text","text":"Inspect café 🦀."},
+            {"type":"image_url","image_url":{"url":"data:image/png;base64,fixture"}}
+        ]})];
+        let tools = vec![serde_json::json!({"type":"function", "function":{"name":"read"}})];
+        for schemas in [None, Some(tools.as_slice())] {
+            let mut payload = ChatPayload::new(&messages, schemas);
+            payload.insert("stream", true.into());
+            payload.insert("model", "fixture".into());
+            let stream_options = serde_json::json!({"include_usage":true});
+            payload.insert("stream_options", stream_options.clone());
+            let mut legacy =
+                serde_json::json!({"model":"fixture","stream":true,"messages":messages});
+            legacy["stream_options"] = stream_options;
+            if let Some(schemas) = schemas {
+                legacy["tools"] = serde_json::json!(schemas);
+            }
+            assert_eq!(
+                serde_json::to_vec(&payload).unwrap(),
+                serde_json::to_vec(&legacy).unwrap()
+            );
+            let baseline = {
+                let _scope = Scope::start();
+                Request::start(&legacy).rejected();
+                legacy.as_object_mut().unwrap().remove("stream_options");
+                drop(Request::start(&legacy));
+                serde_json::to_value(snapshot().unwrap()).unwrap()
+            };
+            let borrowed = {
+                let _scope = Scope::start();
+                let observation = ChatObservation::new(&payload);
+                observation.start(&payload).rejected();
+                payload.fields.remove("stream_options");
+                let retry = observation.start(&payload);
+                assert_eq!(retry.input_chars(), text_size(&legacy).0);
+                drop(retry);
+                serde_json::to_value(snapshot().unwrap()).unwrap()
+            };
+            assert_eq!(borrowed, baseline);
+            assert_eq!(borrowed["requests"], 2);
+            assert_eq!(borrowed["rejected"], 1);
+            assert_eq!(borrowed["unmeasuredContent"], true);
+        }
+    }
+
     #[test]
     fn native_restarts_keep_prior_attempts_and_reported_cache_counts() {
         let _scope = Scope::start();

@@ -27,7 +27,10 @@ pub(super) fn start(
         let mut checks = Vec::new();
         let mut observations = Vec::new();
         let geometry_only = std::env::var("GYRO_BROWSER_GEOMETRY_SMOKE").as_deref() == Ok("1");
-        let result = if geometry_only {
+        let site_permissions = std::env::var("GYRO_BROWSER_SITE_PERMISSIONS_SMOKE").as_deref() == Ok("1");
+        let result = if site_permissions {
+            check_site_permissions(&app, &owner, &mut checks).map_err(|error| error.to_string())
+        } else if geometry_only {
             geometry::run(&app, &base, &owner, &path, &mut checks, &mut observations)
         } else {
             run(&app, &base, &owner, &mut checks, &mut observations)
@@ -38,7 +41,7 @@ pub(super) fn start(
             "nativeBuild":"debug-embedded-tauri-production-handlers",
             "engine":"native-WKWebView", "nativeOsInputTested":false,
             "error":result.err(),
-            "mode":if geometry_only {"geometry"} else {"navigation"},
+            "mode":if site_permissions {"site-permissions"} else if geometry_only {"geometry"} else {"navigation"},
         });
         if !complete.swap(true, Ordering::AcqRel) {
             let _ = std::fs::write(path, serde_json::to_vec_pretty(&report).unwrap());
@@ -181,6 +184,369 @@ fn hold_main_thread(app: &AppHandle) -> Result<MainThreadBarrier, String> {
     Ok(MainThreadBarrier(Some(release)))
 }
 
+fn with_model_browser_tools<T>(
+    app: &AppHandle,
+    session: &str,
+    workspace: &str,
+    provider: &str,
+    run: impl FnOnce(&dyn Fn(gyro_core::CapabilityId, Value) -> anyhow::Result<Value>) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    use crate::{
+        providers::session_lifecycle::ProviderSessionLease,
+        state::{
+            managers::{ProviderCancellationManager, ProviderCapabilityBroker},
+            provider_run::{BoundProviderCapabilityContext, ProviderRunControl},
+        },
+        stores::open_store,
+    };
+    use gyro_core::{
+        CapabilityInvocationContext, CapabilityPolicySnapshot, CapabilityRequest, CapabilityRunMode,
+        WorkspaceContextSnapshot, PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
+    };
+    use uuid::Uuid;
+
+    let store = open_store().map_err(anyhow::Error::msg)?;
+    let id = Uuid::parse_str(session)?;
+    let owner = store
+        .get_session(id)?
+        .ok_or_else(|| anyhow::anyhow!("missing fixture chat"))?;
+    let bound = BoundProviderCapabilityContext {
+        session_id: session.into(),
+        turn_id: Some(Uuid::new_v4().to_string()),
+        provider_id: provider.into(),
+        provider_kind: None,
+        workspace: PathBuf::from(workspace),
+        workspace_key: workspace.into(),
+        workspace_identity_revision: owner.workspace_identity.revision,
+        allow_delegation: false,
+        policy: CapabilityPolicySnapshot::from_policy(
+            &store.get_project_capability_policy(workspace)?,
+            CapabilityRunMode::Normal,
+        ),
+        workspace_context: WorkspaceContextSnapshot::empty(workspace).into(),
+        workspace_check: gyro_core::check_workspace(workspace),
+    };
+    let lease = ProviderSessionLease::for_run(&store, id)?;
+    let control = Arc::new(ProviderRunControl::default());
+    *control.process_owner.lock().unwrap() = Some(lease.process_owner());
+    *control.capability_context.lock().unwrap() = Some(bound.clone());
+    let cancellation = app.state::<ProviderCancellationManager>();
+    cancellation
+        .flags
+        .lock()
+        .unwrap()
+        .insert(session.into(), control.clone());
+    let invoke = |capability_id, arguments| {
+        let response = app.state::<ProviderCapabilityBroker>().invoke(
+            app,
+            CapabilityRequest {
+                schema: PROVIDER_CAPABILITY_IPC_SCHEMA_V1.into(),
+                sender_version: env!("CARGO_PKG_VERSION").into(),
+                context: CapabilityInvocationContext {
+                    session_id: session.into(),
+                    turn_id: bound.turn_id.clone(),
+                    provider_id: bound.provider_id.clone(),
+                    run_nonce: control.approval_nonce.clone(),
+                    call_id: Uuid::new_v4(),
+                    workspace_key: workspace.into(),
+                    mode: bound.policy.mode,
+                    policy_revision: bound.policy.revision,
+                    workspace_context_revision: bound.workspace_context.revision,
+                },
+                capability_id,
+                arguments,
+            },
+        );
+        response
+            .result
+            .map(|result| result.data)
+            .ok_or_else(|| anyhow::anyhow!("{capability_id} failed: {:?}", response.error))
+    };
+    let result = run(&invoke);
+    cancellation.flags.lock().unwrap().remove(session);
+    result
+}
+
+fn check_model_browser_tools(
+    app: &AppHandle,
+    session: &str,
+    workspace: &str,
+    expected_url: &str,
+    checks: &mut Vec<Value>,
+) -> anyhow::Result<()> {
+    use gyro_core::CapabilityId;
+    with_model_browser_tools(app, session, workspace, "openrouter", |invoke| {
+        let input = invoke(
+            CapabilityId::BrowserFind,
+            json!({"selector":"#project-name"}),
+        )?;
+        let reference = &input["data"]["results"][0]["ref"];
+        invoke(
+            CapabilityId::BrowserType,
+            json!({"ref":reference,"text":"  exact value  "}),
+        )?;
+        let read = invoke(CapabilityId::BrowserReadPage, json!({"ref":reference}))?;
+        invoke(
+            CapabilityId::BrowserFormInput,
+            json!({"ref":reference,"value":""}),
+        )?;
+        let cleared = invoke(CapabilityId::BrowserReadPage, json!({"ref":reference}))?;
+        record(
+            checks,
+            "model form tools preserve whitespace and clear fields in native WebKit",
+            read["page"]["tree"]["value"] == "  exact value  "
+                && cleared["page"]["tree"]["value"] == "",
+        );
+
+        let button = invoke(
+            CapabilityId::BrowserFind,
+            json!({"selector":"#show-delayed"}),
+        )?;
+        invoke(
+            CapabilityId::BrowserClick,
+            json!({"ref":button["data"]["results"][0]["ref"]}),
+        )?;
+        let found = invoke(
+            CapabilityId::BrowserFind,
+            json!({"query":"Delayed browser status ready","waitMs":2_000}),
+        )?;
+        let missing = invoke(
+            CapabilityId::BrowserFind,
+            json!({"selector":"#absent","waitMs":100}),
+        )?;
+        record(
+            checks,
+            "one model find waits for delayed native page text and explicitly reports a deadline",
+            found["data"]["timedOut"] == false
+                && found["data"]["url"] == expected_url
+                && found["data"]["results"][0]["tag"] == "p"
+                && missing["data"]["timedOut"] == true
+                && missing["data"]["results"] == json!([]),
+        );
+
+        invoke(CapabilityId::BrowserScroll, json!({"dy":-3000}))?;
+        browser::set_session_browser_visible(app, session, true).map_err(anyhow::Error::msg)?;
+        let capture = invoke(CapabilityId::BrowserScreenshot, json!({}))?;
+        let capture_id = &capture["screenshot"]["filename"];
+        let track = invoke(
+            CapabilityId::BrowserFind,
+            json!({"selector":"#model-mouse-track"}),
+        )?;
+        let rect = &track["data"]["results"][0]["rect"];
+        let left = rect["x"]
+            .as_f64()
+            .ok_or_else(|| anyhow::anyhow!("missing track x"))?;
+        let y = rect["y"]
+            .as_f64()
+            .ok_or_else(|| anyhow::anyhow!("missing track y"))?
+            + 10.0;
+        let pointer = |action, x| {
+            invoke(
+                CapabilityId::BrowserMouse,
+                json!({"action":action,"captureId":capture_id,"x":x,"y":y}),
+            )
+        };
+        pointer("move", left + 12.0)?;
+        let travelled = pointer("move", left + 236.0)?;
+        let cursor = invoke(
+            CapabilityId::BrowserFind,
+            json!({"selector":"[data-gyro-browser-pointer]"}),
+        )?;
+        let samples = invoke(
+            CapabilityId::BrowserFind,
+            json!({"selector":"#model-mouse-samples"}),
+        )?;
+        let sample: Value =
+            serde_json::from_str(samples["data"]["results"][0]["name"].as_str().unwrap_or(""))?;
+        let position =
+            browser::call_agent(app, session, "status", json!({})).map_err(anyhow::Error::msg)?;
+        record(
+            checks,
+            "model mouse sends timed intermediate move events and renders the cursor at the same destination",
+            travelled["inputMode"] == "page-events"
+                && sample["n"].as_u64().unwrap_or(0) >= 5
+                && sample["ms"].as_u64().unwrap_or(0) >= 65
+                && sample["forward"] == true
+                && sample["first"] == left + 12.0
+                && sample["end"] == left + 236.0
+                && position["pointerPosition"]["x"] == left + 236.0
+                && cursor["data"]["returned"] == 1
+                && cursor["data"]["results"][0]["rect"]["x"] == left + 234.0,
+        );
+        let visible_capture =
+            browser::capture_session_browser_png(app, session).map_err(anyhow::Error::msg)?;
+        std::fs::write(
+            PathBuf::from(std::env::var("GYRO_TEST_DATA_DIR")?).join("model-mouse.png"),
+            visible_capture.png,
+        )?;
+        let browser_bounds = browser::BACKGROUND_BROWSER_BOUNDS;
+        browser::set_session_browser_bounds(
+            app,
+            session,
+            browser::SessionBrowserBounds {
+                width: 420.0,
+                height: 300.0,
+                ..browser_bounds.clone()
+            },
+        )
+        .map_err(anyhow::Error::msg)?;
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let fitted_rect = loop {
+            let fitted = invoke(
+                CapabilityId::BrowserFind,
+                json!({"selector":"[data-gyro-browser-pointer]"}),
+            )?;
+            let rect = fitted["data"]["results"][0]["rect"].clone();
+            if rect["width"].as_f64().is_some_and(|width| width >= 72.0)
+                || Instant::now() >= deadline
+            {
+                break rect;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let fitted_x = fitted_rect["x"].as_f64().unwrap_or_default();
+        let fitted_y = fitted_rect["y"].as_f64().unwrap_or_default();
+        let fitted_width = fitted_rect["width"].as_f64().unwrap_or_default();
+        // The scaled bounding box starts before the SVG's (2, 2) hotspot.
+        let tip_inset = 2.0 * fitted_width / 24.0;
+        record(
+            checks,
+            &format!("a visible model pointer stays aligned and keeps its display size as WebKit fits the page ({fitted_rect})"),
+            (fitted_width * (420.0 / 1280.0) - 24.0).abs() <= 1.0
+                && (fitted_x + tip_inset - (left + 236.0)).abs() <= 1.0
+                && (fitted_y + tip_inset - y).abs() <= 1.0,
+        );
+        let fitted_capture =
+            browser::capture_session_browser_png(app, session).map_err(anyhow::Error::msg)?;
+        std::fs::write(
+            PathBuf::from(std::env::var("GYRO_TEST_DATA_DIR")?).join("model-mouse-fitted.png"),
+            fitted_capture.png,
+        )?;
+        browser::set_session_browser_bounds(app, session, browser_bounds)
+            .map_err(anyhow::Error::msg)?;
+        browser::set_session_browser_visible(app, session, false).map_err(anyhow::Error::msg)?;
+        let replaced = invoke(
+            CapabilityId::BrowserFind,
+            json!({"selector":"#model-mouse-replace"}),
+        )?;
+        let button_rect = &replaced["data"]["results"][0]["rect"];
+        let x = button_rect["x"].as_f64().unwrap() + button_rect["width"].as_f64().unwrap() / 2.0;
+        let refused = pointer("click", x);
+        let clicks = invoke(
+            CapabilityId::BrowserFind,
+            json!({"selector":"#model-mouse-clicks"}),
+        )?;
+        record(
+            checks,
+            "model mouse avoids clicking a control replaced during its approach",
+            refused
+                .err()
+                .is_some_and(|error| error.to_string().contains("target changed while moving"))
+                && clicks["data"]["results"][0]["name"] == "0",
+        );
+        Ok(())
+    })
+}
+
+fn check_site_permissions(app: &AppHandle, owner: &Value, checks: &mut Vec<Value>) -> anyhow::Result<()> {
+    use crate::{
+        capabilities::{commands::save_project_capability_policy, types::SaveProjectCapabilityPolicyRequest},
+        stores::open_store,
+    };
+    use gyro_core::{CapabilityApprovalDecision, SessionOrigin};
+
+    let first = owner["id"].as_str().ok_or_else(|| anyhow::anyhow!("fixture chat missing"))?;
+    let workspace = owner["workspaceKey"].as_str().ok_or_else(|| anyhow::anyhow!("fixture workspace missing"))?;
+    let store = open_store().map_err(anyhow::Error::msg)?;
+    let first_result = search_for_permission_check(
+        app, first, workspace, "openai", Some(CapabilityApprovalDecision::AllowProject),
+    )?;
+    record(checks, "OpenAI search starts after Allow for project",
+        first_result["url"].as_str().is_some_and(|url| url.starts_with("https://search.brave.com/search?")));
+
+    let mut policy = store.get_project_capability_policy(workspace)?;
+    let grant = policy.grants.iter().find(|grant| {
+        grant.class == gyro_core::CapabilityClass::BrowserNavigate
+            && grant.scope_kind == "origin" && grant.scope_value == "https://search.brave.com"
+    }).ok_or_else(|| anyhow::anyhow!("project approval did not save an origin grant"))?.id;
+    let second = store.create_session(std::path::Path::new(workspace), SessionOrigin::Desktop, "Fresh search chat")?.id.to_string();
+    browser::set_session_browser_visible(app, first, false).map_err(anyhow::Error::msg)?;
+    let second_result = search_for_permission_check(app, &second, workspace, "openrouter", None)?;
+    record(checks, "a fresh non-OpenAI chat uses the saved grant",
+        second_result["url"].as_str().is_some_and(|url| url.starts_with("https://search.brave.com/search?")));
+
+    policy.grants.retain(|entry| entry.id != grant);
+    tauri::async_runtime::block_on(save_project_capability_policy(app.clone(), SaveProjectCapabilityPolicyRequest {
+        workspace_path: workspace.into(),
+        expected_revision: Some(policy.revision),
+        policy,
+    })).map_err(anyhow::Error::msg)?;
+    search_for_permission_check(app, &second, workspace, "openrouter", Some(CapabilityApprovalDecision::Deny))?;
+    record(checks, "revoking a saved site restores approval in an open chat", true);
+    Ok(())
+}
+
+fn search_for_permission_check(
+    app: &AppHandle,
+    session: &str,
+    workspace: &str,
+    provider: &str,
+    expected: Option<gyro_core::CapabilityApprovalDecision>,
+) -> anyhow::Result<Value> {
+    use crate::{
+        capabilities::{execute::resolve_capability_approval, types::CapabilityApprovalDecisionRequest},
+        state::managers::{ProviderCancellationManager, ProviderCapabilityApprovalManager},
+    };
+    use gyro_core::{CapabilityApprovalDecision, CapabilityId};
+
+    std::thread::scope(|scope| {
+        let (finished, completed) = mpsc::channel();
+        let reviewer = scope.spawn(move || -> anyhow::Result<bool> {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let manager = app.state::<ProviderCapabilityApprovalManager>();
+            loop {
+                let pending = manager.pending.lock().unwrap().iter()
+                    .find(|(_, approval)| approval.session_id.to_string() == session)
+                    .map(|(id, approval)| (id.clone(), approval.turn_id.map(|turn| turn.to_string())));
+                if let Some((approval_id, turn_id)) = pending {
+                    tauri::async_runtime::block_on(resolve_capability_approval(
+                        app.clone(),
+                        CapabilityApprovalDecisionRequest {
+                            approval_id,
+                            session_id: session.into(),
+                            turn_id,
+                            decision: expected.unwrap_or(CapabilityApprovalDecision::Deny),
+                        },
+                        manager,
+                    )).map_err(anyhow::Error::msg)?;
+                    return Ok(true);
+                }
+                if completed.recv_timeout(Duration::from_millis(20)).is_ok() {
+                    return Ok(false);
+                }
+                if Instant::now() >= deadline {
+                    if let Some(control) = app.state::<ProviderCancellationManager>().flags.lock().unwrap().get(session) {
+                        control.cancellation.cancel();
+                    }
+                    anyhow::bail!("search approval fixture did not settle");
+                }
+            }
+        });
+        let result = with_model_browser_tools(app, session, workspace, provider, |invoke| {
+            invoke(CapabilityId::WebSearch, json!({"query":"Rust language official documentation"}))
+        });
+        let _ = finished.send(());
+        let asked = reviewer.join().map_err(|_| anyhow::anyhow!("approval reviewer panicked"))??;
+        anyhow::ensure!(asked == expected.is_some(), "unexpected {provider} search approval state: {result:?}");
+        if expected == Some(CapabilityApprovalDecision::Deny) {
+            let error = result.expect_err("denied search started");
+            anyhow::ensure!(error.to_string().contains("user-denied"), "{error}");
+            return Ok(Value::Null);
+        }
+        result
+    })
+}
+
 fn run(
     app: &AppHandle,
     base: &url::Url,
@@ -210,6 +576,8 @@ fn run(
         },
     )?;
     wait_page(app, session, &original, true)?;
+    check_model_browser_tools(app, session, workspace, &original, checks)
+        .map_err(|error| error.to_string())?;
     let old_ref = find_button(app, session)?;
     for cycle in 1..=2 {
         control(base, "arm")?;

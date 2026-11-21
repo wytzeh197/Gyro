@@ -17,6 +17,7 @@ const CLI_VERSION_TIMEOUT: Duration = Duration::from_secs(8);
 const CLI_CHECK_TIMEOUT: Duration = Duration::from_secs(25);
 const CLI_UPDATE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const CLI_OUTPUT_CHARS: usize = 64 * 1024;
+const GROK_NATIVE_INSTALLER: (&str, &str) = ("GROK_INSTALLER", "internal");
 
 // Avoid checking a partially replaced CLI or running two package managers
 // against the same global prefix at once.
@@ -101,9 +102,13 @@ enum CliCheck {
     Available(PendingUpdate),
 }
 
-enum NativeUpdate {
-    Current,
-    Available(Option<Version>),
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeUpdateCheck {
+    update_available: bool,
+    latest_version: Option<String>,
+    installer: Option<String>,
+    error: Option<String>,
 }
 
 struct PendingUpdate {
@@ -119,10 +124,20 @@ struct UpdateCommand {
     program: PathBuf,
     args: Vec<OsString>,
     search_path: String,
+    env: Option<(&'static str, &'static str)>,
 }
 
 impl PendingUpdate {
     fn offer(&self, spec: &CliUpdateSpec) -> CliUpdateOffer {
+        let mut update_command = Vec::new();
+        if let Some((key, value)) = self.command.env {
+            update_command.extend(["env".into(), format!("{key}={value}")]);
+        }
+        update_command.extend(
+            std::iter::once(self.command.program.as_os_str())
+                .chain(self.command.args.iter().map(OsString::as_os_str))
+                .map(|part| part.to_string_lossy().into_owned()),
+        );
         CliUpdateOffer {
             provider_id: spec.provider_id.into(),
             display_name: spec.display_name.into(),
@@ -131,10 +146,7 @@ impl PendingUpdate {
             latest_version: self.latest.as_ref().map(ToString::to_string),
             update_available: true,
             check_source: self.check_source.into(),
-            update_command: std::iter::once(self.command.program.as_os_str())
-                .chain(self.command.args.iter().map(OsString::as_os_str))
-                .map(|part| part.to_string_lossy().into_owned())
-                .collect(),
+            update_command,
         }
     }
 }
@@ -144,14 +156,22 @@ pub fn check_cli_updates() -> Result<CliUpdateCheckReport> {
     let _guard = CLI_UPDATES
         .try_read()
         .map_err(|_| anyhow!("A CLI update is already running."))?;
-    check_cli_updates_on_path(&augmented_gui_path())
+    check_cli_updates_on_path(&augmented_gui_path(), grok_home().as_deref())
 }
 
-fn check_cli_updates_on_path(search_path: &str) -> Result<CliUpdateCheckReport> {
+fn check_cli_updates_on_path(
+    search_path: &str,
+    grok_home: Option<&Path>,
+) -> Result<CliUpdateCheckReport> {
     let checks = std::thread::scope(|scope| {
         CLI_UPDATE_SPECS
             .iter()
-            .map(|spec| (spec, scope.spawn(move || check_one_cli(spec, search_path))))
+            .map(|spec| {
+                (
+                    spec,
+                    scope.spawn(move || check_one_cli(spec, search_path, grok_home)),
+                )
+            })
             .collect::<Vec<_>>()
             .into_iter()
             .map(|(spec, worker)| {
@@ -190,12 +210,14 @@ pub fn apply_cli_updates(provider_ids: &[String]) -> Result<Vec<CliUpdateApplyRe
     Ok(apply_cli_updates_on_path(
         provider_ids,
         &augmented_gui_path(),
+        grok_home().as_deref(),
     ))
 }
 
 fn apply_cli_updates_on_path(
     provider_ids: &[String],
     search_path: &str,
+    grok_home: Option<&Path>,
 ) -> Vec<CliUpdateApplyResult> {
     let only_pending = provider_ids.is_empty();
     let ids: Vec<&str> = if only_pending {
@@ -218,7 +240,7 @@ fn apply_cli_updates_on_path(
             });
             continue;
         };
-        let result = match check_one_cli(spec, search_path) {
+        let result = match check_one_cli(spec, search_path, grok_home) {
             Ok(CliCheck::Available(update)) => apply_one_cli_update(spec, update, search_path),
             Ok(_) if only_pending => continue,
             Ok(CliCheck::Current(version)) => Ok(already_current(spec, &version)),
@@ -235,7 +257,11 @@ fn apply_cli_updates_on_path(
     results
 }
 
-fn check_one_cli(spec: &CliUpdateSpec, search_path: &str) -> Result<CliCheck> {
+fn check_one_cli(
+    spec: &CliUpdateSpec,
+    search_path: &str,
+    grok_home: Option<&Path>,
+) -> Result<CliCheck> {
     let Some(executable) = find_on_path(spec.program, search_path) else {
         return Ok(CliCheck::Unavailable(format!(
             "Gyro cannot find {} on its PATH.",
@@ -273,14 +299,39 @@ fn check_one_cli(spec: &CliUpdateSpec, search_path: &str) -> Result<CliCheck> {
                 format!("{package}@{latest}").into(),
             ],
             search_path: npm_path,
+            env: None,
         };
         (Some(latest), "npm-view", command)
     } else {
+        let mut env = None;
         let (latest, check_source) = if let Some(args) = spec.native_check_args {
-            match native_update_version(&executable, args, search_path)? {
-                NativeUpdate::Current => return Ok(CliCheck::Current(current)),
-                NativeUpdate::Available(latest) => (latest, "native"),
+            let mut check = native_update_check(&executable, args, search_path, env)?;
+            if spec.provider_id == "xai"
+                && check.installer.as_deref() == Some("npm")
+                && grok_home.is_some_and(|home| {
+                    grok_npm_link_conflict(home, &resolved_executable, search_path)
+                })
+            {
+                env = Some(GROK_NATIVE_INSTALLER);
+                check = native_update_check(&executable, args, search_path, env)?;
+                if check.installer.as_deref() != Some(GROK_NATIVE_INSTALLER.1) {
+                    bail!("Grok did not select its native installer after detecting an npm link conflict.");
+                }
             }
+            if let Some(error) = check.error {
+                bail!("Grok could not check for an update: {error}");
+            }
+            if !check.update_available {
+                return Ok(CliCheck::Current(current));
+            }
+            let latest = check
+                .latest_version
+                .as_deref()
+                .map(|value| {
+                    parse_version(value).context("Native update check returned an invalid version")
+                })
+                .transpose()?;
+            (latest, "native")
         } else {
             let package = spec.npm_package.context("No release source for this CLI")?;
             let npm = find_on_path("npm", search_path)
@@ -299,6 +350,7 @@ fn check_one_cli(spec: &CliUpdateSpec, search_path: &str) -> Result<CliCheck> {
                 .map(OsString::from)
                 .collect(),
             search_path: search_path.into(),
+            env,
         };
         (latest, check_source, command)
     };
@@ -353,6 +405,7 @@ fn apply_one_cli_update(
         &command.args,
         CLI_UPDATE_TIMEOUT,
         &command.search_path,
+        command.env,
     );
     // A failed updater can still have replaced part of the install.
     crate::provider_health::invalidate_provider_health_cache();
@@ -408,33 +461,50 @@ fn at_least(observed: &Version, expected: &Version) -> bool {
     !observed.cmp_precedence(expected).is_lt()
 }
 
-fn native_update_version(
+fn native_update_check(
     executable: &Path,
     args: &[&str],
     search_path: &str,
-) -> Result<NativeUpdate> {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct NativeCheck {
-        update_available: bool,
-        latest_version: Option<String>,
-    }
-
-    let outcome = run_cli_with_path(executable, args, CLI_CHECK_TIMEOUT, search_path)?;
+    env: Option<(&str, &str)>,
+) -> Result<NativeUpdateCheck> {
+    let outcome = run_cli_with_path(executable, args, CLI_CHECK_TIMEOUT, search_path, env)?;
     let output = successful_output(executable, outcome)?;
-    let check: NativeCheck = serde_json::from_str(output.stdout.trim())
-        .context("Read the native update check response")?;
-    if !check.update_available {
-        return Ok(NativeUpdate::Current);
+    serde_json::from_str(output.stdout.trim()).context("Read the native update check response")
+}
+
+fn grok_home() -> Option<PathBuf> {
+    if let Some(home) = std::env::var_os("GROK_HOME").filter(|home| !home.is_empty()) {
+        return Some(cli_working_dir()?.join(home));
     }
-    let latest = check
-        .latest_version
-        .as_deref()
-        .map(|value| {
-            parse_version(value).context("Native update check returned an invalid version")
-        })
-        .transpose()?;
-    Ok(NativeUpdate::Available(latest))
+    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".grok"))
+}
+
+fn grok_npm_link_conflict(home: &Path, resolved: &Path, search_path: &str) -> bool {
+    let Ok(home) = home.canonicalize() else {
+        return false;
+    };
+    if !resolved.starts_with(&home)
+        || home.join("bin/grok").canonicalize().as_deref().ok() != Some(resolved)
+    {
+        return false;
+    }
+    let Some(npm) = find_on_path("npm", search_path) else {
+        return false;
+    };
+    let Ok(output) = run_cli_with_path(
+        &npm,
+        &["prefix", "--global"],
+        CLI_VERSION_TIMEOUT,
+        search_path,
+        None,
+    )
+    .and_then(|outcome| successful_output(&npm, outcome)) else {
+        return false;
+    };
+    let prefix = Path::new(output.stdout.trim());
+    // The npm bin entry points to Grok's own managed copy, after npm ownership
+    // has already been ruled out. npm would refuse to replace this entry.
+    prefix.is_absolute() && prefix.join("bin/grok").canonicalize().as_deref().ok() == Some(resolved)
 }
 
 fn npm_latest_version(
@@ -460,7 +530,7 @@ fn npm_latest_version(
             prefix.as_os_str(),
         ]);
     }
-    let outcome = run_cli_with_path(npm, &args, CLI_CHECK_TIMEOUT, search_path)?;
+    let outcome = run_cli_with_path(npm, &args, CLI_CHECK_TIMEOUT, search_path, None)?;
     let output = successful_output(npm, outcome).context("Check the latest release with npm")?;
     parse_npm_version(&output.stdout)
 }
@@ -487,7 +557,13 @@ fn installed_version(
     executable: &Path,
     search_path: &str,
 ) -> Result<Version> {
-    let outcome = run_cli_with_path(executable, &["--version"], CLI_VERSION_TIMEOUT, search_path)?;
+    let outcome = run_cli_with_path(
+        executable,
+        &["--version"],
+        CLI_VERSION_TIMEOUT,
+        search_path,
+        None,
+    )?;
     let output = successful_output(executable, outcome)?;
     parse_version_output(spec, &output.stdout)
         .or_else(|| parse_version_output(spec, &output.stderr))
@@ -577,7 +653,7 @@ pub(crate) fn run_cli_capture_with_path(
     search_path: &str,
 ) -> Result<String> {
     let program = Path::new(program);
-    let outcome = run_cli_with_path(program, args, timeout, search_path)?;
+    let outcome = run_cli_with_path(program, args, timeout, search_path, None)?;
     successful_output(program, outcome).map(|outcome| join_output(&outcome))
 }
 
@@ -592,12 +668,16 @@ fn run_cli_with_path(
     args: &[impl AsRef<OsStr>],
     timeout: Duration,
     search_path: &str,
+    env: Option<(&str, &str)>,
 ) -> Result<ExecutionOutcome> {
     let mut request = ExecutionRequest::new(program.as_os_str());
     request.args = args.iter().map(|arg| arg.as_ref().to_owned()).collect();
     // A workspace's .npmrc must not affect global CLI updates.
     request.current_dir = cli_working_dir();
     request.env = vec![("PATH".into(), Some(search_path.into()))];
+    if let Some((key, value)) = env {
+        request.env.push((key.into(), Some(value.into())));
+    }
     request.timeout = timeout;
     request.max_stdout_chars = CLI_OUTPUT_CHARS;
     request.max_stderr_chars = CLI_OUTPUT_CHARS / 2;

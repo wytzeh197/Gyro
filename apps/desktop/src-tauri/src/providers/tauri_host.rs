@@ -6,6 +6,7 @@ use super::{
 };
 use crate::{
     capabilities::bridge::{active_provider_approval_nonce, active_provider_capability_context},
+    conversation_history::PrefetchedHistory,
     efficiency, provider_accounting, provider_tool_batch,
     state::managers::{ProviderCancellationManager, ProviderCapabilityBroker},
     stores::open_store,
@@ -20,6 +21,7 @@ use uuid::Uuid;
 
 pub(crate) struct TauriRunnerHost {
     app: tauri::AppHandle,
+    prefetched_history: std::sync::Mutex<Option<PrefetchedHistory>>,
     generated_images: std::sync::Mutex<crate::codex_images::GeneratedImages>,
 }
 
@@ -50,8 +52,16 @@ impl TauriRunnerHost {
     }
 
     pub(crate) fn new(app: &tauri::AppHandle) -> Self {
+        Self::with_prefetched_history(app, None)
+    }
+
+    pub(super) fn with_prefetched_history(
+        app: &tauri::AppHandle,
+        prefetched_history: Option<PrefetchedHistory>,
+    ) -> Self {
         Self {
             app: app.clone(),
+            prefetched_history: std::sync::Mutex::new(prefetched_history),
             generated_images: std::sync::Mutex::new(Default::default()),
         }
     }
@@ -67,15 +77,21 @@ impl RunnerHost for TauriRunnerHost {
         tools: bool,
         images: bool,
     ) -> (String, String) {
-        self.record_memory_context(request, false);
-        crate::efficiency::capture_prompt(|| {
-            super::prompt::provider_context_message_with_capabilities(
+        let prompt = {
+            let _measure = gyro_core::timing::EfficiencyTimer::start(
+                gyro_core::timing::EfficiencyComponent::RequestAssembly,
+            );
+            super::prompt::provider_context_sections(
                 request,
                 self.conversation_history(request).as_deref(),
                 tools,
                 images,
             )
-        })
+        };
+        // The receipt appends a system event. Read history before writing it
+        // so this turn can still reuse the matching transcript snapshot.
+        self.record_memory_context(request, false);
+        prompt
     }
     fn model_context_window(&self, provider: &str, model: Option<&str>) -> Option<u64> {
         crate::provider_context::provider_model_context_window(provider, model)
@@ -214,7 +230,12 @@ impl RunnerHost for TauriRunnerHost {
     }
 
     fn conversation_history(&self, request: &ProviderChatRequest) -> Option<String> {
-        super::binding::local_conversation_history_for_request(request)
+        let prefetched_history = self
+            .prefetched_history
+            .lock()
+            .ok()
+            .and_then(|mut value| value.take());
+        super::binding::local_conversation_history_for_request(request, prefetched_history)
     }
 
     fn save_checkpoint(&self, request: &ProviderChatRequest) {

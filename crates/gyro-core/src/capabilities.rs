@@ -83,6 +83,7 @@ pub enum CapabilityId {
     BrowserNetwork,
     GithubStatus,
     WebFetch,
+    WebSearch,
     MemoryRead,
     MemoryWrite,
     ResearchRun,
@@ -169,6 +170,7 @@ impl CapabilityId {
             Self::BrowserNetwork => "browser.network",
             Self::GithubStatus => "github.status",
             Self::WebFetch => "web.fetch",
+            Self::WebSearch => "web.search",
             Self::MemoryRead => "memory.read",
             Self::MemoryWrite => "memory.write",
             Self::ResearchRun => "research.run",
@@ -255,6 +257,7 @@ impl CapabilityId {
             Self::BrowserNetwork => "gyro_browser_network",
             Self::GithubStatus => "gyro_github_status",
             Self::WebFetch => "gyro_web_fetch",
+            Self::WebSearch => "gyro_web_search",
             Self::MemoryRead => "gyro_memory_read",
             Self::MemoryWrite => "gyro_memory_write",
             Self::ResearchRun => "gyro_research",
@@ -1020,7 +1023,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::BrowserMouse,
         class: CapabilityClass::BrowserNavigate,
-        description: "Move, click, secondary-click, or drag the mouse in this chat's browser using CSS-pixel coordinates from a recent gyro_browser_screenshot. Pass that screenshot's filename as captureId. Re-observe after acting; coordinates from a changed page are rejected.",
+        description: "Move, hover, click, secondary-click, or drag with the model's mouse in this chat's browser using CSS-pixel coordinates from a recent gyro_browser_screenshot. Pass that screenshot's filename as captureId. The pointer glides from its last position. Re-observe after acting; coordinates from a changed page are rejected.",
     },
     CapabilityDescriptor {
         id: CapabilityId::BrowserType,
@@ -1045,7 +1048,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::BrowserFind,
         class: CapabilityClass::BrowserInspect,
-        description: "Find elements matching text or a CSS selector in this chat's open browser and return refs.",
+        description: "Find visible elements matching text or a CSS selector in this chat's open browser and return refs. Set waitMs on the first page to wait for a delayed result after an interaction, then verify the matching content.",
     },
     CapabilityDescriptor {
         id: CapabilityId::BrowserConsole,
@@ -1096,6 +1099,11 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
         id: CapabilityId::WebFetch,
         class: CapabilityClass::BrowserNavigate,
         description: "Read one http(s) URL as text without opening the browser rail. Prefer this for reading or summarizing articles, announcements, documentation, and other links when rendered content or interaction is unnecessary. Use the browser if fetching fails or needed content requires rendering. Egress is gated per origin exactly like browser navigation. Responses are bounded and secret-redacted. HTML defaults to readable text with source links and page-supplied title/date/canonical metadata; format: source returns raw markup. Sparse HTML, sign-in pages, and challenges may need the background browser; they are not evidence that content is absent. Plain text, JSON and feeds are preserved; non-text content types are refused.",
+    },
+    CapabilityDescriptor {
+        id: CapabilityId::WebSearch,
+        class: CapabilityClass::BrowserNavigate,
+        description: "Search the public web with Brave Search in the chat's background Gyro Browser. Pass a search query. The search engine's origin uses the project's normal browser approvals. After the page loads, use gyro_browser_read_page or gyro_browser_find to inspect results, then verify claims at their source. Use this on models without native search or when you need a live search page.",
     },
     CapabilityDescriptor {
         id: CapabilityId::GithubStatus,
@@ -1520,6 +1528,7 @@ mod tests {
             assert!(support.available, "{provider_id} should support Gyro tools");
             assert!(support.execution_kind.is_some());
             assert_eq!(support.capabilities.len(), CAPABILITY_DESCRIPTORS.len());
+            assert!(support.capabilities.contains(&CapabilityId::WebSearch));
             assert!(support.reason.is_none());
         }
         {
@@ -1621,8 +1630,9 @@ mod tests {
         assert!(!plan.contains(&CapabilityId::WorkspaceEdit));
         assert!(!plan.contains(&CapabilityId::TerminalOpen));
         assert!(!plan.contains(&CapabilityId::BrowserClick));
-        // Web fetch leaves the machine, so Plan mode never advertises it.
+        // Web requests leave the machine, so Plan does not advertise them.
         assert!(!plan.contains(&CapabilityId::WebFetch));
+        assert!(!plan.contains(&CapabilityId::WebSearch));
         // Reading memory is inspection; writing it is writing.
         assert!(plan.contains(&CapabilityId::MemoryRead));
         assert!(!plan.contains(&CapabilityId::MemoryWrite));

@@ -19,6 +19,7 @@ function page(hasFocus = false) {
   let blocked = false;
   let sensitiveDestination = false;
   const element = {
+    isConnected: true,
     closest: () => null,
     focus: () => {
       focused = true;
@@ -145,6 +146,8 @@ assert.equal(sensitive.events.length, 0);
 {
   const observed = [];
   class Capturable {
+    isConnected = true;
+
     closest() {
       return null;
     }
@@ -248,6 +251,7 @@ assert.equal(sensitive.events.length, 0);
     }
   }
   const sourceElement = {
+    isConnected: true,
     closest: (selector) =>
       selector === '[draggable="true"]' ? sourceElement : null,
     focus() {},
@@ -292,6 +296,8 @@ assert.equal(sensitive.events.length, 0);
 {
   const events = [];
   class RangeInput {
+    isConnected = true;
+
     constructor() {
       this.tagName = "INPUT";
       this.type = "range";
@@ -400,6 +406,10 @@ const injected = browser
       .trim()
       .replace(/;$/, ""),
   )
+  .replaceAll(
+    "{trace_capture}",
+    readFileSync(new URL("../apps/desktop/src-tauri/src/browser_trace_capture.js", import.meta.url), "utf8").trim(),
+  )
   .replaceAll("{nonce}", '"test-nonce"')
   .replace(
     /\{(MAX_[A-Z_]+)\}/g,
@@ -416,6 +426,7 @@ class InstalledEvent {
   }
 }
 const installedTarget = {
+  isConnected: true,
   closest: () => null,
   focus() {},
   dispatchEvent(event) {

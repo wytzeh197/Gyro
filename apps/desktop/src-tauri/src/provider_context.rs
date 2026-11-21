@@ -784,14 +784,15 @@ pub(crate) use gyro_core::provider_runtime::accounting::provider_context_usage_f
 
 pub(crate) use gyro_core::provider_runtime::context::{
     antigravity_step_occupancy, claude_stream_context_window, exceeds_context_window,
-    occupancy_from_request, provider_context_usage_from_codex_exec, should_auto_compact_session,
-    AutoCompactReading, SessionContextSignal,
+    occupancy_from_request, provider_context_usage_from_codex_exec, AutoCompactReading,
+    SessionContextSignal,
 };
 #[cfg(test)]
 pub(crate) use gyro_core::provider_runtime::context::{
     auto_compact_messages, auto_compaction_fill, is_context_compaction, message_role, message_size,
-    provider_context_usage_from_claude_stream, refresh_context_checkpoint, ClaudeUsageFrame,
-    OllamaTurnUsage, CONTEXT_CHECKPOINT_MARKER, CONTEXT_COMPACTION_MARKER,
+    provider_context_usage_from_claude_stream, refresh_context_checkpoint,
+    should_auto_compact_session, ClaudeUsageFrame, OllamaTurnUsage, CONTEXT_CHECKPOINT_MARKER,
+    CONTEXT_COMPACTION_MARKER,
 };
 
 /// Compatibility parser for the Grok PromptUsage contract only. Live ACP

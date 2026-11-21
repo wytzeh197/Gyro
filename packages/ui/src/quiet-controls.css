@@ -209,12 +209,6 @@ html:root[data-theme] .gyro-settings-surface .gyro-usage-empty > svg {
   color: var(--gyro-faint);
 }
 
-/* Import: the archived toggle aligns to the same right edge as other rows. */
-html:root[data-theme] .gyro-settings-surface .gyro-import-archived {
-  flex: 1;
-  justify-content: space-between;
-}
-
 /* Settings sidebar fits a normal window without scrolling. */
 html:root[data-theme] .gyro-app-shell .gyro-sidebar-actions.is-settings-pages {
   gap: calc(10px * var(--gyro-ui-scale, 1));

@@ -124,7 +124,7 @@ fn whole_page_observation_follows_navigation_without_replaying_actions() {
             .observe_document(
                 "chat",
                 "readPage",
-                Value::Null,
+                serde_json::json!({"maxDepth":4,"ref":null,"maxChars":null}),
                 |lease, snapshot, action, _| {
                     if action == redirect_during && !redirected {
                         redirected = true;
@@ -143,6 +143,43 @@ fn whole_page_observation_follows_navigation_without_replaying_actions() {
             .unwrap();
         assert!(redirected);
         assert_eq!(result["url"], "https://next.example/");
+    }
+}
+
+#[test]
+fn find_waits_for_a_match_or_reports_an_empty_deadline() {
+    for becomes_visible in [true, false] {
+        let manager = SessionBrowserManager::default();
+        manager
+            .inner
+            .lock()
+            .unwrap()
+            .insert("chat".into(), browser_slot("chat", false));
+        let mut finds = 0;
+        let mut probes = 0;
+        let result = manager
+            .observe_document(
+                "chat",
+                "find",
+                serde_json::json!({"query":"Saved","waitMs":200}),
+                |_, _, action, _| {
+                    if action == "status" {
+                        probes += 1;
+                        return Ok(serde_json::json!({"readyState":"interactive"}));
+                    }
+                    finds += 1;
+                    Ok(if becomes_visible && finds > 1 {
+                        serde_json::json!({"results":[{"ref":"fresh","name":"Saved"}]})
+                    } else {
+                        serde_json::json!({"results":[]})
+                    })
+                },
+            )
+            .unwrap();
+        assert_eq!(probes, 1);
+        assert!(finds > 1);
+        assert_eq!(result["timedOut"], !becomes_visible);
+        assert_eq!(result["results"][0]["ref"] == "fresh", becomes_visible);
     }
 }
 
@@ -962,7 +999,6 @@ fn browser_slot(session_id: &str, background_only: bool) -> SessionBrowserSlot {
         )
         .unwrap()
         .state,
-        approved_origins: HashSet::new(),
         pointer_reference: None,
         console: VecDeque::new(),
         network: VecDeque::new(),
@@ -1069,6 +1105,25 @@ fn agent_browser_cannot_be_revealed_but_parent_browser_can() {
 }
 
 #[test]
+fn site_permissions_work_without_a_browser_and_revocation_is_project_scoped() {
+    let manager = SessionBrowserManager::default();
+    let site = "https://search.brave.com";
+    for (chat, project) in [("first", "project-a"), ("second", "project-a"), ("other", "project-b")] {
+        manager.approve_origin(chat, project, site).unwrap();
+        assert!(manager.is_origin_approved(chat, project, site).unwrap());
+    }
+    assert!(!manager.is_origin_approved("first", "project-b", site).unwrap());
+    manager.approve_origin("first", "project-a", "https://example.com").unwrap();
+
+    manager.forget_project_origins("project-a", &[site]).unwrap();
+
+    assert!(!manager.is_origin_approved("first", "project-a", site).unwrap());
+    assert!(!manager.is_origin_approved("second", "project-a", site).unwrap());
+    assert!(manager.is_origin_approved("other", "project-b", site).unwrap());
+    assert!(manager.is_origin_approved("first", "project-a", "https://example.com").unwrap());
+}
+
+#[test]
 fn agent_browsers_keep_resources_page_state_and_grants_independent() {
     let manager = SessionBrowserManager::default();
     for (id, private) in [("parent", false), ("agent-a", true), ("agent-b", true)] {
@@ -1083,7 +1138,7 @@ fn agent_browsers_keep_resources_page_state_and_grants_independent() {
         .unwrap();
     manager.set_title("agent-a", "Research").unwrap();
     manager
-        .approve_origin("agent-a", "https://example.com")
+        .approve_origin("agent-a", "shared-workspace", "https://example.com")
         .unwrap();
     manager
         .push_console(
@@ -1115,7 +1170,7 @@ fn agent_browsers_keep_resources_page_state_and_grants_independent() {
         assert_eq!(other.url, "https://example.com/");
         assert!(other.title.is_empty());
         assert!(!manager
-            .is_origin_approved(id, "https://example.com")
+            .is_origin_approved(id, "shared-workspace", "https://example.com")
             .unwrap());
         assert!(manager.console_entries(id, 10).unwrap().is_empty());
         assert!(manager.pointer_reference(id, "capture-a").is_err());

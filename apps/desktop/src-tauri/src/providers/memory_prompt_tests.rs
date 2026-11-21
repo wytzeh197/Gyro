@@ -4,6 +4,7 @@ use super::{
     provider_context_message_for_turn, provider_context_message_with_capabilities,
     provider_context_message_with_capabilities_for_turn, ChatMode, PromptTurn, ProviderChatRequest,
 };
+use crate::providers::prompt::provider_context_sections;
 use gyro_core::{project_memory::prepare_memory_context, GyroPaths, SessionOrigin, SessionStore};
 use serde_json::json;
 
@@ -54,9 +55,7 @@ fn project_memory_reaches_every_provider_in_fresh_and_resumed_desktop_prompts() 
             // API and Ollama runners consume this stable/dynamic split. Memory
             // must stay in the dynamic tail even without native tool support.
             for tools in [false, true] {
-                let (stable, dynamic) = crate::efficiency::capture_prompt(|| {
-                    provider_context_message_with_capabilities(&request, None, tools, false)
-                });
+                let (stable, dynamic) = provider_context_sections(&request, None, tools, false);
                 assert!(!stable.contains("Run frontend tests with pnpm test"));
                 assert_eq!(
                     dynamic.matches("Run frontend tests with pnpm test").count(),

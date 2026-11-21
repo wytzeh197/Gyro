@@ -83,6 +83,22 @@
   overflow-wrap: anywhere;
   line-height: 1.45;
 }
+.gyro-confirm-dialog-detail {
+  display: grid;
+  gap: var(--gyro-space-compact);
+  margin: var(--gyro-space-compact) 0 0;
+  padding: var(--gyro-space-standard);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-sm);
+  background: var(--gyro-surface-soft);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-support);
+}
+.gyro-confirm-dialog-detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--gyro-text);
+}
 .gyro-confirm-dialog-icon {
   display: grid;
   place-items: center;
@@ -95,6 +111,14 @@
 .gyro-confirm-dialog.is-danger .gyro-confirm-dialog-icon {
   background: var(--gyro-danger-soft);
   color: var(--gyro-danger);
+}
+.gyro-confirm-dialog.is-permission .gyro-confirm-dialog-icon {
+  background: color-mix(in srgb, var(--gyro-permission-full) 12%, transparent);
+  color: var(--gyro-permission-full);
+}
+.gyro-confirm-dialog.is-permission {
+  box-sizing: border-box;
+  width: min(432px, calc(100vw - 32px));
 }
 .gyro-confirm-dialog .gyro-primary-button.is-danger {
   background: var(--gyro-danger);

@@ -1,4 +1,5 @@
 use crate::provider_context;
+use gyro_core::provider_runtime::types::ProviderAdapterKind;
 use gyro_core::{GyroConfig, GyroPaths, SessionEvent, SessionStore, UsageOrigin};
 use uuid::Uuid;
 /// Which action a provider call belongs to, for the usage ledger.
@@ -136,8 +137,43 @@ pub(crate) fn usage_guard_block(
     }
 }
 
-pub(crate) fn session_context_signal(
+pub(crate) fn should_compact_before_turn(
+    percent: u32,
+    adapter: ProviderAdapterKind,
+    provider_id: &str,
+    model_id: Option<&str>,
+    catalog_window: Option<u64>,
+    events: &[SessionEvent],
+) -> bool {
+    if percent == 0 {
+        return false;
+    }
+    let owned_transcript = matches!(
+        adapter,
+        ProviderAdapterKind::OpenAiCompatible | ProviderAdapterKind::Ollama
+    );
+    if owned_transcript && !crate::conversation_history::has_reply_since_checkpoint(events) {
+        return false;
+    }
+    let transcript_characters =
+        owned_transcript.then(|| crate::conversation_history::carried_history_characters(events));
+    let signals = events
+        .iter()
+        .map(|event| session_context_signal(event, transcript_characters.is_none()))
+        .collect::<Vec<_>>();
+    gyro_core::provider_runtime::context::should_auto_compact_session_with_transcript(
+        percent,
+        provider_id,
+        model_id,
+        catalog_window,
+        &signals,
+        transcript_characters,
+    )
+}
+
+fn session_context_signal(
     event: &SessionEvent,
+    count_payload: bool,
 ) -> provider_context::SessionContextSignal {
     let object = event.payload.as_object();
     let text = |key: &str| {
@@ -189,7 +225,11 @@ pub(crate) fn session_context_signal(
         provider_id: text("providerId"),
         model_id: text("modelId"),
         reading,
-        characters: event_text_characters(event),
+        characters: if count_payload {
+            event_text_characters(event)
+        } else {
+            0
+        },
         session_compaction,
     }
 }
@@ -244,6 +284,79 @@ pub(crate) fn is_encoded_text(field: Option<&str>, text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gyro_core::SessionEventKind;
+    use serde_json::json;
+
+    #[test]
+    fn owned_auto_compaction_uses_replayed_history_and_measured_usage() {
+        let session = Uuid::new_v4();
+        let mut events = vec![
+            SessionEvent::new(
+                session,
+                SessionEventKind::UserMessage,
+                "Check the build",
+                json!({}),
+            ),
+            SessionEvent::new(
+                session,
+                SessionEventKind::SystemEvent,
+                "Build log",
+                json!({
+                    "kind": "provider-activity", "detail": "Build diagnostic 🦀\n".repeat(4_000),
+                }),
+            ),
+            SessionEvent::new(
+                session,
+                SessionEventKind::AssistantMessage,
+                "The build passed.",
+                json!({}),
+            ),
+            SessionEvent::new(
+                session,
+                SessionEventKind::UserMessage,
+                "Continue",
+                json!({}),
+            ),
+        ];
+        let needs_compaction = |adapter, events: &[SessionEvent]| {
+            should_compact_before_turn(85, adapter, "fixture", Some("model"), Some(512), events)
+        };
+        for adapter in [
+            ProviderAdapterKind::OpenAiCompatible,
+            ProviderAdapterKind::Ollama,
+        ] {
+            assert!(!needs_compaction(adapter, &events));
+        }
+        assert!(needs_compaction(ProviderAdapterKind::KimiAcp, &events));
+
+        events[2].payload["contextUsage"] = json!({"inputTokens": 450, "modelContextWindow": 512});
+        for adapter in [
+            ProviderAdapterKind::OpenAiCompatible,
+            ProviderAdapterKind::Ollama,
+        ] {
+            assert!(needs_compaction(adapter, &events));
+        }
+
+        events[2].payload = json!({});
+        events[2].message = "🦀".repeat(1_800);
+        for adapter in [
+            ProviderAdapterKind::OpenAiCompatible,
+            ProviderAdapterKind::Ollama,
+        ] {
+            assert!(needs_compaction(adapter, &events));
+        }
+
+        events.insert(3, SessionEvent::new(session, SessionEventKind::SystemEvent, "Checkpoint", json!({
+            "kind": "provider-activity", "activityKind": "context", "activityId": "context-compaction-fixture",
+            "status": "done", "contextSummary": "🦀".repeat(1_800),
+        })));
+        for adapter in [
+            ProviderAdapterKind::OpenAiCompatible,
+            ProviderAdapterKind::Ollama,
+        ] {
+            assert!(!needs_compaction(adapter, &events));
+        }
+    }
 
     #[test]
     fn only_successful_compaction_resets_context_occupancy() {
@@ -260,7 +373,7 @@ mod tests {
                 }),
             );
             assert_eq!(
-                session_context_signal(&event).session_compaction,
+                session_context_signal(&event, true).session_compaction,
                 matches!(status, "done" | "completed"),
                 "{status}"
             );

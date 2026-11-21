@@ -1470,21 +1470,24 @@ impl SessionStore {
         policy.updated_at = Utc::now();
         policy.validate()?;
         let encoded = serde_json::to_string(&policy)?;
-        self.conn.execute(
+        let saved = self.conn.execute(
             "insert into project_capability_policies
              (workspace_key, policy_json, revision, updated_at)
              values (?1, ?2, ?3, ?4)
              on conflict(workspace_key) do update set
                policy_json = excluded.policy_json,
                revision = excluded.revision,
-               updated_at = excluded.updated_at",
+               updated_at = excluded.updated_at
+             where project_capability_policies.revision = ?5",
             params![
                 policy.workspace_key,
                 encoded,
                 policy.revision,
                 policy.updated_at.to_rfc3339(),
+                current.revision,
             ],
         )?;
+        anyhow::ensure!(saved == 1, "capability policy changed; reload and try again");
         Ok(policy)
     }
 
@@ -1612,6 +1615,14 @@ impl SessionStore {
         turn_id: Uuid,
     ) -> Result<Option<String>> {
         self.ensure_turn_index(session_id)?;
+        self.indexed_provider_status_for_turn(session_id, turn_id)
+    }
+
+    fn indexed_provider_status_for_turn(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+    ) -> Result<Option<String>> {
         self.conn
             .query_row(
                 "select status from session_turn_status
@@ -1766,6 +1777,14 @@ impl SessionStore {
         self.read_recent_events(session_id, MAX_SESSION_EVENTS_READ)
     }
 
+    /// Read the bounded tail and identify its revision under the same log lock.
+    pub fn read_events_with_revision(
+        &self,
+        session_id: Uuid,
+    ) -> Result<(Vec<SessionEvent>, Option<String>)> {
+        self.read_recent_events_impl(session_id, MAX_SESSION_EVENTS_READ, true)
+    }
+
     /// Metadata-only display revision. Identity and modification time also
     /// invalidate a same-size replacement; no event text is read or retained.
     pub fn transcript_revision(&self, session_id: Uuid) -> Result<String> {
@@ -1778,29 +1797,7 @@ impl SessionStore {
         }
         let file = open_session_event_log_for_read(&path)?;
         let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Shared)?;
-        let metadata = file.metadata()?;
-        let modified = metadata
-            .modified()?
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|time| time.as_nanos())
-            .unwrap_or(0);
-        #[cfg(unix)]
-        let identity = {
-            use std::os::unix::fs::MetadataExt;
-            format!("{}:{}", metadata.dev(), metadata.ino())
-        };
-        #[cfg(not(unix))]
-        let identity = metadata
-            .created()
-            .ok()
-            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|time| time.as_nanos())
-            .unwrap_or(0)
-            .to_string();
-        Ok(format!(
-            "{session_id}:{identity}:{}:{modified}",
-            metadata.len()
-        ))
+        transcript_file_revision(&file, session_id)
     }
 
     /// Complete display history. Provider context continues to use bounded reads.
@@ -1834,8 +1831,9 @@ impl SessionStore {
     /// Walks complete events from the start of the log.
     ///
     /// `visit` returns `false` to stop. The returned flag is true when the walk
-    /// stopped early, and nothing past that point is read.
-    pub(crate) fn visit_transcript_events(
+    /// stopped early, and nothing past that point is read. The visitor runs
+    /// under a shared log lock and must not write to this session's log.
+    pub fn visit_transcript_events(
         &self,
         session_id: Uuid,
         mut visit: impl FnMut(&SessionEvent) -> bool,
@@ -1872,22 +1870,44 @@ impl SessionStore {
         session_id: Uuid,
         max_recent_events: usize,
     ) -> Result<Vec<SessionEvent>> {
+        self.read_recent_events_impl(session_id, max_recent_events, false)
+            .map(|(events, _)| events)
+    }
+
+    fn read_recent_events_impl(
+        &self,
+        session_id: Uuid,
+        max_recent_events: usize,
+        include_revision: bool,
+    ) -> Result<(Vec<SessionEvent>, Option<String>)> {
         let session = self
             .get_session(session_id)?
             .ok_or_else(|| anyhow!("unknown session {session_id}"))?;
         let events_path = self.session_events_path(session.id)?;
 
         if !events_path.exists() {
-            return Ok(Vec::new());
+            let revision = include_revision.then(|| format!("{session_id}:missing"));
+            return Ok((Vec::new(), revision));
         }
 
         let mut file = open_session_event_log_for_read(&events_path)?;
         let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Shared)
             .with_context(|| format!("lock {} for read", events_path.display()))?;
+        let revision = include_revision
+            .then(|| transcript_file_revision(&file, session_id).ok())
+            .flatten();
         let first_line = read_bounded_session_event_line(&mut BufReader::new(file.try_clone()?))?;
-        let recent_lines = read_recent_event_lines(&mut file, max_recent_events)?;
+        let tail = read_recent_event_tail(&mut file, max_recent_events)?;
+        // Keep the selected lines as slices into the tail buffer until JSON
+        // parsing has taken ownership of the event fields it needs.
+        let recent_lines = tail
+            .lines()
+            .rev()
+            .take(max_recent_events)
+            .collect::<Vec<_>>();
         let mut events = recent_lines
-            .iter()
+            .into_iter()
+            .rev()
             .enumerate()
             .filter_map(|(index, line)| {
                 if line.is_empty() {
@@ -1907,7 +1927,7 @@ impl SessionStore {
                 events.insert(0, first_event);
             }
         }
-        Ok(events)
+        Ok((events, revision))
     }
 
     /// The workspace-context event a turn already persisted, if any.
@@ -1957,16 +1977,20 @@ impl SessionStore {
     /// Read durable chat context independently of the bounded transcript tail.
     /// The SQLite rows are a rebuildable index over JSONL, never its source of truth.
     pub fn read_context_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
-        self.read_context_events_filtered(session_id, false)
+        self.read_context_events_filtered(session_id, context_query::ALL_CONTEXT)
+    }
+    /// Read the ordered goal changes, including earlier revisions and clears.
+    pub fn read_goal_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
+        self.read_context_events_filtered(session_id, context_query::GOAL_CONTEXT)
     }
     /// Latest structured records plus durable routing evidence, without loading every old checkpoint.
     pub fn read_efficiency_context_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
-        self.read_context_events_filtered(session_id, true)
+        self.read_context_events_filtered(session_id, context_query::EFFICIENCY_CONTEXT)
     }
     fn read_context_events_filtered(
         &self,
         session_id: Uuid,
-        efficiency: bool,
+        sql: &str,
     ) -> Result<Vec<SessionEvent>> {
         self.ensure_turn_index(session_id)?;
         let session = self
@@ -2123,11 +2147,6 @@ impl SessionStore {
             transaction.commit()?;
         }
 
-        let sql = if efficiency {
-            context_query::EFFICIENCY_CONTEXT
-        } else {
-            "select event_json from session_context_events where session_id = ?1 order by log_offset asc"
-        };
         let mut statement = self.conn.prepare(sql)?;
         let rows = statement.query_map(params![session_id.to_string()], |row| {
             row.get::<_, String>(0)
@@ -2838,6 +2857,32 @@ fn repair_partial_session_event_tail(file: &mut File, path: &Path) -> Result<()>
     Ok(())
 }
 
+fn transcript_file_revision(file: &File, session_id: Uuid) -> Result<String> {
+    let metadata = file.metadata()?;
+    let modified = metadata
+        .modified()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|time| time.as_nanos())
+        .unwrap_or(0);
+    #[cfg(unix)]
+    let identity = {
+        use std::os::unix::fs::MetadataExt;
+        format!("{}:{}", metadata.dev(), metadata.ino())
+    };
+    #[cfg(not(unix))]
+    let identity = metadata
+        .created()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|time| time.as_nanos())
+        .unwrap_or(0)
+        .to_string();
+    Ok(format!(
+        "{session_id}:{identity}:{}:{modified}",
+        metadata.len()
+    ))
+}
+
 fn open_session_event_log_for_read(path: &Path) -> Result<File> {
     let mut options = OpenOptions::new();
     options.read(true);
@@ -3010,13 +3055,13 @@ fn visit_recent_event_lines(
     Ok(false)
 }
 
-fn read_recent_event_lines(file: &mut std::fs::File, max_lines: usize) -> Result<Vec<String>> {
+fn read_recent_event_tail(file: &mut std::fs::File, max_lines: usize) -> Result<String> {
     if max_lines == 0 {
-        return Ok(Vec::new());
+        return Ok(String::new());
     }
     let file_len = file.seek(SeekFrom::End(0))?;
     if file_len == 0 {
-        return Ok(Vec::new());
+        return Ok(String::new());
     }
 
     let mut chunks = Vec::new();
@@ -3047,24 +3092,30 @@ fn read_recent_event_lines(file: &mut std::fs::File, max_lines: usize) -> Result
         let mut chunk = vec![0; chunk_len];
         file.read_exact(&mut chunk)?;
         bytes_read += chunk_len;
-        for byte in chunk.iter().rev() {
-            if *byte == b'\n' {
-                newline_count += 1;
-                current_line_bytes = 0;
-            } else {
-                current_line_bytes += 1;
-                if current_line_bytes > MAX_SESSION_EVENT_LINE_BYTES {
-                    return Err(anyhow!(
-                        "session event line exceeds the {} byte limit",
-                        MAX_SESSION_EVENT_LINE_BYTES
-                    ));
-                }
-            }
+        let mut end = chunk.len();
+        for newline in memchr::memrchr_iter(b'\n', &chunk) {
+            current_line_bytes += end - newline - 1;
+            anyhow::ensure!(
+                current_line_bytes <= MAX_SESSION_EVENT_LINE_BYTES,
+                "session event line exceeds the {} byte limit",
+                MAX_SESSION_EVENT_LINE_BYTES
+            );
+            newline_count += 1;
+            current_line_bytes = 0;
+            end = newline;
         }
+        current_line_bytes += end;
+        anyhow::ensure!(
+            current_line_bytes <= MAX_SESSION_EVENT_LINE_BYTES,
+            "session event line exceeds the {} byte limit",
+            MAX_SESSION_EVENT_LINE_BYTES
+        );
         chunks.push(chunk);
     }
-    chunks.reverse();
-    let mut bytes = chunks.into_iter().flatten().collect::<Vec<_>>();
+    let mut bytes = Vec::with_capacity(bytes_read);
+    for chunk in chunks.into_iter().rev() {
+        bytes.extend_from_slice(&chunk);
+    }
     if position > 0 {
         if let Some(first_newline) = bytes.iter().position(|byte| *byte == b'\n') {
             bytes.drain(..=first_newline);
@@ -3084,12 +3135,7 @@ fn read_recent_event_lines(file: &mut std::fs::File, max_lines: usize) -> Result
             bytes.truncate(tail_start);
         }
     }
-    let text = String::from_utf8(bytes).context("session event log is not valid UTF-8")?;
-    let mut lines = text.lines().map(str::to_string).collect::<Vec<_>>();
-    if lines.len() > max_lines {
-        lines.drain(..lines.len() - max_lines);
-    }
-    Ok(lines)
+    String::from_utf8(bytes).context("session event log is not valid UTF-8")
 }
 
 fn row_to_provider_session_binding(
@@ -4346,7 +4392,31 @@ mod tests {
         assert!(read_bounded_session_event_line(&mut &bytes[..]).is_err());
         let mut file = tempfile::tempfile().unwrap();
         file.write_all(bytes).unwrap();
-        assert!(read_recent_event_lines(&mut file, 10).is_err());
+        assert!(read_recent_event_tail(&mut file, 10).is_err());
+    }
+
+    #[test]
+    fn recent_event_tail_enforces_the_line_limit_across_chunks() {
+        for line_len in [
+            MAX_SESSION_EVENT_LINE_BYTES,
+            MAX_SESSION_EVENT_LINE_BYTES + 1,
+        ] {
+            let mut file = tempfile::tempfile().unwrap();
+            file.write_all(b"older\n").unwrap();
+            file.write_all(&vec![b'x'; line_len]).unwrap();
+            file.write_all(b"\nnewer\n").unwrap();
+            let tail = read_recent_event_tail(&mut file, 3);
+            if line_len == MAX_SESSION_EVENT_LINE_BYTES {
+                let tail = tail.unwrap();
+                let lines: Vec<_> = tail.lines().collect();
+                assert_eq!(lines.len(), 3);
+                assert_eq!(lines[0], "older");
+                assert_eq!(lines[1].len(), line_len);
+                assert_eq!(lines[2], "newer");
+            } else {
+                assert!(tail.unwrap_err().to_string().contains("line exceeds"));
+            }
+        }
     }
 
     #[test]
@@ -4367,12 +4437,15 @@ mod tests {
         );
         let mut file = tempfile::tempfile().unwrap();
         file.write_all(&bytes).unwrap();
-        let recent = read_recent_event_lines(&mut file, 10).unwrap();
-        assert_eq!(recent.len(), 1);
+        let recent = read_recent_event_tail(&mut file, 10).unwrap();
+        let mut lines = recent.lines();
         assert_eq!(
-            serde_json::from_str::<SessionEvent>(&recent[0]).unwrap().id,
+            serde_json::from_str::<SessionEvent>(lines.next().unwrap())
+                .unwrap()
+                .id,
             event.id
         );
+        assert!(lines.next().is_none());
     }
 
     #[test]

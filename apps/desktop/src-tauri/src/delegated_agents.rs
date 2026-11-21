@@ -3059,7 +3059,7 @@ mod tests {
             workspace_identity_revision: 1,
             allow_delegation: true,
             policy: CapabilityPolicySnapshot::from_policy(&policy, CapabilityRunMode::Normal),
-            workspace_context: WorkspaceContextSnapshot::empty(policy.workspace_key.clone()),
+            workspace_context: WorkspaceContextSnapshot::empty(policy.workspace_key.clone()).into(),
             workspace_check: gyro_core::check_workspace(temp.path()),
         };
         for id in [

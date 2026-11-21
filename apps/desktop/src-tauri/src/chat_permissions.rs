@@ -6,14 +6,15 @@ use crate::{
     },
     stores::{open_store, parse_uuid, to_string},
 };
-use gyro_core::{GyroConfig, GyroPaths, Session};
+use gyro_core::{GyroConfig, GyroPaths, Session, SessionStore};
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf, sync::Mutex};
 use tauri::Manager;
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use uuid::Uuid;
 
-#[derive(Clone, Eq, PartialEq)]
-struct ChatBinding {
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChatBinding {
     provider: String,
     workspace: PathBuf,
     workspace_revision: u64,
@@ -30,6 +31,21 @@ impl ChatBinding {
             workspace_revision: session.workspace_identity.revision,
         })
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChatFullAccessScope {
+    binding: ChatBinding,
+    provider_label: String,
+}
+
+fn read_local_chat(store: &SessionStore, id: Uuid) -> Result<Session, String> {
+    store
+        .get_session(id)
+        .map_err(to_string)?
+        .filter(|session| session.parent_session_id.is_none())
+        .ok_or_else(|| "Full access requires a local chat.".to_string())
 }
 
 #[derive(Default)]
@@ -118,10 +134,31 @@ pub(crate) fn for_active_turn(
 }
 
 #[tauri::command]
+pub(crate) async fn get_chat_full_access_scope(
+    session_id: String,
+) -> Result<ChatFullAccessScope, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store()?;
+        let session = read_local_chat(&store, parse_uuid(&session_id)?)?;
+        let binding = ChatBinding::read(&session, store.paths())?;
+        let provider_label = session
+            .provider_label
+            .unwrap_or_else(|| binding.provider.clone());
+        Ok(ChatFullAccessScope {
+            binding,
+            provider_label,
+        })
+    })
+    .await
+    .map_err(to_string)?
+}
+
+#[tauri::command]
 pub(crate) async fn set_chat_full_access(
     app: tauri::AppHandle,
     session_id: String,
     enabled: bool,
+    confirmed_binding: Option<ChatBinding>,
 ) -> Result<bool, String> {
     crate::features::remote_access::require_local_control(&app, &session_id)?;
     let session_id = parse_uuid(&session_id)?;
@@ -129,37 +166,24 @@ pub(crate) async fn set_chat_full_access(
         revoke(&app, session_id)?;
         return Ok(false);
     }
+    let confirmed_binding =
+        confirmed_binding.ok_or_else(|| "Review Full access before enabling it.".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let store = open_store()?;
-        let read_session = || {
-            store.get_session(session_id).map_err(to_string)?
-                .filter(|session| session.parent_session_id.is_none())
-                .ok_or_else(|| "Full access requires a local chat.".to_string())
-        };
-        let session = read_session()?;
-        let binding = ChatBinding::read(&session, store.paths())?;
-        let confirmed = app.dialog()
-            .message(format!(
-                "{} can run commands with access to files and the network. This applies to this chat until you quit Gyro.\n\nWorkspace: {}",
-                session.provider_label.as_deref().unwrap_or(&binding.provider),
-                binding.workspace.display(),
-            ))
-            .title("Enable Full access for this chat?")
-            .kind(MessageDialogKind::Warning)
-            .buttons(MessageDialogButtons::OkCancelCustom("Enable Full access".into(), "Cancel".into()))
-            .blocking_show();
-        if !confirmed {
-            return Ok(false);
-        }
         let manager = app.state::<ProviderCancellationManager>();
         let runs = manager.flags.lock().map_err(to_string)?;
         if runs.contains_key(&session_id.to_string()) {
             return Err("Stop the active response before enabling Full access.".into());
         }
-        if ChatBinding::read(&read_session()?, store.paths())? != binding {
+        let binding = ChatBinding::read(&read_local_chat(&store, session_id)?, store.paths())?;
+        if binding != confirmed_binding {
             return Err("The chat’s provider or workspace changed. Review access again.".into());
         }
-        app.state::<ChatFullAccess>().0.lock().map_err(to_string)?.insert(session_id, binding);
+        app.state::<ChatFullAccess>()
+            .0
+            .lock()
+            .map_err(to_string)?
+            .insert(session_id, binding);
         Ok(true)
     })
     .await

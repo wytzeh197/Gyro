@@ -1,3 +1,4 @@
+import { browserTraceRuntime } from "./browser-trace";
 import { useProviderCapabilityEvents } from "./use-provider-capability-events";
 import { refreshOpenEditorBuffers } from "./refresh-open-editor-buffers";
 import { ConfigRecoveryDialog } from "./config-recovery-dialog";
@@ -4677,6 +4678,25 @@ export function App() {
       }));
     });
   }, [selectedFile, workspaceRoots]);
+
+  const loadProjectSitePermissions = useCallback((root: string) =>
+    invoke<ProjectCapabilityPolicy>("get_project_capability_policy", { workspacePath: root }), []);
+  const revokeProjectSitePermission = useCallback(async (
+    root: string, policy: ProjectCapabilityPolicy, id: string,
+  ) => {
+    const saved = await invoke<ProjectCapabilityPolicy>("save_project_capability_policy", {
+      request: {
+        workspacePath: root,
+        expectedRevision: policy.revision,
+        policy: { ...policy, grants: policy.grants.filter((grant) => grant.id !== id) },
+      },
+    });
+    setCapabilityPoliciesByProject((current) => ({
+      ...current,
+      [normalizeProjectPath(root)]: saved,
+    }));
+    return saved;
+  }, []);
 
   const workspaceContextSnapshot = useMemo<
     WorkspaceContextSnapshot | undefined
@@ -10316,7 +10336,32 @@ export function App() {
           return false;
         }
         try {
-          const granted = await invoke<boolean>("set_chat_full_access", { sessionId: session.id, enabled });
+          type ChatBinding = {
+            provider: string;
+            workspace: string;
+            workspaceRevision: number;
+          };
+          let confirmedBinding: ChatBinding | undefined;
+          if (enabled) {
+            const { binding, providerLabel } = await invoke<{
+              binding: ChatBinding;
+              providerLabel: string;
+            }>("get_chat_full_access_scope", { sessionId: session.id });
+            const confirmed = await askConfirmation({
+              title: "Enable Full access for this chat?",
+              message: `${providerLabel} can run commands, edit files outside the workspace, and use the network without the usual approvals. This applies to this chat until you quit Gyro.`,
+              detail: { label: "Workspace", value: binding.workspace },
+              confirmLabel: "Enable Full access",
+              tone: "permission",
+            });
+            if (!confirmed) return false;
+            confirmedBinding = binding;
+          }
+          const granted = await invoke<boolean>("set_chat_full_access", {
+            sessionId: session.id,
+            enabled,
+            confirmedBinding,
+          });
           setChatFullAccess((current) => {
             const next = { ...current };
             if (granted) next[session.id] = session;
@@ -13347,7 +13392,10 @@ export function App() {
               ? "Capability denied"
               : capabilityDecision === "allow-project"
                 ? "Capability allowed for project"
-                : "Capability allowed once",
+                : capabilityApproval.scopeKind === "origin" &&
+                    capabilityApproval.capabilityClass === "browser-navigate"
+                  ? "Site allowed for this chat"
+                  : "Capability allowed once",
             capabilityApproval.capabilityId.replaceAll("-", " "),
           );
           await refreshEvents(ownerSessionId);
@@ -18126,6 +18174,7 @@ export function App() {
         <ChatSurface
           {...projectImport.chatProps(paneSession)}
           {...taskHandoff.chatProps(paneSession)}
+          browserTrace={browserTraceRuntime(paneSession, openEditorLocation)}
           questionState={questionStateForSession(paneSession?.id)}
           activeChatPanel={panePanel}
           paneKey={paneDraftKey}
@@ -18541,6 +18590,7 @@ export function App() {
     <ChatSurface
       {...projectImport.chatProps(activeSession)}
       {...taskHandoff.chatProps(activeSession)}
+      browserTrace={browserTraceRuntime(activeSession, openEditorLocation)}
       questionState={questionStateForSession(activeSessionId)}
       chatSwitcher={workspaceChatSwitcher}
       paneKey={activeDraftKey}
@@ -19013,6 +19063,7 @@ export function App() {
                   <ChatSurface
                     {...projectImport.chatProps(activeSession)}
                     {...taskHandoff.chatProps(activeSession)}
+                    browserTrace={browserTraceRuntime(activeSession, openEditorLocation)}
                     questionState={questionStateForSession(activeSessionId)}
                     activeChatPanel={activeChatPanel}
                     paneKey={activeDraftKey}
@@ -19529,6 +19580,11 @@ export function App() {
             dispatchWorkbench({ type: "import-portable-settings", settings })
           }
           projectImport={projectImport.settingsProps}
+          projectSitePermissions={isTauriRuntime() ? {
+            workspacePath: activeWorkspaceRoot,
+            load: loadProjectSitePermissions,
+            revoke: revokeProjectSitePermission,
+          } : undefined}
           activeSection={
             activeDestination === "providers"
               ? "providers"

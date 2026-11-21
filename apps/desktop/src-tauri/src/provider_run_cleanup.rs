@@ -187,9 +187,7 @@ impl Drop for ProviderTurnFinalizer<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::providers::{
-        events::provider_turn_has_unfinished_attempt, session_lifecycle::ProviderSessionLease,
-    };
+    use crate::providers::session_lifecycle::ProviderSessionLease;
     use gyro_core::{GyroPaths, SessionEventKind};
     use std::time::Duration;
 
@@ -279,7 +277,12 @@ mod tests {
         let (_temp, store, request, session, run) = setup();
         store.append_event_with_turn_id(session, SessionEventKind::SystemEvent, "Waiting for provider",
             serde_json::json!({"kind":"provider-status", "status":"waiting", "nativeRetry":true}), Some(run)).unwrap();
-        assert!(provider_turn_has_unfinished_attempt(&store, session, run).unwrap());
+        assert!(
+            store
+                .provider_turn_status_for_dispatch(session, run)
+                .unwrap()
+                .1
+        );
         {
             let _finalizer = ProviderTurnFinalizer::new(
                 &store,
@@ -347,7 +350,12 @@ mod tests {
                     .as_deref(),
                 Some("failed")
             );
-            assert!(!provider_turn_has_unfinished_attempt(&store, session, run).unwrap());
+            assert!(
+                !store
+                    .provider_turn_status_for_dispatch(session, run)
+                    .unwrap()
+                    .1
+            );
             drop(lease);
             let _next_run = ProviderSessionLease::for_run(&store, session).unwrap();
         }

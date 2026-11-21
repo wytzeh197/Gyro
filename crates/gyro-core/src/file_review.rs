@@ -169,13 +169,15 @@ Rules:
 /// Returns the prompt together with the paths included, because the byte
 /// ceilings can drop trailing files — the caller has to know which ones need a
 /// fallback line rather than assuming every file was described.
-pub fn build_summary_prompt(files: &[FileChangeInput]) -> (String, Vec<String>) {
+pub fn build_summary_prompt<'a>(
+    files: impl IntoIterator<Item = &'a FileChangeInput>,
+) -> (String, Vec<String>) {
     let mut prompt =
         String::from("Describe each of these changed files in one plain sentence.\n\n");
     let mut included: Vec<String> = Vec::new();
     let mut budget = MAX_DIFF_BYTES_TOTAL;
 
-    for file in files.iter().take(MAX_SUMMARY_FILES) {
+    for file in files.into_iter().take(MAX_SUMMARY_FILES) {
         if budget == 0 {
             break;
         }

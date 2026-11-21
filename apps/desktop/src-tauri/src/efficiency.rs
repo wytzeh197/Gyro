@@ -39,36 +39,6 @@ use tauri::Manager;
 use uuid::Uuid;
 static ROUTE_LOCK: Mutex<()> = Mutex::new(());
 
-thread_local! { static PROMPT_SECTIONS: std::cell::RefCell<Option<(String,String)>> = const {std::cell::RefCell::new(None)}; }
-pub(super) fn capture_prompt(build: impl FnOnce() -> String) -> (String, String) {
-    let _measure = timing::EfficiencyTimer::start(timing::EfficiencyComponent::RequestAssembly);
-    PROMPT_SECTIONS.with(|slot| *slot.borrow_mut() = Some((String::new(), String::new())));
-    let original = build();
-    PROMPT_SECTIONS
-        .with(|slot| slot.borrow_mut().take())
-        .filter(|(_, dynamic)| !dynamic.is_empty())
-        .unwrap_or((String::new(), original))
-}
-/// Record the prompt split the builder already chose.
-///
-/// The stable block is byte-identical across turns of an owned thread. History,
-/// the workspace path, the check, mode, and the user message stay in the tail.
-/// No-ops unless [`capture_prompt`] armed the thread-local.
-pub(super) fn record_prompt_sections(stable: &[String], tail: &[String], message: &str) {
-    PROMPT_SECTIONS.with(|slot| {
-        if slot.borrow().is_none() {
-            return;
-        }
-        let tail_text = tail.join("\n");
-        let dynamic = if tail_text.is_empty() {
-            format!("User message:\n{message}")
-        } else {
-            format!("{tail_text}\n\nUser message:\n{message}")
-        };
-        *slot.borrow_mut() = Some((stable.join("\n"), dynamic));
-    });
-}
-
 #[tauri::command]
 pub async fn set_efficiency_config(
     value: gyro_core::efficiency::Config,

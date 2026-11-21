@@ -1,6 +1,13 @@
-use super::OllamaToolChatRequest;
+use super::{
+    ensure_loopback_response_url, normalize_digest, ollama_endpoint, read_metadata,
+    OllamaToolChatRequest,
+};
+use crate::CancellationToken;
 use anyhow::Result;
+use chrono::{DateTime, Utc};
+use serde::Deserialize;
 use serde_json::Value;
+use std::time::Duration;
 
 #[derive(Debug)]
 pub(super) struct OllamaContextOverflow;
@@ -55,6 +62,52 @@ pub(super) fn request_context_window(request: &OllamaToolChatRequest<'_>) -> Res
         .checked_next_power_of_two()
         .unwrap_or(maximum);
     Ok(Some(allocation.min(maximum)))
+}
+
+#[derive(Deserialize)]
+struct RunningModels {
+    models: Vec<RunningModel>,
+}
+
+#[derive(Deserialize)]
+struct RunningModel {
+    name: String,
+    digest: Option<String>,
+    context_length: Option<u64>,
+    expires_at: Option<DateTime<Utc>>,
+}
+
+/// A smaller allocation would unload a working runner. Only reuse a live
+/// allocation that belongs to the selected local manifest and that Gyro can
+/// keep requesting on later rounds. Status is optional on older daemons.
+pub(super) fn resident_context_window(
+    request: &OllamaToolChatRequest<'_>,
+    estimated: Option<u64>,
+    model_digest: Option<&str>,
+    cancellation: &CancellationToken,
+) -> Option<u64> {
+    let (estimated, maximum, digest) = (estimated?, request.context_window_tokens?, model_digest?);
+    if estimated >= maximum
+        || request.minimum_context_window_tokens.is_some()
+        || cancellation.is_cancelled()
+    {
+        return None;
+    }
+    let endpoint = ollama_endpoint(request.base_url).ok()?;
+    let url = endpoint.join("ps").ok()?;
+    let response = crate::chat_http::get(&url, cancellation, Duration::from_millis(40)).ok()?;
+    ensure_loopback_response_url(response.get_url(), &endpoint).ok()?;
+    let running: RunningModels = read_metadata(response.into_reader()).ok()?;
+    let soon = Utc::now() + chrono::Duration::seconds(1);
+    running.models.into_iter().find_map(|model| {
+        let window = model.context_length?;
+        (model.name == request.model
+            && normalize_digest(model.digest.as_deref()?).eq_ignore_ascii_case(digest)
+            && model.expires_at? > soon
+            && (estimated < window && window <= maximum)
+            && (window == maximum || window.is_power_of_two()))
+        .then_some(window)
+    })
 }
 
 #[cfg(test)]

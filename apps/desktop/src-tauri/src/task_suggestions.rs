@@ -8,7 +8,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 
-pub(crate) const GYRO_TASKS_MARKER: &str = "GYRO_TASKS:";
+pub(crate) use gyro_core::provider_runtime::prompts::GYRO_TASKS_MARKER;
 
 /// Matches the renderer: more than two cards under a reply reads as clutter.
 const MAX_TASKS: usize = 2;

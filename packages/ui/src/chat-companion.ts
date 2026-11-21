@@ -14,6 +14,7 @@ import type { ChatSidePanelId } from "./types.ts";
 export type ChatCompanionTabId = Extract<
   ChatSidePanelId,
   | "review"
+  | "trace"
   | "terminal"
   | "browser"
   | "files"
@@ -26,6 +27,7 @@ export type ChatCompanionTabId = Extract<
 export const chatCompanionTabIds: ChatCompanionTabId[] = [
   "canvas",
   "review",
+  "trace",
   "terminal",
   "browser",
   "files",
@@ -37,6 +39,7 @@ export const chatCompanionTabIds: ChatCompanionTabId[] = [
 export const chatCompanionTabLabels: Record<ChatCompanionTabId, string> = {
   canvas: "Canvas",
   review: "Review",
+  trace: "Trace",
   terminal: "Terminal",
   browser: "Browser",
   files: "Files",

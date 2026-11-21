@@ -428,6 +428,26 @@ pub(crate) fn browser_capability_origin_scope(
     Ok(("origin".into(), origin))
 }
 
+pub(crate) const MAX_WEB_SEARCH_QUERY_CHARS: usize = 512;
+
+pub(crate) fn browser_destination_url(
+    capability_id: CapabilityId,
+    arguments: &serde_json::Value,
+) -> anyhow::Result<url::Url> {
+    if capability_id == CapabilityId::WebSearch {
+        let query = capability_argument_string(arguments, "query")?;
+        anyhow::ensure!(
+            query.chars().count() <= MAX_WEB_SEARCH_QUERY_CHARS && !query.contains('\0'),
+            "query must be at most {MAX_WEB_SEARCH_QUERY_CHARS} characters and contain no null bytes"
+        );
+        let mut url = url::Url::parse("https://search.brave.com/search")?;
+        url.query_pairs_mut().append_pair("q", query);
+        return Ok(url);
+    }
+    session_browser::parse_navigable_url(capability_argument_string(arguments, "url")?)
+        .map_err(anyhow::Error::msg)
+}
+
 pub(crate) fn capability_grant_scope(
     capability_id: CapabilityId,
     arguments: &serde_json::Value,
@@ -449,12 +469,12 @@ pub(crate) fn capability_grant_scope(
                 arguments, "path",
             )?)?,
         )),
-        CapabilityId::BrowserOpen | CapabilityId::BrowserNavigate | CapabilityId::WebFetch => {
-            let url =
-                session_browser::parse_navigable_url(capability_argument_string(arguments, "url")?)
-                    .map_err(anyhow::Error::msg)?;
-            let origin = url.origin().ascii_serialization();
-            Ok(("origin".into(), origin))
+        CapabilityId::BrowserOpen
+        | CapabilityId::BrowserNavigate
+        | CapabilityId::WebFetch
+        | CapabilityId::WebSearch => {
+            let url = browser_destination_url(capability_id, arguments)?;
+            Ok(("origin".into(), url.origin().ascii_serialization()))
         }
         CapabilityId::WorkspaceOpenFolder => Ok((
             "folder".into(),
@@ -481,6 +501,46 @@ pub(crate) fn capability_grant_scope(
                 format!("{}:{:x}", capability_id, digest.finalize()),
             ))
         }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn web_search_uses_the_search_engine_origin_and_encodes_the_query() {
+    let query = "Gyro & Rust #2 ☀";
+    let arguments = serde_json::json!({"query": query, "url": "https://example.com"});
+    let url = browser_destination_url(CapabilityId::WebSearch, &arguments).unwrap();
+    assert_eq!(url.path(), "/search");
+    assert!(url.fragment().is_none());
+    let mut pairs = url.query_pairs();
+    let (key, value) = pairs.next().unwrap();
+    assert_eq!(key, "q");
+    assert_eq!(value, query);
+    assert!(pairs.next().is_none());
+    assert_eq!(
+        capability_grant_scope(CapabilityId::WebSearch, &arguments).unwrap(),
+        ("origin".into(), "https://search.brave.com".into())
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn web_search_requires_a_bounded_query_and_no_workspace_root() {
+    let schema = super::mcp_server::desktop_capability_tool_schema(CapabilityId::WebSearch);
+    assert_eq!(schema["required"], serde_json::json!(["query"]));
+    assert_eq!(
+        schema["properties"]["query"]["maxLength"],
+        MAX_WEB_SEARCH_QUERY_CHARS
+    );
+    assert!(schema["properties"].get("rootId").is_none());
+
+    for arguments in [
+        serde_json::json!({"url": "https://example.com"}),
+        serde_json::json!({"query": "  "}),
+        serde_json::json!({"query": "a".repeat(MAX_WEB_SEARCH_QUERY_CHARS + 1)}),
+        serde_json::json!({"query": "a\0b"}),
+    ] {
+        assert!(capability_grant_scope(CapabilityId::WebSearch, &arguments).is_err());
     }
 }
 

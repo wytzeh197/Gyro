@@ -1,4 +1,5 @@
 use super::*;
+use crate::providers::prompt::provider_context_sections;
 
 #[test]
 fn model_search_keeps_regex_and_glob_semantics() {
@@ -52,7 +53,7 @@ fn internal_summary_requests_carry_only_their_own_input() {
         InternalRequestPurpose::SessionTitle,
     ] {
         request.internal_purpose = Some(purpose);
-        assert_eq!(local_conversation_history_for_request(&request), None);
+        assert_eq!(local_conversation_history_for_request(&request, None), None);
         let prompt =
             provider_context_message_with_capabilities(&request, Some(history), true, true);
         assert!(!prompt.contains(history), "{purpose:?} leaked chat history");
@@ -76,11 +77,10 @@ fn internal_summary_requests_carry_only_their_own_input() {
             chat.len()
         );
         // Owned runners split the same prompt into a cacheable prefix and a tail.
-        let (stable, dynamic) = efficiency::capture_prompt(|| {
-            provider_context_message_with_capabilities(&request, None, true, true)
-        });
+        let (stable, dynamic) = provider_context_sections(&request, None, true, true);
         assert!(stable.starts_with("Gyro internal request:"));
         assert!(dynamic.ends_with("+ added line"));
+        assert_eq!(prompt, format!("{stable}\n\n{dynamic}"));
     }
 }
 
@@ -187,16 +187,18 @@ fn owned_turns_share_one_stable_block_across_history_and_check_duration() {
     second.workspace_check.as_mut().unwrap().duration_ms = 4_000;
     second.message = "edit it again".into();
     let build = |request: &ProviderChatRequest, history: &str| {
-        provider_context_message_with_capabilities(request, Some(history), true, false)
+        provider_context_sections(request, Some(history), true, false)
     };
-    let (stable_a, dynamic_a) =
-        efficiency::capture_prompt(|| build(&first, "User: one\n\nAssistant: first answer"));
-    let (stable_b, dynamic_b) = efficiency::capture_prompt(|| {
-        build(
-            &second,
-            "User: one\n\nAssistant: a different and longer answer",
-        )
-    });
+    let history = "User: one\n\nAssistant: first answer";
+    let (stable_a, dynamic_a) = build(&first, history);
+    let (stable_b, dynamic_b) = build(
+        &second,
+        "User: one\n\nAssistant: a different and longer answer",
+    );
+    assert_eq!(
+        format!("{stable_a}\n{dynamic_a}"),
+        provider_context_message_with_capabilities(&first, Some(history), true, false)
+    );
     assert!(!stable_a.is_empty());
     assert_eq!(stable_a, stable_b);
     assert_ne!(dynamic_a, dynamic_b);
@@ -3024,7 +3026,7 @@ fn native_provider_binding_owns_execution_authority() {
         internal_purpose: None,
     };
 
-    bind_provider_chat_request(&mut request, &session, &config, store.paths()).unwrap();
+    bind_provider_chat_request(&mut request, &session, &config, &store).unwrap();
 
     assert!(request.require_command_approval);
     assert!(request.require_file_edit_approval);
@@ -3041,7 +3043,7 @@ fn native_provider_binding_owns_execution_authority() {
     let mut projectless = session.clone();
     projectless.workspace_path = PathBuf::new();
     request.workspace_path = None;
-    bind_provider_chat_request(&mut request, &projectless, &config, store.paths()).unwrap();
+    bind_provider_chat_request(&mut request, &projectless, &config, &store).unwrap();
     let scratch = PathBuf::from(request.workspace_path.as_ref().unwrap());
     assert!(scratch.is_dir());
     assert_eq!(
@@ -3052,7 +3054,7 @@ fn native_provider_binding_owns_execution_authority() {
 
     request.provider_id = "anthropic".into();
     assert!(
-        bind_provider_chat_request(&mut request, &session, &config, store.paths())
+        bind_provider_chat_request(&mut request, &session, &config, &store)
             .unwrap_err()
             .contains("provider selection changed")
     );

@@ -9,7 +9,7 @@ use crate::{
     },
     capabilities::mcp_server::advertised_capability_descriptors,
     context_compaction,
-    conversation_history::acp_conversation_history_text_for_session,
+    conversation_history::{conversation_history_text_for_session, PrefetchedHistory},
     delegated_agents,
     providers::chat_types::{isolated_internal_purpose, ProviderChatRequest},
     sessions::attachments::{hash_file_streaming, validate_attachment_name},
@@ -44,12 +44,12 @@ pub(crate) fn bind_provider_chat_request(
     request: &mut ProviderChatRequest,
     session: &Session,
     config: &GyroConfig,
-    paths: &GyroPaths,
+    store: &SessionStore,
 ) -> Result<(), String> {
-    let role_store = gyro_core::SessionStore::open(paths.clone()).map_err(to_string)?;
+    let paths = store.paths();
     let root = session_execution_workspace(session, paths)?;
     if let Some(id) = request.workflow_run_id {
-        let ceiling = role_store
+        let ceiling = store
             .validate_workflow_dispatch(
                 id,
                 session.id,
@@ -64,14 +64,14 @@ pub(crate) fn bind_provider_chat_request(
         if ceiling == gyro_core::workflows::WorkflowAccess::ReadOnly {
             request.mode = super::chat_types::ChatMode::Plan;
         }
-    } else if role_store
+    } else if store
         .active_workflow_for_root(&root.to_string_lossy())
         .map_err(to_string)?
         .is_some()
     {
         return Err("A workflow owns this checkout. Stop it before starting another mutating chat, or use another worktree.".into());
     }
-    if role_store
+    if store
         .advisory_session_purpose(session.id)
         .map_err(to_string)?
         .is_some()
@@ -141,7 +141,7 @@ pub(crate) fn bind_provider_chat_request(
     request.model_label = session.model_label.clone();
     request.reasoning_effort = session.reasoning_effort.clone();
     request.workspace_path = Some(workspace.display().to_string());
-    let policy = role_store
+    let policy = store
         .get_project_capability_policy(&workspace.to_string_lossy())
         .map_err(to_string)?;
     let writes_denied = policy.access_for(gyro_core::CapabilityClass::WorkspaceWrite)
@@ -198,7 +198,7 @@ pub(crate) fn bind_provider_capability_context(
         .get_project_capability_policy(&workspace_key)
         .map_err(to_string)?;
     let mode = capability_run_mode_for_chat(request.mode);
-    let persisted_context = if load_persisted_context {
+    let persisted_context: Option<WorkspaceContextSnapshot> = if load_persisted_context {
         store
             .latest_workspace_context_event(
                 Uuid::parse_str(&request.session_id).map_err(to_string)?,
@@ -217,15 +217,14 @@ pub(crate) fn bind_provider_capability_context(
     };
     let context_already_persisted = persisted_context.is_some();
     let workspace_context = if let Some(context) = persisted_context {
-        context
+        context.into()
     } else {
         app.state::<CapabilityIdeEvidenceManager>()
             .evidence
             .lock()
             .map_err(|_| "IDE evidence state is unavailable".to_string())?
-            .get(&workspace_key)
-            .cloned()
-            .unwrap_or_else(|| WorkspaceContextSnapshot::empty(workspace_key.clone()))
+            .snapshot(&workspace_key)
+            .unwrap_or_else(|| WorkspaceContextSnapshot::empty(workspace_key.clone()).into())
     };
     let mut context = BoundProviderCapabilityContext {
         session_id: request.session_id.clone(),
@@ -471,6 +470,7 @@ mod snapshot_budget_tests {
 /// session (model handoff, missing cursor, or first turn after a switch).
 pub(crate) fn local_conversation_history_for_request(
     request: &ProviderChatRequest,
+    prefetched_history: Option<PrefetchedHistory>,
 ) -> Option<String> {
     // Internal text-only calls already carry their complete input.
     if isolated_internal_purpose(request).is_some()
@@ -478,7 +478,7 @@ pub(crate) fn local_conversation_history_for_request(
     {
         return None;
     }
-    acp_conversation_history_text_for_session(&request.session_id)
+    conversation_history_text_for_session(&request.session_id, prefetched_history)
 }
 
 pub(crate) use gyro_core::provider_runtime::prompts::provider_approval_instructions;

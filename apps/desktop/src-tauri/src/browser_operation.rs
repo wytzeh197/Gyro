@@ -39,10 +39,13 @@ pub(crate) fn begin_model_operation(
     id: CapabilityId,
     cancellation: CancellationToken,
 ) -> Option<OperationScope> {
-    id.as_str()
-        .starts_with("browser.")
+    (id == CapabilityId::WebSearch || id.as_str().starts_with("browser."))
         .then(|| enter(cancellation, CALLBACK_BUDGET))
 }
+pub(super) fn is_model_operation() -> bool {
+    ACTIVE.with(|active| active.borrow().is_some())
+}
+
 fn enter(cancellation: CancellationToken, budget: Duration) -> OperationScope {
     OperationScope {
         previous: ACTIVE.with(|active| {

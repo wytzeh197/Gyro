@@ -300,6 +300,9 @@ pub(crate) fn delete_session_blocking(session_id: String) -> Result<bool, String
     let staged = stage_session_attachments(&attachments_root, session_id)?;
     match store.delete_session(session_id) {
         Ok(deleted) => {
+            if deleted {
+                crate::browser_trace::delete_reports(&store, session_id);
+            }
             drop(store);
             if let Some((_, tombstone)) = staged {
                 if let Err(error) = remove_attachment_storage_entry(&tombstone) {

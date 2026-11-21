@@ -1,6 +1,7 @@
 //! Host-owned tool definitions and observation policy, shared by API transports.
 use crate::{CapabilityDescriptor, CapabilityId, CapabilityRunMode};
 use serde_json::Value;
+use std::borrow::Cow;
 
 pub trait ToolCatalog: Send + Sync {
     fn descriptors(
@@ -8,6 +9,11 @@ pub trait ToolCatalog: Send + Sync {
         mode: CapabilityRunMode,
     ) -> Box<dyn Iterator<Item = &'static CapabilityDescriptor> + '_>;
     fn schema(&self, id: CapabilityId) -> Value;
+    /// Same full schema as `schema`. Catalogs with reusable definitions can
+    /// lend a value to readers without rebuilding or cloning it.
+    fn schema_ref(&self, id: CapabilityId) -> Cow<'_, Value> {
+        Cow::Owned(self.schema(id))
+    }
     fn observation_byte_limit(&self, arguments: &Value) -> anyhow::Result<usize>;
 }
 

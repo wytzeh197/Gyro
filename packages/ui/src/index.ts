@@ -932,3 +932,5 @@ export type {WorkflowRuntime,WorkflowDefinition,WorkflowBinding,WorkflowRun,Work
 export type { ComposerReviewer } from "./composer-inline-draft";
 
 export { parseCouncilSynthesizerAction } from "./council-composer";
+
+export type { BrowserTraceRuntime } from "./browser-trace";

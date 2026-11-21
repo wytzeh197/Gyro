@@ -41,7 +41,6 @@ export function BrowserPreviewSurround({
       1,
     ),
   );
-  const zoom = scale < 1 ? ` · ${Math.round(scale * 100)}%` : "";
   return (
     <div
       ref={ref}
@@ -70,9 +69,10 @@ export function BrowserPreviewSurround({
         {children}
       </div>
       {framed && (
-        <span className="gyro-preview-stage-label">
-          Web preview · {mobile ? "Phone" : tablet ? "Tablet" : "Desktop"} · {viewport.width} × {viewport.height}{zoom}
-        </span>
+        <div className="gyro-preview-stage-label" style={{ width: outerWidth * scale }}>
+          <span>{mobile ? "Phone" : tablet ? "Tablet" : "Desktop"} · {viewport.width} × {viewport.height}</span>
+          {scale > 0 && scale < 1 ? <span>Fit {Math.round(scale * 100)}%</span> : null}
+        </div>
       )}
     </div>
   );

@@ -132,6 +132,54 @@ fn batch_statuses_and_unindexed_running_turns_reach_global_recovery() {
 }
 
 #[test]
+fn dispatch_guards_unterminated_attempts_without_using_them_as_retry_status() {
+    let (_temp, store, session) = fixture();
+    let turn = Uuid::new_v4();
+    let status = || {
+        store
+            .provider_turn_status_for_dispatch(session.id, turn)
+            .unwrap()
+    };
+    assert_eq!(status(), (None, false));
+
+    let mut event = SessionEvent::new(
+        session.id,
+        SessionEventKind::SystemEvent,
+        "Waiting for provider",
+        json!({"kind":"provider-status", "status":"waiting"}),
+    );
+    event.turn_id = Some(turn);
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&session.events_path)
+        .unwrap();
+    let record = serde_json::to_vec(&event).unwrap();
+    file.write_all(&record[..record.len() - 1]).unwrap();
+    assert_eq!(status(), (None, false));
+    file.write_all(&record[record.len() - 1..]).unwrap();
+    assert_eq!(status(), (None, true));
+    assert_eq!(
+        store
+            .provider_turn_status_for_dispatch(session.id, Uuid::new_v4())
+            .unwrap(),
+        (None, false),
+    );
+    file.write_all(b"\n").unwrap();
+    assert_eq!(status(), (Some("waiting".into()), true));
+
+    store
+        .append_event_with_turn_id(
+            session.id,
+            SessionEventKind::SystemEvent,
+            "Completed",
+            json!({"kind":"provider-status", "status":"done"}),
+            Some(turn),
+        )
+        .unwrap();
+    assert_eq!(status(), (Some("done".into()), false));
+}
+
+#[test]
 fn replacement_truncation_and_partial_tails_do_not_leave_stale_rows() {
     let (_temp, store, session) = fixture();
     let turn = Uuid::new_v4();

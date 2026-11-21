@@ -52,7 +52,7 @@ pub fn run_anthropic_claude_chat(
         request.mode == ChatMode::Normal,
         can_resume,
     );
-    crate::provider_observation::native_prompt(&serde_json::json!(prompt));
+    crate::provider_observation::native_text_prompt(&prompt);
     let permission_mcp_config = Some(host.claude_mcp_config(request)?);
     let session_id = resume_cursor
         .and_then(|cursor| (cursor.kind == "claude-session").then_some(cursor.session_id.clone()))

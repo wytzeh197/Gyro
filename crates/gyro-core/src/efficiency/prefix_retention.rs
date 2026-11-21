@@ -1,5 +1,8 @@
 //! Bounded retention of already-sent API messages between retirement checkpoints.
-use super::context::{prepare_owned_model_request_with_policy, EvidencePolicy};
+use super::context::{
+    compact_duplicate_reads, prepare_owned_model_request_for_task, retire_with_policy,
+    EvidencePolicy,
+};
 use serde_json::Value;
 
 /// Retention is local to one owned API turn. Window compaction and provider
@@ -21,25 +24,37 @@ impl PrefixRetention {
         policy: EvidencePolicy,
         enabled: bool,
     ) -> usize {
+        self.prepare_for_task(messages, policy, enabled, "")
+    }
+
+    pub fn prepare_for_task(
+        &mut self,
+        messages: &mut [Value],
+        policy: EvidencePolicy,
+        enabled: bool,
+        task: &str,
+    ) -> usize {
         if !enabled {
             *self = Self::default();
-            return prepare_owned_model_request_with_policy(messages, policy);
+            return prepare_owned_model_request_for_task(messages, policy, task);
         }
-        let bytes = request_bytes(messages);
+        // The current exchange has not been sent yet. Fold duplicate reads in
+        // it even when previously sent messages must survive byte for byte.
+        let saved = compact_duplicate_reads(messages);
         // A shrinking request means compaction/recovery has already changed
         // the prefix. Retire now rather than delaying behind a stale checkpoint.
-        if self.rounds > 0
-            && self.rounds < CHECKPOINT_ROUNDS
-            && bytes >= self.checkpoint_bytes
-            && bytes - self.checkpoint_bytes < MAX_GROWTH_BYTES
+        if (1..CHECKPOINT_ROUNDS).contains(&self.rounds)
+            && request_bytes(messages)
+                .checked_sub(self.checkpoint_bytes)
+                .is_some_and(|growth| growth < MAX_GROWTH_BYTES)
         {
             self.rounds += 1;
-            return 0;
+            return saved;
         }
-        let saved = prepare_owned_model_request_with_policy(messages, policy);
+        let retired = retire_with_policy(messages, policy, task);
         self.checkpoint_bytes = request_bytes(messages);
         self.rounds = 1;
-        saved
+        saved + retired
     }
 }
 
@@ -64,18 +79,25 @@ fn request_bytes(messages: &[Value]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::efficiency::context::prepare_owned_model_request_with_policy;
     use serde_json::json;
 
-    fn exchange(messages: &mut Vec<Value>, id: usize, bytes: usize) {
-        messages.push(json!({"role":"assistant","tool_calls":[
-            {"id":format!("call-{id}"),"type":"function","function":{
+    fn read_call(id: usize) -> Value {
+        json!({"id":format!("call-{id}"),"type":"function","function":{
                 "name":"gyro_workspace_read","arguments":"{\"path\":\"file.rs\"}"
-            }}
-        ]}));
-        messages.push(json!({"role":"tool","tool_call_id":format!("call-{id}"),
-            "content":json!({"callId":format!("call-{id}"),
+        }})
+    }
+
+    fn read_reply(id: usize, bytes: usize) -> Value {
+        json!({"role":"tool","tool_call_id":format!("call-{id}"),
+            "content":json!({"status":"completed","callId":format!("call-{id}"),
                 "result":{"capabilityId":"workspace-read","summary":"Read file",
-                    "data":{"path":"file.rs","content":"x".repeat(bytes)}}}).to_string()}));
+                    "data":{"path":"file.rs","contentHash":format!("fixture-{bytes}"),"content":"x".repeat(bytes)}}}).to_string()})
+    }
+
+    fn exchange(messages: &mut Vec<Value>, id: usize, bytes: usize) {
+        messages.push(json!({"role":"assistant","tool_calls":[read_call(id)]}));
+        messages.push(read_reply(id, bytes));
     }
 
     fn messages() -> Vec<Value> {
@@ -126,6 +148,33 @@ mod tests {
         state.prepare(&mut messages, EvidencePolicy::Preview, true);
         exchange(&mut messages, 1, MAX_GROWTH_BYTES);
         assert!(state.prepare(&mut messages, EvidencePolicy::Preview, true) > 0);
+    }
+
+    #[test]
+    fn duplicate_reads_are_folded_between_checkpoints_without_rewriting_sent_messages() {
+        let mut state = PrefixRetention::default();
+        let mut messages = messages();
+        state.prepare(&mut messages, EvidencePolicy::Preview, true);
+        let sent = messages.clone();
+        let duplicate = read_reply(2, 6_000);
+        messages.extend([
+            json!({"role":"assistant","tool_calls":[read_call(1), read_call(2)]}),
+            read_reply(1, 6_000),
+            duplicate.clone(),
+        ]);
+
+        assert!(state.prepare(&mut messages, EvidencePolicy::Preview, true) > 5_000);
+        assert_eq!(state.rounds, 2);
+        let (previous, current) = messages.split_at(sent.len());
+        assert_eq!(previous, sent);
+        assert_eq!(current[1]["tool_call_id"], "call-1");
+        assert_eq!(current[2], duplicate);
+        let reference: Value =
+            serde_json::from_str(current[1]["content"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            reference["result"]["data"]["sameEvidenceAsCallId"],
+            "call-2"
+        );
     }
 
     #[test]

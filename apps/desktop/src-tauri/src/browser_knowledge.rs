@@ -69,6 +69,14 @@ pub fn context(tools: bool, images: bool, mode: &str, detailed: bool) -> String 
     format!("{GUIDE}\nCurrent browser capability contract:\n{contract}\n{SIDE_PANEL_GUIDE}")
 }
 
+/// Use the maintained reading and research instructions from the Browser guide.
+pub fn web_research_context() -> &'static str {
+    GUIDE
+        .split_once("## Read links quietly\n")
+        .and_then(|(_, research)| research.split_once("\n## Observe, act, verify"))
+        .map_or(GUIDE, |(research, _)| research.trim())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,12 +92,14 @@ mod tests {
         assert!(!ordinary.contains(SIDE_PANEL_GUIDE));
         assert!(!needs_surface_guide("preview the diff"));
         assert!(needs_surface_guide("open https://example.com"));
-        assert!(needs_surface_guide(
+        assert!(needs_web_research_guidance(
             "Research whether a new model was released"
         ));
-        assert!(needs_surface_guide(
+        assert!(needs_web_research_guidance(
             "Run a web search for model announcements"
         ));
+        assert!(!needs_surface_guide("Summarize https://example.com"));
+        assert!(needs_surface_guide("Click Download on https://example.com"));
         assert!(!needs_surface_guide("Refactor the serializer"));
         assert!(needs_surface_guide(
             "check the component preview and dev server"
@@ -221,4 +231,6 @@ mod tests {
     }
 }
 
-pub(crate) use gyro_core::provider_runtime::prompts::{needs_surface_guide, SIDE_PANEL_GUIDE};
+pub(crate) use gyro_core::provider_runtime::prompts::{
+    needs_surface_guide, needs_web_research_guidance, SIDE_PANEL_GUIDE,
+};

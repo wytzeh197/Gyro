@@ -141,6 +141,7 @@ pub fn run() {
         .manage(WorkspacePreparationManager::default())
         .manage(AutomationSchedulerControl::default())
         .manage(session_browser::SessionBrowserManager::default())
+        .manage(crate::browser_trace::TraceManager::default())
         .manage(app_preview::ManagerState::default())
         .manage(menu_bar::MenuBarController::default())
         .manage(quit_confirmation::QuitConfirmation::default())
@@ -313,6 +314,14 @@ pub fn run() {
             crate::session_browser::session_browser_close,
             crate::session_browser::session_browser_snapshot,
             crate::session_browser::session_browser_annotate,
+            crate::browser_trace::browser_trace_start,
+            crate::browser_trace::browser_trace_status,
+            crate::browser_trace::browser_trace_active,
+            crate::browser_trace::browser_trace_discard,
+            crate::browser_trace::browser_trace_review,
+            crate::browser_trace::browser_trace_analyze,
+            crate::browser_trace::browser_trace_history,
+            crate::browser_trace::browser_trace_source,
             crate::automation::commands::complete_automation_lease,
             crate::terminal::panes::close_terminal_pane,
             crate::automation::commands::create_automation,
@@ -421,6 +430,7 @@ pub fn run() {
             crate::providers::commands::run_provider_chat,
             crate::providers::commands::compact_provider_chat,
             crate::app::config::save_config,
+            crate::chat_permissions::get_chat_full_access_scope,
             crate::chat_permissions::set_chat_full_access,
             crate::app::config::recover_config,
             crate::capabilities::commands::save_project_capability_policy,

@@ -123,9 +123,8 @@ pub(crate) fn resolve_pane_governance(
             .evidence
             .lock()
             .map_err(|_| anyhow::anyhow!("IDE evidence state is unavailable"))?
-            .get(&workspace_key)
-            .cloned()
-            .unwrap_or_else(|| WorkspaceContextSnapshot::empty(workspace_key.clone())),
+            .snapshot(&workspace_key)
+            .unwrap_or_else(|| WorkspaceContextSnapshot::empty(workspace_key.clone()).into()),
         workspace_check: gyro_core::check_workspace(&workspace),
     };
 

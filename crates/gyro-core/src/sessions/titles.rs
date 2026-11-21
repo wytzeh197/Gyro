@@ -50,6 +50,29 @@ impl SessionStore {
             .optional()?)
     }
 
+    /// A completed title-only response can still leave the title pending if
+    /// its content was unusable. Reuse the receipt to avoid buying it again.
+    pub fn completed_session_title_repair(
+        &self,
+        session_id: Uuid,
+        provider_id: &str,
+        model_id: Option<&str>,
+    ) -> Result<bool> {
+        Ok(self.conn.query_row(
+            "select exists(select 1 from usage_ledger
+             where session_id = ?1 and provider_id = ?2 and model_id is ?3
+             and origin = ?4 and outcome = ?5)",
+            params![
+                session_id.to_string(),
+                provider_id,
+                model_id,
+                crate::usage::UsageOrigin::SessionTitle.as_str(),
+                crate::usage::UsageOutcome::Done.as_str(),
+            ],
+            |row| row.get(0),
+        )?)
+    }
+
     /// Apply once, atomically against the current title and ownership. A manual
     /// rename on another connection always wins, even if its text is unchanged.
     pub fn apply_session_title(

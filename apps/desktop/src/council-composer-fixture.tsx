@@ -8,6 +8,8 @@ import {
   parseCouncilSynthesizerAction,
   providersForConfig,
   type ChatMode,
+  type BrowserTraceRuntime,
+  type ChatCompanionTabId,
   type GyroConfig,
   type SessionEvent,
 } from "@gyro-dev/ui";
@@ -81,6 +83,33 @@ function Fixture() {
 
 // The app sets the theme on <html>; composer resets key off `:root[data-theme]`.
 document.documentElement.dataset.theme = "dark";
+const traceEvidence = {click:"Save",events:[{id:1,kind:"request" as const,elapsedMs:35,method:"POST",origin:"http://localhost:3000",path:"/api/events",status:400}]};
+const traceExcerpt = {id:1,path:"src/events.ts",firstLine:42,selectedLine:42,lines:["if (!startTime) return 400;"],hash:"fixture"};
+function TraceFixture() {
+  const [draft, setDraft] = useState("");
+  const [tab, setTab] = useState<ChatCompanionTabId>();
+  const [tabs, setTabs] = useState<ChatCompanionTabId[]>([]);
+  const data = useState(() => ({sends:0, analyzed:0, source:0, setup:undefined as Parameters<BrowserTraceRuntime["start"]>[0] | undefined}))[0];
+  Object.assign(window, {traceFixture: data});
+  const chooseTab = (next: ChatCompanionTabId) => { setTab(next); setTabs(current => current.includes(next) ? current : [...current, next]); };
+  const runtime: BrowserTraceRuntime = {
+    sessionId:"trace-fixture", roots:[{id:"calendar",path:"/fixture/Calendar"}], activeRootId:"calendar",
+    active:async()=>null,
+    start:async (setup)=>{data.setup=setup;return "capture";},
+    status:async()=>({done:true,evidence:traceEvidence,browserModel:data.setup?.browserModel,sourceModel:data.setup?.sourceModel}),
+    discard:async()=>{},
+    review:async()=>({id:"approval",browserInput:{question:data.setup!.question,evidence:traceEvidence},sourceInput:{question:data.setup!.question,evidence:traceEvidence,source:[traceExcerpt]},excerpts:[traceExcerpt]}),
+    analyze:async()=>{data.analyzed++;return {id:"trace",setup:data.setup!,evidence:traceEvidence,approvedEvidence:traceEvidence,excerpts:[traceExcerpt],browserFindings:[],sourceFindings:[{text:"The handler requires a start time for all-day events.",eventId:1,excerptId:1,line:42}],errors:[]};},
+    history:async()=>[],
+    openSource:async()=>{data.source++;return false;},
+  };
+  return <ChatSurface config={initial} events={[]} draft={draft} onDraftChange={setDraft}
+    onSend={()=>{data.sends++;}} shellReady workspacePath="/fixture/Calendar"
+    sessionModel={{providerId:"anthropic",modelId:"claude-opus-5-5"}} browserTrace={runtime}
+    browserPreview={{url:"http://localhost:3000", history:[], historyIndex:-1, device:"desktop", status:"ready", consoleErrors:0, diagnostics:[], diagnosticsSupported:true, diagnosticsCaptured:false, captureStatus:"idle", verificationMessage:""}}
+    activeChatPanel={tab} companionTabs={tabs} onOpenCompanionTab={chooseTab} onCloseCompanionDock={()=>setTab(undefined)} />;
+}
+
 createRoot(document.getElementById("root")!).render(
-  <main className="gyro-app" data-theme="dark" style={{ height: "100vh", display: "flex", background: "var(--gyro-pane)" }}><Fixture /></main>,
+  <main className="gyro-app" data-theme="dark" style={{ height: "100vh", display: "flex", background: "var(--gyro-pane)" }}>{query.has("trace") ? <TraceFixture /> : <Fixture />}</main>,
 );

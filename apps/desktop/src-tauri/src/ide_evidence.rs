@@ -5,12 +5,14 @@
 //! model-facing capability can answer without an editor round trip.
 //!
 //! A snapshot can carry unsaved text for every open buffer that fits, which
-//! makes it expensive to copy and cheap to borrow. This cache therefore owns
-//! one snapshot per project and hands out references under its lock, and it
-//! caps how many projects it keeps: opening a project used to leave every
-//! earlier project's buffer text alive for the life of the process.
+//! makes it expensive to copy. Readers can share the same immutable
+//! snapshot after releasing the cache lock. The cache limits how many
+//! projects retain live evidence.
 
-use std::collections::{HashMap, VecDeque};
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+};
 
 use gyro_core::WorkspaceContextSnapshot;
 
@@ -19,7 +21,7 @@ use gyro_core::WorkspaceContextSnapshot;
 pub(super) const EVIDENCE_WORKSPACE_CAPACITY: usize = 8;
 
 pub(super) struct IdeEvidenceCache {
-    entries: HashMap<String, WorkspaceContextSnapshot>,
+    entries: HashMap<String, Arc<WorkspaceContextSnapshot>>,
     /// Most recently stored key last, so eviction takes the front.
     order: VecDeque<String>,
     capacity: usize,
@@ -37,7 +39,11 @@ impl Default for IdeEvidenceCache {
 
 impl IdeEvidenceCache {
     pub(super) fn get(&self, workspace_key: &str) -> Option<&WorkspaceContextSnapshot> {
-        self.entries.get(workspace_key)
+        self.entries.get(workspace_key).map(Arc::as_ref)
+    }
+
+    pub(super) fn snapshot(&self, workspace_key: &str) -> Option<Arc<WorkspaceContextSnapshot>> {
+        self.entries.get(workspace_key).cloned()
     }
 
     /// Stores one project's evidence and evicts the least recently updated
@@ -52,7 +58,8 @@ impl IdeEvidenceCache {
             return;
         }
         self.touch(&workspace_key);
-        self.entries.insert(workspace_key.clone(), snapshot);
+        self.entries
+            .insert(workspace_key.clone(), Arc::new(snapshot));
         while self.entries.len() > self.capacity {
             let Some(coldest) = self.order.pop_front() else {
                 break;
@@ -78,9 +85,11 @@ impl IdeEvidenceCache {
         } else {
             self.store(workspace_key.to_string(), seed());
         }
-        self.entries
-            .get_mut(workspace_key)
-            .expect("evidence was stored above")
+        Arc::make_mut(
+            self.entries
+                .get_mut(workspace_key)
+                .expect("evidence was stored above"),
+        )
     }
 
     fn touch(&mut self, workspace_key: &str) {
@@ -120,6 +129,32 @@ mod tests {
             cache.store("a".into(), old);
             assert_eq!(cache.get("a"), Some(&latest));
         }
+    }
+
+    #[test]
+    fn an_in_flight_snapshot_survives_live_updates_and_eviction() {
+        let mut cache = IdeEvidenceCache {
+            capacity: 1,
+            ..IdeEvidenceCache::default()
+        };
+        let mut initial = snapshot("a");
+        initial.revision = 1;
+        cache.store("a".into(), initial.clone());
+        let in_flight = cache.snapshot("a").unwrap();
+        assert!(Arc::ptr_eq(&in_flight, &cache.snapshot("a").unwrap()));
+
+        let live = cache.entry_mut("a", || panic!("the workspace already has evidence"));
+        live.revision = 2;
+        live.active_output = Some(serde_json::json!({"exitCode":0}));
+        let updated = cache.snapshot("a").unwrap();
+        assert_eq!(*in_flight, initial);
+        assert_eq!(updated.revision, 2);
+        assert_eq!(updated.active_output.as_ref().unwrap()["exitCode"], 0);
+
+        cache.store("b".into(), snapshot("b"));
+        assert!(cache.get("a").is_none());
+        assert_eq!(*in_flight, initial);
+        assert_eq!(updated.revision, 2);
     }
 
     #[test]

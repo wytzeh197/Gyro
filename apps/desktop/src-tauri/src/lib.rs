@@ -93,6 +93,7 @@ mod provider_tool_batch;
 mod quit_confirmation;
 mod reply_segments;
 mod session_browser;
+mod browser_trace;
 mod session_goal;
 mod session_history;
 mod session_model;

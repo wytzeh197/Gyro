@@ -43,6 +43,7 @@ pub enum UsageOrigin {
     /// folded into their chat total.
     ChangeSummary,
     CodeReview,
+    BrowserTrace,
     WorkflowExtraction,
     /// The one model call a manual `/compact` spends on a provider that has no
     /// compact command of its own, to write the checkpoint the next turn
@@ -67,6 +68,7 @@ impl UsageOrigin {
             Self::CouncilResynthesis => "council-resynthesis",
             Self::ChangeSummary => "change-summary",
             Self::CodeReview => "code-review",
+            Self::BrowserTrace => "browser-trace",
             Self::WorkflowExtraction => "workflow-extraction",
             Self::ContextCompaction => "context-compaction",
             Self::SessionTitle => "session-title",
@@ -84,6 +86,7 @@ impl UsageOrigin {
             "council-resynthesis" => Self::CouncilResynthesis,
             "change-summary" => Self::ChangeSummary,
             "code-review" => Self::CodeReview,
+            "browser-trace" => Self::BrowserTrace,
             "workflow-extraction" => Self::WorkflowExtraction,
             "context-compaction" => Self::ContextCompaction,
             "session-title" => Self::SessionTitle,
@@ -104,6 +107,7 @@ impl UsageOrigin {
             Self::CouncilResynthesis => "Council re-synthesis",
             Self::ChangeSummary => "Change summaries",
             Self::CodeReview => "Code reviews",
+            Self::BrowserTrace => "Browser traces",
             Self::WorkflowExtraction => "Workflow extraction",
             Self::ContextCompaction => "Context compaction",
             Self::SessionTitle => "Chat titles",

@@ -338,7 +338,7 @@
 }
 :root[data-theme]
   .gyro-settings-surface
-  :is(.gyro-settings-row strong, .gyro-workspace-settings-list strong, .gyro-import-archived strong) {
+  :is(.gyro-settings-row strong, .gyro-workspace-settings-list strong) {
   font-size: var(--gyro-font-support);
   font-weight: 500;
 }
@@ -916,8 +916,7 @@
   .gyro-settings-surface
   :is(
     .gyro-settings-row > div:first-child > span,
-    .gyro-workspace-settings-list small,
-    .gyro-import-archived > div > span
+    .gyro-workspace-settings-list small
   ) {
   color: var(--gyro-muted);
   font-size: var(--gyro-font-micro);
