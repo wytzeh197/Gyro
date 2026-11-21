@@ -1,6 +1,7 @@
 //! Model-facing observations retain full backing data and return bounded pages.
 use super::*;
 use serde_json::{json, Value};
+use std::io::{self, Write};
 
 #[derive(Clone, Copy)]
 pub(super) struct TextField<'a> {
@@ -28,6 +29,47 @@ pub(super) fn offset_schema() -> Value {
     json!({"type":"integer","minimum":0,"description":"Character offset from the previous result's window. Reuse its nextOffset or previousOffset to read another page."})
 }
 
+/// Compact JSON length of `value`.
+///
+/// Paging a tool result binary-searches this length, and a browser tree prunes
+/// one node at a time. Each probe used to keep a fresh encoding of the page.
+/// The counter is the same compact JSON and keeps none of it. `Value`
+/// serialization does not fail for a writer that accepts every buffer; a
+/// failure still rejects the page, which is what `to_vec` did.
+fn json_byte_len(value: &Value) -> anyhow::Result<usize> {
+    struct ByteCounter(usize);
+
+    impl Write for ByteCounter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0 = self.0.saturating_add(buf.len());
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut counter = ByteCounter(0);
+    serde_json::to_writer(&mut counter, value)?;
+    Ok(counter.0)
+}
+
+/// `None` means `text` is ASCII: character offsets and byte offsets match.
+fn char_total(text: &str, boundaries: &Option<Vec<usize>>) -> usize {
+    match boundaries {
+        Some(boundaries) => boundaries.len() - 1,
+        None => text.len(),
+    }
+}
+
+fn char_to_byte(boundaries: &Option<Vec<usize>>, index: usize) -> usize {
+    match boundaries {
+        Some(boundaries) => boundaries[index],
+        None => index,
+    }
+}
+
 pub(super) fn text_result(
     mut data: Value,
     fields: &[TextField<'_>],
@@ -41,17 +83,27 @@ pub(super) fn text_result(
             continue;
         };
         let text = text.to_owned();
-        let boundaries = text
-            .char_indices()
-            .map(|(index, _)| index)
-            .chain(std::iter::once(text.len()))
-            .collect::<Vec<_>>();
-        let start = offset(arguments, field.offset)?.map(|start| start.min(boundaries.len() - 1));
+        // Command logs and source text are almost always ASCII, so a character
+        // offset is a byte offset. A retained terminal buffer is up to 16 MiB.
+        // Recording every scalar index would allocate eight bytes per log byte
+        // before the page is cut. Non-ASCII still stores scalar boundaries.
+        let boundaries = if text.is_ascii() {
+            None
+        } else {
+            Some(
+                text.char_indices()
+                    .map(|(index, _)| index)
+                    .chain(std::iter::once(text.len()))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let total = char_total(&text, &boundaries);
+        let start = offset(arguments, field.offset)?.map(|start| start.min(total));
         sources.push((*field, text, boundaries, start));
     }
     let update = |data: &mut Value, count: usize| {
         for (field, text, boundaries, requested_start) in &sources {
-            let total = boundaries.len() - 1;
+            let total = char_total(text, boundaries);
             let start = requested_start.unwrap_or_else(|| {
                 if field.tail {
                     total.saturating_sub(count)
@@ -61,7 +113,9 @@ pub(super) fn text_result(
             });
             let end = start.saturating_add(count).min(total);
             if let Some(value) = data.pointer_mut(field.pointer) {
-                *value = json!(&text[boundaries[start]..boundaries[end]]);
+                let start_byte = char_to_byte(boundaries, start);
+                let end_byte = char_to_byte(boundaries, end);
+                *value = json!(&text[start_byte..end_byte]);
             }
             data[field.window] = json!({
                 "offset": start, "returnedChars": end - start, "totalChars": total,
@@ -75,14 +129,14 @@ pub(super) fn text_result(
     while low < high {
         let middle = low + (high - low).div_ceil(2);
         update(&mut data, middle);
-        if serde_json::to_vec(&data)?.len() <= max_bytes {
+        if json_byte_len(&data)? <= max_bytes {
             low = middle;
         } else {
             high = middle - 1;
         }
     }
     update(&mut data, low);
-    if serde_json::to_vec(&data)?.len() > max_bytes
+    if json_byte_len(&data)? > max_bytes
         || (low == 0 && sources.iter().any(|(_, text, _, _)| !text.is_empty()))
     {
         anyhow::bail!("Observation metadata exceeds maxBytes; increase the byte budget");
@@ -110,14 +164,14 @@ pub(super) fn array_result(mut data: Value, key: &str, max_bytes: usize) -> anyh
     while low < high {
         let middle = low + (high - low).div_ceil(2);
         update(&mut data, middle);
-        if serde_json::to_vec(&data)?.len() <= max_bytes {
+        if json_byte_len(&data)? <= max_bytes {
             low = middle;
         } else {
             high = middle - 1;
         }
     }
     update(&mut data, low);
-    if serde_json::to_vec(&data)?.len() > max_bytes || (low == 0 && !original.is_empty()) {
+    if json_byte_len(&data)? > max_bytes || (low == 0 && !original.is_empty()) {
         anyhow::bail!(
             "Observation entry exceeds maxBytes; narrow the request or increase the byte budget"
         );
@@ -339,7 +393,7 @@ pub(super) fn browser_page_result(mut data: Value, max_bytes: usize) -> anyhow::
         node["omittedChildren"] = json!(omitted + 1);
         true
     }
-    while serde_json::to_vec(&data)?.len() > max_bytes {
+    while json_byte_len(&data)? > max_bytes {
         let pruned = data.pointer_mut("/page/tree").is_some_and(prune);
         if !pruned {
             anyhow::bail!("Browser page metadata exceeds maxBytes; increase the byte budget");
@@ -560,5 +614,56 @@ mod tests {
             assert!(after <= DEFAULT_WORKSPACE_RESULT_BYTES);
             assert!(after * 4 < before);
         }
+    }
+
+    #[test]
+    fn json_byte_len_matches_compact_json() {
+        for value in [
+            json!(null),
+            json!(true),
+            json!(false),
+            json!(0),
+            json!("quote \" and emoji 🦀\n"),
+            json!({"logs": "a".repeat(1000), "n": [1, null, false]}),
+        ] {
+            assert_eq!(
+                json_byte_len(&value).unwrap(),
+                serde_json::to_vec(&value).unwrap().len(),
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn ascii_log_pages_reconstruct_the_same_characters_as_a_scalar_walk() {
+        let source = "compile detail\n".repeat(20_000);
+        assert!(source.is_ascii());
+        assert!(source.len() > 16 * 1024);
+        let fields = [TextField {
+            pointer: "/output",
+            window: "outputWindow",
+            offset: "outputOffset",
+            tail: false,
+        }];
+        let mut cursor = 0u64;
+        let mut reconstructed = String::new();
+        loop {
+            let page = text_result(
+                json!({"output": source}),
+                &fields,
+                &json!({"outputOffset": cursor, "maxBytes": 4096}),
+            )
+            .unwrap();
+            let text = page["output"].as_str().unwrap();
+            assert!(text.is_char_boundary(text.len()));
+            assert!(serde_json::to_vec(&page).unwrap().len() <= 4096);
+            reconstructed.push_str(text);
+            let Some(next) = page["outputWindow"]["nextOffset"].as_u64() else {
+                break;
+            };
+            assert!(next > cursor);
+            cursor = next;
+        }
+        assert_eq!(reconstructed, source);
     }
 }
