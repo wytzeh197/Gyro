@@ -75,6 +75,7 @@
       "endpoints": [
         "https://github.com/wytzeh197/Gyro/releases/latest/download/latest.json"
       ],
+      "allowDowngrades": false,
       "windows": {
         "installMode": "passive"
       }

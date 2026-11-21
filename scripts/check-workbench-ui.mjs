@@ -6690,7 +6690,9 @@ expect(
     !surfaceSource.includes("gyro-sidebar-update-indicator") &&
     !styleSource.includes(".gyro-update-popover") &&
     updateControllerSource.includes("import.meta.env.DEV") &&
-    updateControllerSource.includes("allowDowngrades: false") &&
+    /"allowDowngrades": false/.test(
+      readFileSync("apps/desktop/src-tauri/tauri.conf.json", "utf8"),
+    ) &&
     updateControllerSource.includes("isUpdateVersionNewer") &&
     updateControllerSource.includes(
       "localStorage.setItem(LAST_UPDATE_CHECK_STORAGE_KEY, checkedAt)",

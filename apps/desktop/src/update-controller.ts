@@ -119,10 +119,9 @@ export function useGyroUpdater({
           getVersion(),
         ]);
         currentVersionRef.current = currentVersion;
-        const update = await check({
-          allowDowngrades: false,
-          timeout: 15_000,
-        });
+        // Downgrades are blocked by plugins.updater.allowDowngrades in
+        // tauri.conf.json (updater plugin 2.14+ reads it from config).
+        const update = await check({ timeout: 15_000 });
         const checkedAt = new Date().toISOString();
         localStorage.setItem(LAST_UPDATE_CHECK_STORAGE_KEY, checkedAt);
         window.clearTimeout(retryTimerRef.current);
