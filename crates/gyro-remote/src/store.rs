@@ -109,6 +109,7 @@ impl Store {
           create table if not exists receipts(peer text not null,id text not null,hash text not null,status text not null,value text,primary key(peer,id));
           create table if not exists ssh_hosts(id text primary key,value text not null);
           create table if not exists ssh_meta(key text primary key,value text not null);
+          create table if not exists server_runs(id text primary key,host text not null,value text not null);
           create table if not exists submitted_turns(session text not null,turn text not null,primary key(session,turn));
           create index if not exists audit_recent on audit(at desc,id desc);
           create index if not exists audit_bucket on audit(peer,action,session,ok,at desc,id desc);")?;
@@ -180,6 +181,31 @@ impl Store {
     pub fn remove_ssh_host(&self, id: &str) -> Result<()> {
         self.db()?
             .execute("delete from ssh_hosts where id=?1", [id])?;
+        Ok(())
+    }
+    /// Server runs Gyro can reattach to, oldest first.
+    #[cfg(unix)]
+    pub fn server_runs(&self) -> Result<Vec<crate::server_runs::ServerRun>> {
+        let db = self.db()?;
+        let mut statement = db.prepare("select value from server_runs order by rowid")?;
+        let rows = statement.query_map([], |r| r.get::<_, String>(0))?;
+        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+    }
+    #[cfg(unix)]
+    pub fn save_server_run(&self, run: &crate::server_runs::ServerRun) -> Result<()> {
+        if !crate::server_runs::valid_name(&run.id) {
+            bail!("Invalid run id");
+        }
+        self.db()?.execute(
+            "insert into server_runs values(?1,?2,?3) on conflict(id) do update set host=excluded.host,value=excluded.value",
+            params![run.id, run.host_id, serde_json::to_string(run)?],
+        )?;
+        Ok(())
+    }
+    #[cfg(unix)]
+    pub fn remove_server_run(&self, id: &str) -> Result<()> {
+        self.db()?
+            .execute("delete from server_runs where id=?1", [id])?;
         Ok(())
     }
     #[cfg(unix)]

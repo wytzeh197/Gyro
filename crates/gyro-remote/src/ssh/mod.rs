@@ -1,5 +1,6 @@
 //! Native OpenSSH transport. Keys and SSH configuration remain owned by OpenSSH.
 mod config;
+pub mod exec;
 mod server;
 pub mod stream;
 use anyhow::{bail, Context, Result};
@@ -81,11 +82,14 @@ impl Options {
         }
         Ok(())
     }
-    pub fn arguments(&self) -> Result<Vec<String>> {
+    /// The hardened option list shared by every SSH use: the Gyro socket, the
+    /// runner exec channel, git transport and the sign-in terminal. It ends
+    /// with user, port and identity, and never contains the destination.
+    pub(crate) fn base_arguments(&self, tty: bool) -> Result<Vec<String>> {
         self.validate()?;
         // Explicit options take precedence over user config. Never spawn a shell
         // locally or interpolate destinations into the remote command.
-        let mut args = vec!["-T".into()];
+        let mut args = Vec::new();
         for option in [
             "BatchMode=yes",
             "StrictHostKeyChecking=yes",
@@ -100,7 +104,11 @@ impl Options {
             "ControlMaster=no",
             "ControlPath=none",
             "RemoteCommand=none",
-            "RequestTTY=no",
+            if tty {
+                "RequestTTY=yes"
+            } else {
+                "RequestTTY=no"
+            },
             "ForkAfterAuthentication=no",
             "SessionType=default",
         ] {
@@ -120,6 +128,11 @@ impl Options {
                 "IdentitiesOnly=yes".into(),
             ]);
         }
+        Ok(args)
+    }
+    pub fn arguments(&self) -> Result<Vec<String>> {
+        let mut args = vec!["-T".into()];
+        args.extend(self.base_arguments(false)?);
         args.push(self.host.clone());
         let target = match &self.socket_path {
             Some(path) => shell_quote(path),
@@ -128,8 +141,48 @@ impl Options {
         args.push(format!("p={target}; if [ ! -S \"$p\" ]; then printf '%s\\n' 'Gyro SSH service is unavailable. Open an updated Gyro app and turn on Remote access on the host Mac.' >&2; exit 69; fi; exec /usr/bin/nc -U \"$p\""));
         Ok(args)
     }
+    /// Runs one fixed remote command with no terminal. Callers build `command`
+    /// only from constants and validated identifiers; data goes over stdin.
+    pub fn exec_arguments(&self, command: &str) -> Result<Vec<String>> {
+        let mut args = vec!["-T".into()];
+        args.extend(self.base_arguments(false)?);
+        args.extend(["--".into(), self.host.clone(), command.into()]);
+        Ok(args)
+    }
+    /// Runs a remote command in a real terminal, for a CLI's own sign-in flow.
+    /// The user types into it; Gyro never reads the CLI's credential files.
+    pub fn terminal_arguments(&self, command: &str) -> Result<Vec<String>> {
+        let mut args = vec!["-t".into()];
+        args.extend(self.base_arguments(true)?);
+        args.extend(["--".into(), self.host.clone(), command.into()]);
+        Ok(args)
+    }
 }
-fn shell_quote(value: &str) -> String {
+/// Plain-language reasons for an OpenSSH failure, from its stderr. Shared by
+/// the Gyro socket and the server runner.
+pub(crate) fn ssh_failure(captured: &str) -> Option<&'static str> {
+    ssh_trust_failure(captured).or_else(|| {
+        if captured.contains("Could not resolve hostname") {
+            Some("SSH hostname could not be resolved. Check the address or SSH config alias.")
+        } else if captured.contains("Connection refused") {
+            Some("SSH connection refused. Enable Remote Login on the host and check the port.")
+        } else {
+            None
+        }
+    })
+}
+fn ssh_trust_failure(captured: &str) -> Option<&'static str> {
+    if captured.contains("Host key verification failed")
+        || captured.contains("REMOTE HOST IDENTIFICATION HAS CHANGED")
+    {
+        Some("SSH host key is not trusted or has changed. Verify this host with ssh in Terminal, then connect again.")
+    } else if captured.contains("Permission denied") || captured.contains("sign_and_send_pubkey") {
+        Some("SSH authentication failed. Load your key into ssh-agent, or choose an identity file. Password-only authentication is not supported.")
+    } else {
+        None
+    }
+}
+pub(crate) fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
@@ -217,25 +270,17 @@ impl Connection {
                     .lock()
                     .map(|e| String::from_utf8_lossy(&e).to_string())
                     .unwrap_or_default();
-                let message = if captured.contains("Host key verification failed")
-                    || captured.contains("REMOTE HOST IDENTIFICATION HAS CHANGED")
-                {
-                    "SSH host key is not trusted or has changed. Verify this host with ssh in Terminal, then connect again."
-                } else if captured.contains("Permission denied")
-                    || captured.contains("sign_and_send_pubkey")
-                {
-                    "SSH authentication failed. Load your key into ssh-agent, or choose an identity file. Password-only authentication is not supported."
-                } else if captured.contains("Gyro SSH service is unavailable")
+                let message = if captured.contains("Gyro SSH service is unavailable")
                     || captured.contains("connect failed")
                     || captured.contains("No such file or directory")
                 {
-                    "Gyro SSH service is unavailable. Open an updated Gyro app and turn on Remote access on the host Mac."
-                } else if captured.contains("Could not resolve hostname") {
-                    "SSH hostname could not be resolved. Check the address or SSH config alias."
-                } else if captured.contains("Connection refused") {
-                    "SSH connection refused. Enable Remote Login on the host and check the port."
+                    ssh_trust_failure(&captured).unwrap_or(
+                        "Gyro SSH service is unavailable. Open an updated Gyro app and turn on Remote access on the host Mac.",
+                    )
                 } else {
-                    "Could not connect over SSH. Check reachability, Remote Login, host trust, and your SSH key."
+                    ssh_failure(&captured).unwrap_or(
+                        "Could not connect over SSH. Check reachability, Remote Login, host trust, and your SSH key.",
+                    )
                 };
                 self.close();
                 bail!("{message}")
