@@ -2240,36 +2240,50 @@ export function providerLabelForId(
   );
 }
 
+const APPROVAL_PROVIDER_NAMES: Record<string, string> = {
+  openai: "Codex",
+  anthropic: "Claude",
+  kimi: "Kimi",
+  xai: "Grok",
+  cursor: "Cursor",
+  gemini: "Gemini",
+  antigravity: "Google Antigravity",
+  opencode: "OpenCode",
+  ollama: "Ollama",
+  deepseek: "DeepSeek",
+  mistral: "Mistral",
+  openrouter: "OpenRouter",
+};
+
 export function approvalNotificationCopy(
   config: GyroConfig,
   mode: "auto" | "direct" | "gated",
 ) {
+  const providerId = config.selectedProviderId ?? "";
   const providerName =
-    config.selectedProviderId === "anthropic"
-      ? "Claude"
-      : config.selectedProviderId === "kimi"
-        ? "Kimi"
-        : config.selectedProviderId === "xai"
-          ? "Grok"
-          : config.selectedProviderId === "antigravity"
-            ? "Google Antigravity"
-            : "Codex";
+    APPROVAL_PROVIDER_NAMES[providerId] ??
+    config.modelProviders.find((provider) => provider.id === providerId)
+      ?.displayName ??
+    "The agent";
   if (mode === "gated") {
     return {
-      title: "Ask for approval",
-      detail: `${providerName} will ask before commands and file edits.`,
+      title: "Ask for Approval",
+      detail:
+        providerId === "antigravity"
+          ? `${providerName} will plan without editing. It cannot ask per tool.`
+          : `${providerName} will ask before commands and file edits.`,
     };
   }
 
   if (mode === "auto") {
     return {
-      title: "Approve for me",
-      detail: `${providerName} can work without prompts inside the workspace boundary.`,
+      title: "Approve for Me",
+      detail: `${providerName} can do routine work without prompts. Riskier actions still ask.`,
     };
   }
 
   return {
-    title: "Full access",
+    title: "Full Access",
     detail: `${providerName} can run commands and apply edits without prompts.`,
   };
 }

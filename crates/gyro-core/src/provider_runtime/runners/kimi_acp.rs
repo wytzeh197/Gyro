@@ -360,7 +360,7 @@ pub fn run_kimi_acp_chat(
             } else {
                 KimiAcpMode::Normal
             },
-            // Full access answers permission requests inside the core, so a card
+            // Full Access answers permission requests inside the core, so a card
             // that cannot be shown can never become a declined tool.
             auto_allow_permissions: approval_posture == crate::ApprovalPosture::FullAccess,
             resume_session_id,
@@ -462,7 +462,7 @@ pub fn run_kimi_acp_chat(
             };
             // Grok `auto` and Kimi `--yolo` already let the safe set through.
             // A request that still arrives is outside that set, so Approve for
-            // me shows a card instead of allowing it silently. Full access
+            // Me shows a card instead of allowing it silently. Full Access
             // does not ask: those CLIs are started with the bypass flag.
             let escalation = approval_posture == crate::ApprovalPosture::ApproveForMe
                 && crate::approve_for_me_keeps_escalations(&request.provider_id);

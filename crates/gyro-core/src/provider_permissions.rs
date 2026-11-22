@@ -1,6 +1,6 @@
 //! The composer's three approval choices, translated into each CLI's own flags.
 //!
-//! Ask for approval, Approve for me, and Full access are one saved choice.
+//! Ask for Approval, Approve for Me, and Full Access are one saved choice.
 //! A CLI that has a native mode is started in that mode. A CLI that does not
 //! is left on its default, and Gyro's approval callback still asks or allows
 //! from the same flags.
@@ -36,8 +36,8 @@ pub fn approval_posture(
 
 /// Codex app-server approval policy and sandbox for one turn.
 ///
-/// Plan and Council are read-only even when the saved choice is Full access.
-/// Approve for me keeps the workspace sandbox and leaves network off. Full
+/// Plan and Council are read-only even when the saved choice is Full Access.
+/// Approve for Me keeps the workspace sandbox and leaves network off. Full
 /// access is `danger-full-access`.
 pub fn codex_execution_policy(
     advisory: bool,
@@ -82,7 +82,7 @@ pub fn codex_execution_policy(
 
 /// Claude Code's `--permission-mode` for a normal turn.
 ///
-/// Full access is launched with `--dangerously-skip-permissions` instead of
+/// Full Access is launched with `--dangerously-skip-permissions` instead of
 /// this value. `manual` is the current ask mode; `default` is still accepted
 /// by Claude Code 2.1 but is no longer one of the listed choices.
 pub fn claude_permission_mode(posture: ApprovalPosture) -> &'static str {
@@ -93,7 +93,7 @@ pub fn claude_permission_mode(posture: ApprovalPosture) -> &'static str {
     }
 }
 
-/// Whether Approve for me should still show a card when this CLI asks.
+/// Whether Approve for Me should still show a card when this CLI asks.
 ///
 /// These CLIs auto-approve the safe set themselves. A request that still
 /// reaches Gyro is outside that set, so the person decides it. CLIs without
@@ -124,7 +124,7 @@ pub fn acp_permission_args(
         },
         "gemini" => match posture {
             // Halfway mode auto-approves edits and still prompts for other
-            // tools. `--sandbox` is Gemini's project boundary. Full access is
+            // tools. `--sandbox` is Gemini's project boundary. Full Access is
             // `--approval-mode yolo` with the sandbox left off.
             ApprovalPosture::Ask => &["--approval-mode", "default", "--acp"],
             ApprovalPosture::ApproveForMe => {

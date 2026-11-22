@@ -86,7 +86,7 @@ fn renderer_cannot_select_terminal_execution_policies() {
 fn full_access_requires_explicit_flags_normal_mode_and_delegation_ceiling() {
     for (label, full_access, command_approval, file_approval, mode, ceiling, expected) in [
         (
-            "explicit Full access",
+            "explicit Full Access",
             true,
             false,
             false,
@@ -95,7 +95,7 @@ fn full_access_requires_explicit_flags_normal_mode_and_delegation_ceiling() {
             true,
         ),
         (
-            "no Full access flag",
+            "no Full Access flag",
             false,
             false,
             false,

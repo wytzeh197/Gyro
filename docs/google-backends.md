@@ -66,7 +66,7 @@ posture onto the CLI's launch flags instead:
 
 | Gyro posture | `agy` flags |
 | --- | --- |
-| Full access (no command or edit approval required) | `--dangerously-skip-permissions` |
+| Full Access (no command or edit approval required) | `--dangerously-skip-permissions` |
 | Plan mode / approval-gated | `--sandbox --mode accept-edits` |
 
 Every non-full-access run keeps Google's sandbox on, which is the containment

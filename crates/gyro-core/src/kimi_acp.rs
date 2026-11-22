@@ -213,7 +213,7 @@ pub struct KimiAcpRequest {
     /// Override the agent's thinking level only when the user selected one.
     pub reasoning_effort: Option<String>,
     pub mode: KimiAcpMode,
-    /// Full access: answer the agent's permission requests with an allow option
+    /// Full Access: answer the agent's permission requests with an allow option
     /// without asking anyone. A card that never resolves, or a host that cannot
     /// answer it, must not become a declined tool -- agents end the whole turn
     /// for that, and every step around it is lost.
@@ -293,7 +293,7 @@ struct KimiAcpConnection {
     /// Set once a wire frame, rather than a /usage text line, supplied occupancy.
     context_from_wire: bool,
     bound_session_id: Option<String>,
-    /// Full access was chosen for this run, so a permission request is answered
+    /// Full Access was chosen for this run, so a permission request is answered
     /// with an allow option here and never reaches an approval card.
     auto_allow_permissions: bool,
     /// Set when a permission request was answered with a rejection. Some agents
@@ -1867,7 +1867,7 @@ where
                 let decision = if connection.cancellation.is_cancelled() {
                     KimiAcpApprovalDecision::Cancelled
                 } else if connection.auto_allow_permissions {
-                    // Full access answered this before the request arrived. No
+                    // Full Access answered this before the request arrived. No
                     // card, no host callback, and no way for a broken card to
                     // turn into a declined tool that ends the turn.
                     KimiAcpApprovalDecision::AllowOnce
@@ -4038,7 +4038,7 @@ done
         assert_eq!(activities.last().unwrap().status, "done");
     }
 
-    /// Full access must never depend on a card being shown or answered. An agent
+    /// Full Access must never depend on a card being shown or answered. An agent
     /// that ends its turn over a declined tool would otherwise kill the run with
     /// every step around it.
     #[cfg(unix)]

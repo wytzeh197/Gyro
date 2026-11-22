@@ -20096,11 +20096,11 @@ export function SettingsSurface({
                       label="Approval budget"
                       value={
                         config.fullAccess
-                          ? "Full access"
+                          ? APPROVAL_MODE_LABELS.direct
                           : config.requireCommandApproval ||
                               config.requireFileEditApproval
-                            ? "Ask for approval"
-                            : "Approve for me"
+                            ? APPROVAL_MODE_LABELS.gated
+                            : APPROVAL_MODE_LABELS.auto
                       }
                       detail="Approval behavior follows Permissions and the chat’s selected approval mode."
                     />
@@ -20685,7 +20685,7 @@ export function SettingsSurface({
                 <SettingsRow
                   label="Workspace boundary"
                   value="Provider-dependent"
-                  detail="Set by the provider and approval mode. Full access can reach outside the project."
+                  detail="Set by the provider and approval mode. Full Access can reach outside the project."
                 />
                 <SettingsRow
                   label="Network access"
@@ -22370,19 +22370,19 @@ function providerTestActionLabel(provider: {
 
 type ApprovalCopy = {
   chipLabel: string;
-  title: string;
   gatedLabel: string;
   gatedDetail: string;
   autoLabel: string;
   autoDetail: string;
   directLabel: string;
   directDetail: string;
-  settingsDetail: string;
-  commandValue: string;
-  commandDetail: string;
-  editValue: string;
-  editDetail: string;
 };
+
+export const APPROVAL_MODE_LABELS = {
+  gated: "Ask for Approval",
+  auto: "Approve for Me",
+  direct: "Full Access",
+} as const;
 
 function approvalModeForConfig(config: GyroConfig) {
   if (config.fullAccess) {
@@ -22397,18 +22397,63 @@ function approvalModeForConfig(config: GyroConfig) {
   return "custom";
 }
 
-function approvalBackendSummary(config: GyroConfig) {
-  if (config.fullAccess) {
-    return "full access · sandbox bypassed";
+/**
+ * What Ask for Approval and Approve for Me actually do for each provider.
+ * Keep these in step with `crates/gyro-core/src/provider_permissions.rs`,
+ * `grok.rs`, `antigravity_cli.rs`, and the capability broker.
+ */
+function providerApprovalDetails(providerId: ProviderId | undefined) {
+  const gyroTools =
+    "Gyro runs workspace commands without prompts. HTTPS, terminals, and file edits still ask.";
+  switch (providerId) {
+    case "openai":
+      return {
+        gated: "Ask before commands and file edits in this workspace",
+        auto: "Codex works in the workspace sandbox without prompts. Commands that leave the sandbox are blocked; edits outside it still ask.",
+      };
+    case "anthropic":
+      return {
+        gated: "Ask before commands and file edits in this workspace",
+        auto: "Claude's auto mode runs routine work without prompts. Anything outside it still asks.",
+      };
+    case "xai":
+      return {
+        gated: "Ask before Grok's commands and file edits",
+        auto: "Grok runs routine work in the workspace sandbox without prompts. Anything outside it still asks.",
+      };
+    case "kimi":
+      return {
+        gated: "Ask before Kimi's commands and file edits",
+        auto: "Kimi approves ordinary tool calls itself. Anything it escalates still asks.",
+      };
+    case "gemini":
+      return {
+        gated: "Ask before Gemini's commands and file edits",
+        auto: "Gemini works in its sandbox, and Gyro approves its tool requests without prompts.",
+      };
+    case "cursor":
+      return {
+        gated: "Ask before Cursor's commands and file edits",
+        auto: "Cursor works in its sandbox, and Gyro approves its tool requests without prompts.",
+      };
+    case "antigravity":
+      return {
+        gated: "Read-only planning. Antigravity cannot ask per tool, so it does not edit.",
+        auto: "Antigravity accepts edits in Google's sandbox without prompts.",
+      };
+    case "opencode":
+      return {
+        gated: "Ask before OpenCode's commands and file edits",
+        auto: "Gyro approves OpenCode's permission requests without prompts.",
+      };
+    default:
+      // Ollama, DeepSeek, Mistral, OpenRouter, and custom providers have no
+      // native tools: every action goes through Gyro's capability broker.
+      return {
+        gated: "Ask before commands and file edits through Gyro tools",
+        auto: gyroTools,
+      };
   }
-  if (!config.requireCommandApproval && !config.requireFileEditApproval) {
-    return "auto approve · provider boundary retained";
-  }
-  const command = config.requireCommandApproval
-    ? "commands ask"
-    : "commands allow";
-  const edits = config.requireFileEditApproval ? "edits ask" : "edits allow";
-  return `${command} · ${edits}`;
 }
 
 function providerApprovalCopy(
@@ -22416,56 +22461,16 @@ function providerApprovalCopy(
   config: GyroConfig,
 ): ApprovalCopy {
   const mode = approvalModeForConfig(config);
-  const backendSummary = approvalBackendSummary(config);
-  const isAnthropic = providerId === "anthropic";
-  const hasWorkspaceBoundary = isAnthropic || providerId === "openai";
-  const autoLabel = hasWorkspaceBoundary ? "Workspace access" : "Provider permissions";
-  const autoDetail = hasWorkspaceBoundary
-    ? "Work in the selected workspace. HTTPS command access requires approval."
-    : "The provider controls its own native tools. Gyro approvals apply to Gyro tools.";
-  const providerTitle =
-    providerId === "anthropic"
-      ? "Anthropic permissions"
-      : providerId === "kimi"
-        ? "Kimi permissions"
-        : providerId === "xai"
-          ? "xAI permissions"
-          : providerId === "gemini"
-            ? "Gemini permissions"
-            : "OpenAI permissions";
-  const base = isAnthropic
-    ? {
-        title: providerTitle,
-        gatedLabel: "Ask for approval",
-        gatedDetail: hasWorkspaceBoundary
-          ? "Ask before commands and file edits in this workspace"
-          : "Ask for actions reported by the provider and through Gyro tools",
-        autoLabel,
-        autoDetail,
-        directLabel: "Full access",
-        directDetail:
-          "Unrestricted file and network access for this chat until you quit Gyro",
-        commandValue: config.requireCommandApproval ? "Ask first" : "Allow",
-        commandDetail: "Claude tool calls use the backend command policy.",
-        editValue: config.requireFileEditApproval ? "Review" : "Auto-accept",
-        editDetail: "Claude edits follow the backend diff policy.",
-      }
-    : {
-        title: providerTitle,
-        gatedLabel: "Ask for approval",
-        gatedDetail: hasWorkspaceBoundary
-          ? "Ask before commands and file edits in this workspace"
-          : "Ask for actions reported by the provider and through Gyro tools",
-        autoLabel,
-        autoDetail,
-        directLabel: "Full access",
-        directDetail:
-          "Unrestricted file and network access for this chat until you quit Gyro",
-        commandValue: config.requireCommandApproval ? "Ask" : "Allow",
-        commandDetail: "Codex command execution uses the backend policy.",
-        editValue: config.requireFileEditApproval ? "Review" : "Auto-apply",
-        editDetail: "Codex file edits follow the backend diff policy.",
-      };
+  const details = providerApprovalDetails(providerId);
+  const base = {
+    gatedLabel: APPROVAL_MODE_LABELS.gated,
+    gatedDetail: details.gated,
+    autoLabel: APPROVAL_MODE_LABELS.auto,
+    autoDetail: details.auto,
+    directLabel: APPROVAL_MODE_LABELS.direct,
+    directDetail:
+      "Unrestricted file and network access for this chat until you quit Gyro",
+  };
 
   return {
     ...base,
@@ -22477,7 +22482,6 @@ function providerApprovalCopy(
           : mode === "custom"
             ? "Custom permissions"
             : base.gatedLabel,
-    settingsDetail: `Backend: ${backendSummary}`,
   };
 }
 

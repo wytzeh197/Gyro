@@ -143,7 +143,7 @@ fn create_file_mutation_proposal_with_base(
         base_exists,
         !apply_immediately,
     )?;
-    // Full access authorizes this write, but it still goes through the same
+    // Full Access authorizes this write, but it still goes through the same
     // hash guard, atomic replacement and durable decision as a reviewed edit.
     // Do not emit a pending approval for an already authorized operation.
     if apply_immediately {

@@ -670,7 +670,7 @@ pub(crate) fn handle_desktop_provider_approval_request(
         config.require_file_edit_approval,
     );
     // Claude `auto` already approved the safe set. A prompt that still arrives
-    // is outside that set, so Approve for me asks instead of allowing it.
+    // is outside that set, so Approve for Me asks instead of allowing it.
     let required = if posture == gyro_core::ApprovalPosture::ApproveForMe
         && gyro_core::approve_for_me_keeps_escalations("anthropic")
     {

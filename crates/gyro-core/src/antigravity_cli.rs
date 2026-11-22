@@ -68,7 +68,7 @@ impl AntigravityMode {
 /// Translate Gyro's approval posture into the CLI's launch flags.
 ///
 /// A headless run has no channel for a per-call approval prompt, so Gyro cannot
-/// forward an "ask me first" dialog. Full access maps to the CLI's documented
+/// forward an "ask me first" dialog. Full Access maps to the CLI's documented
 /// `--dangerously-skip-permissions`. Every other posture keeps Google's sandbox
 /// on, which is the containment the CLI offers without a dialog.
 pub fn posture_flags(full_access: bool, mode: AntigravityMode) -> Vec<String> {

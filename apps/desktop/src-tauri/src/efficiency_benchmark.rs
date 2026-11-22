@@ -347,7 +347,7 @@ fn turn_receipt<'a>(
 }
 
 // Simulate the review step only for the benchmark's disposable fixture and
-// declared edit paths. Keep normal app approvals and Full access unchanged.
+// declared edit paths. Keep normal app approvals and Full Access unchanged.
 #[derive(Clone, Copy, Debug, Default)]
 struct FixtureReviews {
     applied: usize,

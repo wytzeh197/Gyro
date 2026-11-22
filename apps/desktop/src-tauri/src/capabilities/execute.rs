@@ -1834,7 +1834,7 @@ fn handle_desktop_provider_capability_request_inner(
                     "Request HTTPS access with a standalone Workspace command.".into(),
                 );
             }
-            // A project grant and Full access cannot skip an explicitly requested one-call network decision.
+            // A project grant and Full Access cannot skip an explicitly requested one-call network decision.
             if access != CapabilityAccess::Deny {
                 access = if network || config.require_command_approval {
                     CapabilityAccess::Ask

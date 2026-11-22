@@ -10332,7 +10332,7 @@ export function App() {
       const changeFullAccess = async (enabled: boolean) => {
         const session = sessions.find((entry) => entry.id === permissionSessionId);
         if (!session || !isTauriRuntime()) {
-          if (enabled) notify("terminal", "Open a chat first", "Full access applies to one saved chat.");
+          if (enabled) notify("terminal", "Open a chat first", "Full Access applies to one saved chat.");
           return false;
         }
         try {
@@ -10348,10 +10348,10 @@ export function App() {
               providerLabel: string;
             }>("get_chat_full_access_scope", { sessionId: session.id });
             const confirmed = await askConfirmation({
-              title: "Enable Full access for this chat?",
+              title: "Enable Full Access for this chat?",
               message: `${providerLabel} can run commands, edit files outside the workspace, and use the network without the usual approvals. This applies to this chat until you quit Gyro.`,
               detail: { label: "Workspace", value: binding.workspace },
-              confirmLabel: "Enable Full access",
+              confirmLabel: "Enable Full Access",
               tone: "permission",
             });
             if (!confirmed) return false;

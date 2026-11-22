@@ -51,7 +51,7 @@ pub fn format_acp_program_args(
         // `auto` lets routine local work through and still asks Gyro about the
         // rest. `bypassPermissions` is always-approve. The sandbox is
         // process-wide: workspace keeps writes in the project, `off` is the
-        // unrestricted Full access profile.
+        // unrestricted Full Access profile.
         crate::provider_permissions::ApprovalPosture::Ask => ("default", "workspace"),
         crate::provider_permissions::ApprovalPosture::ApproveForMe => ("auto", "workspace"),
         crate::provider_permissions::ApprovalPosture::FullAccess => ("bypassPermissions", "off"),

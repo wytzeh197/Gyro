@@ -7906,11 +7906,19 @@ expect(
   "Light-mode composer popovers should keep labels, icons, details, and hover states comfortably readable.",
 );
 expect(
-  sourceIncludes(surfaceSource, "OpenAI permissions") &&
-    sourceIncludes(surfaceSource, "Anthropic permissions") &&
-    sourceIncludes(surfaceSource, 'gatedLabel: "Ask for approval"') &&
-    sourceIncludes(surfaceSource, 'autoLabel = hasWorkspaceBoundary ? "Workspace access" : "Provider permissions"') &&
-    sourceIncludes(surfaceSource, 'directLabel: "Full access"') &&
+  sourceIncludes(surfaceSource, 'gated: "Ask for Approval"') &&
+    sourceIncludes(surfaceSource, 'auto: "Approve for Me"') &&
+    sourceIncludes(surfaceSource, 'direct: "Full Access"') &&
+    sourceIncludes(surfaceSource, "gatedLabel: APPROVAL_MODE_LABELS.gated") &&
+    sourceIncludes(surfaceSource, "autoLabel: APPROVAL_MODE_LABELS.auto") &&
+    sourceIncludes(surfaceSource, "directLabel: APPROVAL_MODE_LABELS.direct") &&
+    sourceIncludes(surfaceSource, "function providerApprovalDetails(") &&
+    !sourceIncludes(surfaceSource, "OpenAI permissions") &&
+    !sourceIncludes(surfaceSource, '"Workspace access"') &&
+    !sourceIncludes(surfaceSource, '"Provider permissions"') &&
+    ["openai", "anthropic", "xai", "kimi", "gemini", "cursor", "antigravity", "opencode"].every(
+      (providerId) => sourceIncludes(surfaceSource, `case "${providerId}":`),
+    ) &&
     sourceIncludes(surfaceSource, "detail: approvalCopy.gatedDetail") &&
     sourceIncludes(surfaceSource, "detail: approvalCopy.autoDetail") &&
     sourceIncludes(surfaceSource, "detail: approvalCopy.directDetail") &&

@@ -20,7 +20,7 @@ as disabled library entries. There are no loops, remote includes or evaluation.
 
 **Setup and run** requires explicit provider/model bindings and access ceilings.
 CLI roles keep CLI authentication; API roles use configured API billing. The
-recipe cannot grant Full access. Review/extraction roles currently support only
+recipe cannot grant Full Access. Review/extraction roles currently support only
 API/Ollama adapters with a no-tool path. Task bindings preserve argv boundaries,
 working-directory identity and manifest fingerprints; changed manifests require
 inspection and rebinding. Native capability policy, approvals, sandbox,

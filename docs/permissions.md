@@ -1,19 +1,35 @@
 # Chat permissions
 
-A new installation starts in **Ask for approval**. The approval preference applies
+A new installation starts in **Ask for Approval**. The approval preference applies
 to ordinary chat turns. The composer shows the permissions for the selected
 provider and workspace. Plan, Council, and unattended runs retain their own
 limits.
 
 | Mode | Behavior |
 | --- | --- |
-| Ask for approval | Review commands and edits before they run on the bounded Codex and Claude desktop routes. Other providers can request approval for the actions they report to Gyro. |
-| Workspace access | Routine commands and edits can run in the selected workspace on the bounded Codex and Claude desktop routes. Commands that need outside HTTPS destinations require one-invocation approval. |
-| Provider permissions | On other routes, native tool limits depend on the provider. Gyro mediates its own tools. |
-| Full access | Explicitly grant broader file and network access to a saved chat until Gyro quits. Changing the workspace or provider ends the grant. New chats begin with the regular approval preference. |
+| Ask for Approval | Review commands and edits before they run. Antigravity cannot ask per tool, so it runs read-only Plan mode instead. |
+| Approve for Me | Routine work runs without prompts; riskier actions still ask. What counts as routine depends on the provider (see below). |
+| Full Access | Explicitly grant broader file and network access to a saved chat until Gyro quits. Changing the workspace or provider ends the grant. New chats begin with the regular approval preference. |
 
-Upgrading from a configuration with global Full access restores **Ask for
-approval**. The chat grant is held in memory. Queued submissions and recovered
+Approve for Me by provider:
+
+| Provider | What runs without prompts | What still asks |
+| --- | --- | --- |
+| Codex | Commands and edits in the `workspace-write` sandbox | Edits outside the project ask; commands that leave the sandbox are blocked |
+| Claude | Claude's `auto` permission mode | Anything outside auto mode |
+| Grok | `auto` mode in the workspace sandbox | Anything Grok escalates |
+| Kimi | Ordinary tool calls (`--yolo`) | Anything Kimi escalates |
+| Gemini | Edits (`auto_edit`) inside `--sandbox`; Gyro approves Gemini's other tool requests | Nothing native; Gyro tools follow project policy |
+| Cursor | Tools inside Cursor's sandbox; Gyro approves its requests | Nothing native; Gyro tools follow project policy |
+| Antigravity | Edits (`accept-edits`) in Google's sandbox | Shell commands the CLI soft-denies |
+| OpenCode | Gyro answers OpenCode's permission requests | Gyro tools that the project policy marks Ask |
+| Ollama, DeepSeek, Mistral, OpenRouter, custom | Bounded workspace commands through Gyro | HTTPS commands, terminals, tasks, and file edits (edits go to review) |
+
+On every provider, HTTPS commands still need one-invocation approval, and
+Gyro's own tools follow the project's capability policy.
+
+Upgrading from a configuration with global Full Access restores **Ask for
+Approval**. The chat grant is held in memory. Queued submissions and recovered
 turns re-enter under the regular permissions.
 
 ## Workspace commands

@@ -82,7 +82,7 @@ pub fn claude_chat_args(
             args.push(capability_tools);
         }
     } else if permission_mcp_config.is_some() && posture != crate::ApprovalPosture::FullAccess {
-        // Ask is `manual`. Approve for me is `auto`: Claude lets the safe set
+        // Ask is `manual`. Approve for Me is `auto`: Claude lets the safe set
         // through and asks Gyro about the rest.
         args.extend([
             "--permission-prompt-tool".into(),

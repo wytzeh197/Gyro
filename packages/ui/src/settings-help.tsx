@@ -40,17 +40,17 @@ const helpArticleGroups: { label: string; articles: HelpArticle[] }[] = [
     label: "Permissions and approvals",
     articles: [
       {
-        title: "What does Ask for approval allow?",
+        title: "What does Ask for Approval allow?",
         answer:
           "The agent asks before commands and file edits. Review approval requests in the chat before allowing the action.",
       },
       {
-        title: "What does Approve for me allow?",
+        title: "What does Approve for Me allow?",
         answer:
-          "Runs commands and edits without asking each time. With OpenAI, the project sandbox remains in place: network access, writes outside the project, or restricted tools can still require approval. Other providers follow their own permission boundaries, and separate Gyro tool permissions can still require approval.",
+          "Lets routine work run without asking each time, while riskier actions still ask. Codex stays in the project sandbox: commands that leave it are blocked and edits outside it still ask. Claude uses its auto mode, and Grok and Kimi approve their routine calls; anything they escalate still asks. Gemini, Cursor, and Antigravity work inside their sandboxes, and Gyro approves Gemini's, Cursor's, and OpenCode's requests for you. Ollama and the other API providers run workspace commands freely, but HTTPS commands, terminals, and file edits still ask or go to review.",
       },
       {
-        title: "What does Full access allow?",
+        title: "What does Full Access allow?",
         answer:
           "Unrestricted access to the internet and any file on your computer. Allows commands and edits without the usual approval gates and bypasses the provider sandbox where supported. Choose this only for work you trust to run with that access.",
       },

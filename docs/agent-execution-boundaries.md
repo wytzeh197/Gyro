@@ -9,13 +9,13 @@ separate controls. A worktree provides a separate checkout, not process isolatio
 
 | Execution path | What Gyro controls | Limit |
 | --- | --- | --- |
-| Codex app-server | `codex_app_server_policy` requests read-only or workspace-write with network access disabled; explicit Full access can select danger-full-access. | Bounded desktop command escalation is declined. In Ask mode Codex uses the Gyro command broker. The provider enforces its native sandbox. |
-| Codex exec fallback | `codex_chat_args` selects read-only, including resumed runs; explicit Full access can bypass approvals and sandboxing. | Provider-native tools and Gyro capabilities use different execution paths. |
-| Claude CLI | Bounded desktop Claude uses restricted native read tools and the Gyro tool broker for commands and edits. Explicit chat Full access can enable unrestricted native tools. | The installed Claude CLI must support restricted mode. Standalone CLI runners use their own provider configuration. |
+| Codex app-server | `codex_app_server_policy` requests read-only or workspace-write with network access disabled; explicit Full Access can select danger-full-access. | Bounded desktop command escalation is declined. In Ask mode Codex uses the Gyro command broker. The provider enforces its native sandbox. |
+| Codex exec fallback | `codex_chat_args` selects read-only, including resumed runs; explicit Full Access can bypass approvals and sandboxing. | Provider-native tools and Gyro capabilities use different execution paths. |
+| Claude CLI | Bounded desktop Claude uses restricted native read tools and the Gyro tool broker for commands and edits. Explicit chat Full Access can enable unrestricted native tools. | The installed Claude CLI must support restricted mode. Standalone CLI runners use their own provider configuration. |
 | ACP providers | `run_kimi_acp_chat` passes workspace, mode, per-provider credential policy, and approval handling; `KimiAcpConnection::start` launches the provider process. | ACP permission requests depend on provider behavior. Gyro does not add an OS sandbox around this shared ACP launcher. |
 | Direct API / Ollama | Model-requested Gyro tools cross the capability broker, including policy, approval, ownership checks, and recorded results. API keys are used by the host-side runner. | A tool's own execution path determines its confinement; the broker is not an OS sandbox. |
-| Model terminal / background workspace task | The broker binds the PTY to its authoritative workspace, filters credentials, and selects the macOS workspace filesystem policy unless explicit Full access applies. Restart retains confinement, rechecks Full access, and gets fresh scratch space. | Bounded commands block outbound access; approved foreground commands may use a command-scoped public HTTPS proxy. Sandbox setup failure is returned to the caller. |
-| Foreground model workspace task/test | The broker approves execution and revalidates the owning workspace. `run_model_task_output_with_cancellation` applies the same credential filtering and macOS filesystem policy as model terminals. | Explicit Full access can bypass the filesystem policy. Cancellation and output bounds still apply. |
+| Model terminal / background workspace task | The broker binds the PTY to its authoritative workspace, filters credentials, and selects the macOS workspace filesystem policy unless explicit Full Access applies. Restart retains confinement, rechecks Full Access, and gets fresh scratch space. | Bounded commands block outbound access; approved foreground commands may use a command-scoped public HTTPS proxy. Sandbox setup failure is returned to the caller. |
+| Foreground model workspace task/test | The broker approves execution and revalidates the owning workspace. `run_model_task_output_with_cancellation` applies the same credential filtering and macOS filesystem policy as model terminals. | Explicit Full Access can bypass the filesystem policy. Cancellation and output bounds still apply. |
 | Human terminal / governed provider CLI pane | Human terminal launch behavior remains unchanged. Governed CLI panes receive Gyro's provider approval bridge. | These panes retain their environment; the model-command credential policy is not inferred from a pane name or renderer input. |
 
 Sources: desktop [provider dispatch, launch arguments, policy, and capability
@@ -64,13 +64,13 @@ network traffic.
 ## macOS workspace filesystem policy
 
 For Gyro-owned model commands, the backend selects `workspace-filesystem` unless
-all three existing Full access conditions hold: unrestricted normal-run settings,
+all three existing Full Access conditions hold: unrestricted normal-run settings,
 Normal mode, and the delegated child's permission ceiling. The renderer cannot
 select or override the policy. A model-terminal restart rechecks current Full
 access settings and the child ceiling; it can tighten a pane but cannot
 automatically upgrade a confined pane. An already running process retains its
 original boundary. Human terminals and provider CLI launchers retain
-their existing behavior. Credential filtering applies even with Full access.
+their existing behavior. Credential filtering applies even with Full Access.
 
 The [profile](../crates/gyro-core/src/workspace_sandbox.sbpl) denies operations by
 default and grants the process operations needed for child commands, PTYs,
@@ -113,7 +113,7 @@ passed acceptance.
 
 Build tools that require writes outside the workspace/scratch or protected Git
 metadata can fail under this policy. Approval of an individual command does not
-silently relax the filesystem boundary. Full access is the existing explicit
+silently relax the filesystem boundary. Full Access is the existing explicit
 unrestricted mode. This boundary is not a VM, a separate user, complete host
 isolation, or a replacement for provider-native sandboxing.
 
@@ -127,7 +127,7 @@ isolation, or a replacement for provider-native sandboxing.
 - `cargo test -p gyro-desktop --locked --lib command_execution::tests -- --nocapture`:
   10 passed; one ignored credential-fixture entrypoint is invoked by its parent
   tests. Includes real foreground commands and PTYs, restart policy tightening,
-  failed refresh/preparation, Full access, and scratch cleanup.
+  failed refresh/preparation, Full Access, and scratch cleanup.
 - `cargo test -p gyro-desktop --locked --lib terminal_process::tests -- --nocapture`:
   all 6 existing terminal lifecycle tests passed.
 - `cargo check -p gyro-desktop --locked` passed with 10 existing warnings.

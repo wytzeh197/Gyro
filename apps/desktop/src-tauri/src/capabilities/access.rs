@@ -576,7 +576,7 @@ pub(crate) fn capability_access_with_full_access(
     full_access: bool,
 ) -> CapabilityAccess {
     // The composer permission mode is authoritative for normal runs. Plan and
-    // Council retain their read-only/advisory contract even with Full access.
+    // Council retain their read-only/advisory contract even with Full Access.
     if full_access && bound.policy.mode == CapabilityRunMode::Normal {
         return CapabilityAccess::Allow;
     }

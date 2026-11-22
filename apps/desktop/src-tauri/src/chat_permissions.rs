@@ -26,7 +26,7 @@ impl ChatBinding {
             provider: session
                 .provider_id
                 .clone()
-                .ok_or_else(|| "Choose a provider before enabling Full access.".to_string())?,
+                .ok_or_else(|| "Choose a provider before enabling Full Access.".to_string())?,
             workspace: session_execution_workspace(session, paths)?,
             workspace_revision: session.workspace_identity.revision,
         })
@@ -45,7 +45,7 @@ fn read_local_chat(store: &SessionStore, id: Uuid) -> Result<Session, String> {
         .get_session(id)
         .map_err(to_string)?
         .filter(|session| session.parent_session_id.is_none())
-        .ok_or_else(|| "Full access requires a local chat.".to_string())
+        .ok_or_else(|| "Full Access requires a local chat.".to_string())
 }
 
 #[derive(Default)]
@@ -167,13 +167,13 @@ pub(crate) async fn set_chat_full_access(
         return Ok(false);
     }
     let confirmed_binding =
-        confirmed_binding.ok_or_else(|| "Review Full access before enabling it.".to_string())?;
+        confirmed_binding.ok_or_else(|| "Review Full Access before enabling it.".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let store = open_store()?;
         let manager = app.state::<ProviderCancellationManager>();
         let runs = manager.flags.lock().map_err(to_string)?;
         if runs.contains_key(&session_id.to_string()) {
-            return Err("Stop the active response before enabling Full access.".into());
+            return Err("Stop the active response before enabling Full Access.".into());
         }
         let binding = ChatBinding::read(&read_local_chat(&store, session_id)?, store.paths())?;
         if binding != confirmed_binding {

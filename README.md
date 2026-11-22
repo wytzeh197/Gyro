@@ -42,7 +42,7 @@ Type `/open` at the chat prompt to open that session in Gyro.app. To continue th
 | Local model            | Connect Ollama on your Mac and select an installed model. Tool support depends on the model. [Ollama setup](docs/local-models.md)                                                                                                                    |
 | API key · experimental | Choose DeepSeek, Mistral, or OpenRouter, or configure a custom OpenAI-compatible endpoint. [API provider setup](docs/api-key-providers.md)                                                                                                           |
 
-Sessions and workspace settings live on your Mac. Gyro saves new API keys in macOS Keychain. When you use a hosted model, its provider receives the prompt and any files or tool output included as context. New installations start in **Ask for approval**. [Permission modes](docs/permissions.md)
+Sessions and workspace settings live on your Mac. Gyro saves new API keys in macOS Keychain. When you use a hosted model, its provider receives the prompt and any files or tool output included as context. New installations start in **Ask for Approval**. [Permission modes](docs/permissions.md)
 
 ## Work across sessions
 

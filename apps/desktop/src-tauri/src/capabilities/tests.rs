@@ -31,7 +31,7 @@ fn semantic_permission_revocation_during_another_approval_prevents_dispatch() {
             Some(revoked),
             "revoking {revoked:?} during any approval must prevent language-server dispatch"
         );
-        // Full access keeps its existing explicit Normal-mode override.
+        // Full Access keeps its existing explicit Normal-mode override.
         assert_eq!(
             capability_denied_permission(&bound, &current, &classes, "path", ".env", true),
             None

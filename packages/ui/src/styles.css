@@ -25758,7 +25758,7 @@ textarea:focus-visible,
   white-space: nowrap;
 }
 
-/* Full access reads orange in the composer, distinct from amber warnings. */
+/* Full Access reads orange in the composer, distinct from amber warnings. */
 
 /* VS Code's sync badge: the drift counts ride inside the push and pull
    buttons, so the press and the amount it moves are one control. */

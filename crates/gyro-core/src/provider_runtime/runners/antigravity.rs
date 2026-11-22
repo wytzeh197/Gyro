@@ -66,7 +66,7 @@ pub fn run_antigravity_chat(
             id: "antigravity-read-only".into(),
             kind: "tool".into(),
             label: "Antigravity is planning with read-only access".into(),
-            detail: Some("Antigravity cannot show per-tool approval dialogs. Choose Approve for me to allow workspace edits, or Full access for unrestricted tools.".into()),
+            detail: Some("Antigravity cannot show per-tool approval dialogs. Choose Approve for Me to allow workspace edits, or Full Access for unrestricted tools.".into()),
             file_counts: None,
             note: None,
             status: "completed".into(),

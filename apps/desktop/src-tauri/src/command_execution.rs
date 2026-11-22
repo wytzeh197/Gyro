@@ -92,7 +92,7 @@ impl ModelCommandBoundary {
         model_command_policy_summary(self.policy_name())
     }
 
-    /// Restart can tighten a Full access pane but never silently upgrade an
+    /// Restart can tighten a Full Access pane but never silently upgrade an
     /// existing confined pane or move its trusted workspace root.
     pub(super) fn tighten_for_restart(&mut self, current: Self) {
         if matches!(self, Self::Unrestricted) {
@@ -104,7 +104,7 @@ impl ModelCommandBoundary {
 pub(super) fn model_command_policy_summary(policy: &str) -> &'static str {
     match policy {
         "workspace-filesystem" => "workspace filesystem policy; outbound network blocked",
-        "unrestricted" => "Full access",
+        "unrestricted" => "Full Access",
         _ => "unknown execution policy",
     }
 }

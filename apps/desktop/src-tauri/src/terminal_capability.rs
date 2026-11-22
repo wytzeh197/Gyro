@@ -248,7 +248,7 @@ pub(super) fn execute(
             pane.execution_policy != "unrestricted"
                 || (bound.policy.mode == gyro_core::CapabilityRunMode::Normal
                     && config.full_access),
-            "This terminal has Full access. Open a bounded terminal for this turn."
+            "This terminal has Full Access. Open a bounded terminal for this turn."
         );
         let input = terminal_input_bytes(arguments)?;
         let wait = terminal_wait::initial_timeout(arguments)?;

@@ -389,7 +389,7 @@ impl ProjectCapabilityPolicy {
         classes.insert(CapabilityClass::WorkspaceOpen, CapabilityAccess::Ask);
         // A sub-agent spends the user's provider budget, so it is a decision
         // rather than a silent call by default. The desktop permission mode
-        // skips the prompt in Full Access or Approve for me within its ceiling.
+        // skips the prompt in Full Access or Approve for Me within its ceiling.
         classes.insert(CapabilityClass::AgentRun, CapabilityAccess::Ask);
         classes.insert(CapabilityClass::IdeReveal, CapabilityAccess::Allow);
         classes.insert(CapabilityClass::TerminalExecute, CapabilityAccess::Ask);
@@ -833,7 +833,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceProposeEdit,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Submit a hash-guarded file edit in Gyro Workspace. Full access applies it immediately through the guarded transaction; otherwise it creates a proposal for review. Read existing files first and supply expectedHash. Check the returned status before claiming the edit was applied.",
+        description: "Submit a hash-guarded file edit in Gyro Workspace. Full Access (and Approve for Me on Codex and Claude) applies it immediately through the guarded transaction; otherwise it creates a proposal for review. Read existing files first and supply expectedHash. Check the returned status before claiming the edit was applied.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceEdit,
