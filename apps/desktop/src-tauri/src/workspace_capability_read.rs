@@ -1,6 +1,7 @@
 //! Workspace reads honor their advertised ranges and the serialized tool budget.
 use super::*;
 use serde_json::{json, Value};
+use std::io::{self, Write};
 
 pub(super) fn execute(
     app: &tauri::AppHandle,
@@ -437,85 +438,169 @@ fn utf16_offset(line: &str, column: usize) -> anyhow::Result<usize> {
 fn continuation(content: &str, line: u64, column: u64) -> (u64, u64) {
     let newlines = content.bytes().filter(|b| *b == b'\n').count() as u64;
     if newlines == 0 {
-        (line, column + content.encode_utf16().count() as u64)
+        (line, column + utf16_units(content))
     } else {
         (
             line + newlines,
-            content
-                .rsplit('\n')
-                .next()
-                .unwrap_or("")
-                .encode_utf16()
-                .count() as u64
-                + 1,
+            utf16_units(content.rsplit('\n').next().unwrap_or("")) + 1,
         )
     }
+}
+
+/// UTF-16 length used as an editor column delta.
+///
+/// Source text is usually ASCII, where the byte length is the UTF-16 length.
+/// A minified line is scanned once per budget probe, so the ASCII case should
+/// not decode every byte.
+fn utf16_units(text: &str) -> u64 {
+    if text.is_ascii() {
+        text.len() as u64
+    } else {
+        text.encode_utf16().count() as u64
+    }
+}
+
+/// Compact JSON length of one string, including the surrounding quotes.
+///
+/// Matches `serde_json`'s compact encoding: `"`, `\`, and the short controls
+/// take two bytes; other bytes below 0x20 take `\u00XX`; everything else,
+/// including non-ASCII UTF-8, is written unchanged.
+fn json_string_encoded_len(text: &str) -> usize {
+    let mut len = 2;
+    for &byte in text.as_bytes() {
+        len += match byte {
+            0x08 | 0x09 | 0x0A | 0x0C | 0x0D | b'"' | b'\\' => 2,
+            0x00..=0x1F => 6,
+            _ => 1,
+        };
+    }
+    len
+}
+
+fn json_byte_len(value: &Value) -> anyhow::Result<usize> {
+    struct ByteCounter(usize);
+
+    impl Write for ByteCounter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0 = self.0.saturating_add(buf.len());
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut counter = ByteCounter(0);
+    serde_json::to_writer(&mut counter, value)?;
+    Ok(counter.0)
+}
+
+/// `shell["content"]` must be `""`. The returned length is the compact JSON
+/// size of that object with `content` replaced by `content`.
+fn payload_len(shell: &Value, content: &str) -> anyhow::Result<usize> {
+    debug_assert_eq!(shell.get("content").and_then(Value::as_str), Some(""));
+    let shell_len = json_byte_len(shell)?;
+    Ok(shell_len - json_string_encoded_len("") + json_string_encoded_len(content))
 }
 
 fn bound_read_result(mut data: Value, max_bytes: usize) -> anyhow::Result<Value> {
     // A shorter redaction marker would shift continuation columns and can
     // skip source characters on the next chunk. Mask while preserving positions
-    // and redact the remaining metadata separately.
-    let raw = data
-        .as_object_mut()
-        .and_then(|object| object.remove("content"))
-        .and_then(|value| value.as_str().map(str::to_owned))
-        .unwrap_or_default();
-    let masked = gyro_core::security::redact_secrets_preserving_positions(&raw);
+    // and redact the remaining metadata separately. Own the string once: the
+    // unmasked copy dies with this block instead of sitting beside the page.
+    let (masked, redacted) = {
+        let raw = match data
+            .as_object_mut()
+            .and_then(|object| object.remove("content"))
+        {
+            Some(Value::String(text)) => text,
+            _ => String::new(),
+        };
+        let masked = gyro_core::security::redact_secrets_preserving_positions(&raw);
+        let redacted = masked != raw;
+        (masked, redacted)
+    };
     data = redact_json_strings(data);
-    if masked != raw {
+    if redacted {
         data["redacted"] = json!(true);
     }
-    data["content"] = json!(masked);
-    let full = data["content"].as_str().unwrap_or("");
-    let full_len = full.len();
+    let full_len = masked.len();
     // The serialized payload is never smaller than its text, so text past the
     // result budget can never fit. Cutting it first keeps the boundary search
-    // below from indexing every character of a 64 MB minified line.
+    // below from walking a 64 MB minified line.
     let mut cap = full_len.min(max_bytes);
-    while !full.is_char_boundary(cap) {
+    while !masked.is_char_boundary(cap) {
         cap -= 1;
     }
-    let content = full[..cap].to_owned();
+    let content = if cap == masked.len() {
+        masked
+    } else {
+        masked[..cap].to_owned()
+    };
     let already_truncated = data["truncated"].as_bool().unwrap_or(false);
     let line = data["line"].as_u64().unwrap_or(1);
     let column = data["column"].as_u64().unwrap_or(1);
-    let update = |data: &mut Value, end: usize| {
-        let text = &content[..end];
+    // Probes price the content string in place. Copying it into the object
+    // and encoding that object retained a fresh page on every step.
+    data["content"] = json!("");
+    let apply_window = |data: &mut Value, end: usize| {
         let truncated = already_truncated || end < full_len;
-        data["content"] = json!(text);
         data["truncated"] = json!(truncated);
         if truncated {
-            let (next_line, next_column) = continuation(text, line, column);
+            let (next_line, next_column) = continuation(&content[..end], line, column);
             data["nextLine"] = json!(next_line);
             data["nextColumn"] = json!(next_column);
         }
     };
-    update(&mut data, content.len());
-    if serde_json::to_vec(&data)?.len() <= max_bytes {
+    let encoded_len = |data: &Value, end: usize| payload_len(data, &content[..end]);
+    apply_window(&mut data, content.len());
+    if encoded_len(&data, content.len())? <= max_bytes {
+        data["content"] = json!(&content[..]);
         return Ok(data);
     }
-    // Search UTF-8 boundaries using the serialized payload, including escaping
-    // and metadata. This keeps the shared capability validator strict.
-    let boundaries: Vec<_> = content
-        .char_indices()
-        .map(|(i, _)| i)
-        .chain(std::iter::once(content.len()))
-        .collect();
-    let (mut low, mut high) = (0, boundaries.len() - 1);
+    // ASCII character boundaries are the byte offsets, so a source file does
+    // not need an index. Non-ASCII still records scalar boundaries. The
+    // measured length includes escaping and metadata, which is what the
+    // capability validator checks.
+    let boundaries = if content.is_ascii() {
+        None
+    } else {
+        Some(
+            content
+                .char_indices()
+                .map(|(index, _)| index)
+                .chain(std::iter::once(content.len()))
+                .collect::<Vec<_>>(),
+        )
+    };
+    let last = boundaries
+        .as_ref()
+        .map(|bounds| bounds.len() - 1)
+        .unwrap_or(content.len());
+    let boundary_at = |index: usize| {
+        boundaries
+            .as_ref()
+            .map(|bounds| bounds[index])
+            .unwrap_or(index)
+    };
+    let (mut low, mut high) = (0, last);
     while low < high {
         let mid = low + (high - low).div_ceil(2);
-        update(&mut data, boundaries[mid]);
-        if serde_json::to_vec(&data)?.len() <= max_bytes {
+        let end = boundary_at(mid);
+        apply_window(&mut data, end);
+        if encoded_len(&data, end)? <= max_bytes {
             low = mid;
         } else {
             high = mid - 1;
         }
     }
-    update(&mut data, boundaries[low]);
-    if serde_json::to_vec(&data)?.len() > max_bytes {
+    let end = boundary_at(low);
+    apply_window(&mut data, end);
+    if encoded_len(&data, end)? > max_bytes {
         anyhow::bail!("Workspace read metadata exceeds maxBytes; increase the byte budget");
     }
+    data["content"] = json!(&content[..end]);
     gyro_core::validate_capability_result_data(data)
 }
 
@@ -819,5 +904,59 @@ mod tests {
         let continued = select_safe_range(&text, &arguments).unwrap();
         assert_eq!(continued["content"], "*".repeat(10));
         assert_eq!(continued["redacted"], true);
+    }
+
+    #[test]
+    fn read_window_measurement_matches_compact_json() {
+        let long = "x".repeat(200);
+        let samples = [
+            "",
+            "abc",
+            "a\"b\\c",
+            "line\n\t\r\u{0008}",
+            "\u{0001}é🦀",
+            long.as_str(),
+        ];
+        for content in samples {
+            let mut shell = json!({
+                "path": "a.ts",
+                "content": "",
+                "line": 1,
+                "truncated": true,
+                "nextLine": 12,
+                "nextColumn": 34
+            });
+            let measured = payload_len(&shell, content).unwrap();
+            shell["content"] = json!(content);
+            assert_eq!(
+                measured,
+                serde_json::to_vec(&shell).unwrap().len(),
+                "{content:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn bounded_ascii_and_escaped_reads_keep_the_longest_fitting_prefix() {
+        for text in ["a\"b\\".repeat(2_000), "é\"".repeat(2_000)] {
+            let budget = 900;
+            let result = bound_read_result(
+                json!({"path":"a.ts","content":text,"line":1,"column":1,"truncated":false}),
+                budget,
+            )
+            .unwrap();
+            assert!(serde_json::to_vec(&result).unwrap().len() <= budget);
+            let kept = result["content"].as_str().unwrap();
+            assert!(kept.len() < text.len());
+            let mut extended = kept.to_owned();
+            extended.push(text[kept.len()..].chars().next().unwrap());
+            let mut longer = result.clone();
+            longer["content"] = json!(extended);
+            let (next_line, next_column) = continuation(&extended, 1, 1);
+            longer["nextLine"] = json!(next_line);
+            longer["nextColumn"] = json!(next_column);
+            longer["truncated"] = json!(true);
+            assert!(serde_json::to_vec(&longer).unwrap().len() > budget);
+        }
     }
 }
