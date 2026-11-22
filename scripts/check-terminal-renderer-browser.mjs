@@ -103,6 +103,34 @@ try {
     () => evaluate("window.terminalFixture?.events.sizes.length > 0"),
     "terminal mount",
   );
+  await evaluate(`(() => {
+    const output = 'old line\\r\\nanchor-é\\r\\n';
+    window.terminalFixture.pane({
+      output,
+      outputCursor: { generation: 'cursor-fixture', start: 0, end: new TextEncoder().encode(output).length },
+    });
+  })()`);
+  const rows = () =>
+    evaluate("document.querySelector('.xterm-rows')?.textContent ?? ''");
+  await until(async () => (await rows()).includes("anchor-é"), "initial output");
+  await evaluate(`(() => {
+    const output = 'anchor-é\\r\\nnew suffix 😀';
+    const start = new TextEncoder().encode('old line\\r\\n').length;
+    window.terminalFixture.pane({
+      output,
+      outputCursor: { generation: 'cursor-fixture', start, end: start + new TextEncoder().encode(output).length },
+    });
+  })()`);
+  await until(async () => (await rows()).includes("new suffix 😀"), "cursor append");
+  assert.equal((await rows()).split("anchor-é").length, 2, "overlapping output renders once");
+  assert.ok((await rows()).includes("old line"), "rollover does not reset the renderer");
+  await evaluate(`window.terminalFixture.pane({
+    output: 'replacement run',
+    outputCursor: { generation: 'cursor-replacement', start: 0, end: 15 },
+  })`);
+  await until(async () => (await rows()).includes("replacement run"), "cursor restart");
+  assert.ok(!(await rows()).includes("anchor-é"), "a new generation resets the renderer");
+  await evaluate("window.terminalFixture.pane({outputCursor:undefined})");
   await pause(500);
   assert.equal(
     await evaluate("window.terminalFixture.events.rejectedResizes"),

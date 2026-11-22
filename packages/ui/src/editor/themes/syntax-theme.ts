@@ -179,8 +179,8 @@ const families: Record<string, readonly TokenRole[]> = {
 const palettes = {
   dark: {
     foreground: "D7D9DE",
-    comment: "9099A5",
-    keyword: "C58AFF",
+    comment: "A7AFBB",
+    keyword: "CE9CFF",
     type: "F0CB6C",
     function: "66B1FF",
     string: "75D69F",
@@ -189,21 +189,21 @@ const palettes = {
     accent: "45D5E5",
     warm: "F2BB6D",
     muted: "A3AAB5",
-    invalid: "FF7789",
+    invalid: "FF8995",
   },
   light: {
     foreground: "24272D",
-    comment: "626B76",
+    comment: "555E6A",
     keyword: "8C2BD6",
     type: "835500",
     function: "0D5DCC",
     string: "15723D",
-    number: "A74B00",
+    number: "984400",
     property: "BD254B",
-    accent: "087586",
+    accent: "006675",
     warm: "95530A",
     muted: "57606A",
-    invalid: "CF222E",
+    invalid: "B91C2A",
   },
 };
 export function createSyntaxTheme(mode: "dark" | "light"): GyroSyntaxTheme {

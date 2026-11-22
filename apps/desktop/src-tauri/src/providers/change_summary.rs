@@ -17,50 +17,45 @@ use gyro_core::{
 use serde::Deserialize;
 use std::{
     collections::HashMap,
-    sync::{Arc, LazyLock, Mutex, Weak},
+    sync::{Arc, LazyLock, Mutex, TryLockError, Weak},
 };
 use tauri::Manager;
 use uuid::Uuid;
 
 #[derive(Eq, Hash, PartialEq)]
-struct SummaryBatch {
+struct SummaryKey {
     workspace: String,
-    hashes: Vec<String>,
+    hash: String,
 }
 
-type BatchLocks = Mutex<HashMap<SummaryBatch, Weak<Mutex<()>>>>;
-static BATCH_LOCKS: LazyLock<BatchLocks> = LazyLock::new(Mutex::default);
+type SummaryLocks = Mutex<HashMap<SummaryKey, Weak<Mutex<()>>>>;
+static SUMMARY_LOCKS: LazyLock<SummaryLocks> = LazyLock::new(Mutex::default);
 
-fn batch_lock(workspace: &str, hashes: &[String]) -> Result<Arc<Mutex<()>>, String> {
-    let mut key = SummaryBatch {
-        workspace: workspace.to_string(),
-        hashes: hashes.to_vec(),
-    };
-    key.hashes.sort_unstable();
-    key.hashes.dedup();
-    let mut locks = BATCH_LOCKS.lock().map_err(to_string)?;
+fn summary_locks<'a>(
+    workspace: &str,
+    missing: &'a [(String, String)],
+    requested: &[String],
+) -> Result<Vec<(&'a str, Arc<Mutex<()>>)>, String> {
+    let mut locks = SUMMARY_LOCKS.lock().map_err(to_string)?;
     locks.retain(|_, lock| lock.strong_count() > 0);
-    if let Some(lock) = locks.get(&key).and_then(Weak::upgrade) {
-        return Ok(lock);
+    let mut jobs = Vec::new();
+    for (path, hash) in missing.iter().filter(|(path, _)| requested.contains(path)) {
+        if jobs.iter().any(|(previous, _)| *previous == path) {
+            continue;
+        }
+        let entry = locks.entry(SummaryKey {
+            workspace: workspace.to_string(),
+            hash: hash.clone(),
+        });
+        let lock = entry.or_default();
+        let lock = lock.upgrade().unwrap_or_else(|| {
+            let strong = Arc::new(Mutex::new(()));
+            *lock = Arc::downgrade(&strong);
+            strong
+        });
+        jobs.push((path.as_str(), lock));
     }
-    // A larger batch can satisfy the entire request. Partial matches keep
-    // their own lock so unrelated diffs can still be summarized in parallel.
-    if let Some(lock) = locks
-        .iter()
-        .filter(|(batch, _)| {
-            batch.workspace == key.workspace
-                && key
-                    .hashes
-                    .iter()
-                    .all(|hash| batch.hashes.binary_search(hash).is_ok())
-        })
-        .find_map(|(_, lock)| lock.upgrade())
-    {
-        return Ok(lock);
-    }
-    let lock = Arc::new(Mutex::new(()));
-    locks.insert(key, Arc::downgrade(&lock));
-    Ok(lock)
+    Ok(jobs)
 }
 
 /// What the end-of-turn review card asks for: one plain sentence per file.
@@ -151,31 +146,50 @@ fn summarize_changes(
         .copied()
         .filter(|file| !resolved.contains_key(&file.path))
         .collect();
-    let (mut prompt, mut requested) = build_summary_prompt(pending.iter().copied());
-    if !requested.is_empty() {
-        // Offer only the diffs in this prompt to concurrent readers. Byte
-        // limits may exclude some of the outstanding files from this batch.
-        let prompt_hashes: Vec<_> = missing
-            .iter()
-            .filter(|(path, _)| requested.contains(path))
-            .map(|(_, hash)| hash.clone())
-            .collect();
-        let lock = batch_lock(workspace_key, &prompt_hashes)?;
-        let _batch = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let completed = store
+    let mut summarize = Some(summarize);
+    loop {
+        let (mut prompt, mut requested) = build_summary_prompt(pending.iter().copied());
+        if requested.is_empty() {
+            break;
+        }
+        // Reserve only files the prompt could fit. If another review already
+        // owns some, the remaining files can still be sent without waiting.
+        let locks = summary_locks(workspace_key, &missing, &requested)?;
+        let mut owned = Vec::new();
+        let mut shared = Vec::new();
+        for (path, lock) in &locks {
+            match lock.try_lock() {
+                Ok(guard) => owned.push((*path, guard)),
+                Err(TryLockError::Poisoned(error)) => owned.push((*path, error.into_inner())),
+                Err(TryLockError::WouldBlock) => shared.push(lock),
+            }
+        }
+        let mut completed = store
             .cached_file_change_summaries(workspace_key, &missing)
             .map_err(to_string)?;
+        completed.retain(|summary| !resolved.contains_key(&summary.path));
         if !completed.is_empty() {
+            // A result arrived before we reserved its diff. Repack the prompt
+            // so trailing files can use the newly available space.
             resolved.extend(
                 completed
                     .into_iter()
                     .map(|summary| (summary.path.clone(), summary)),
             );
             pending.retain(|file| !resolved.contains_key(&file.path));
-            (prompt, requested) = build_summary_prompt(pending);
+            continue;
+        }
+        if !shared.is_empty() {
+            (prompt, requested) = build_summary_prompt(
+                pending
+                    .iter()
+                    .copied()
+                    .filter(|file| owned.iter().any(|(path, _)| *path == file.path)),
+            );
         }
         if !requested.is_empty() {
-            match summarize(prompt) {
+            let run = summarize.take().expect("one summary call per review");
+            match run(prompt) {
                 Ok(raw) => {
                     let mut fresh: Vec<FileChangeSummary> = Vec::new();
                     for (path, summary) in parse_summary_response(&raw, &requested) {
@@ -196,6 +210,26 @@ fn summarize_changes(
                 }
                 Err(error) => eprintln!("could not summarize file changes: {error}"),
             }
+        }
+        // Release our diffs before waiting. Two overlapping reviews can each
+        // generate different files and then reuse each other's cached results.
+        drop(owned);
+        if shared.is_empty() {
+            break;
+        }
+        for lock in shared {
+            drop(lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
+        }
+        if summarize.is_none() {
+            match store.cached_file_change_summaries(workspace_key, &missing) {
+                Ok(completed) => resolved.extend(
+                    completed
+                        .into_iter()
+                        .map(|summary| (summary.path.clone(), summary)),
+                ),
+                Err(error) => eprintln!("could not reuse file change summaries: {error}"),
+            }
+            break;
         }
     }
 
@@ -320,6 +354,63 @@ mod tests {
     }
 
     #[test]
+    fn overlapping_reviews_share_the_common_diff_and_send_unique_files_in_parallel() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = gyro_core::GyroPaths::from_base_dir(temp.path().join("data"));
+        let workspace = temp.path().to_str().unwrap();
+        let input = |path: &str| FileChangeInput {
+            path: path.into(),
+            diff: format!("@@\n+change to {path}\n"),
+            additions: 1,
+            deletions: 0,
+        };
+        let first = [input("a.rs"), input("b.rs")];
+        let second = [input("b.rs"), input("c.rs")];
+        let (first_started, first_running) = mpsc::channel();
+        let (second_started, second_running) = mpsc::channel();
+        let (finish_first, first_released) = mpsc::channel();
+        let timeout = Duration::from_secs(5);
+
+        thread::scope(|scope| {
+            let first = scope.spawn(|| {
+                let store = SessionStore::open(paths.clone()).unwrap();
+                summarize_changes(&store, workspace, &first, move |prompt| {
+                    assert!(
+                        prompt.contains("+change to a.rs") && prompt.contains("+change to b.rs")
+                    );
+                    first_started.send(()).unwrap();
+                    first_released.recv_timeout(timeout).unwrap();
+                    Ok(r#"{"a.rs":"Records A.","b.rs":"Records B."}"#.into())
+                })
+                .unwrap()
+            });
+            first_running.recv_timeout(timeout).unwrap();
+
+            let second = scope.spawn(|| {
+                let store = SessionStore::open(paths.clone()).unwrap();
+                summarize_changes(&store, workspace, &second, |prompt| {
+                    assert!(prompt.contains("+change to c.rs"));
+                    assert!(!prompt.contains("b.rs"));
+                    second_started.send(()).unwrap();
+                    Ok(r#"{"c.rs":"Records C."}"#.into())
+                })
+                .unwrap()
+            });
+            second_running.recv_timeout(timeout).unwrap();
+            finish_first.send(()).unwrap();
+            let first = first.join().unwrap();
+            let second = second.join().unwrap();
+            assert_eq!(second.len(), 2);
+            assert_eq!(second[0].content_hash, first[1].content_hash);
+            assert_eq!(second[0].summary, first[1].summary);
+            assert_eq!(second[1].summary, "Records C.");
+            assert!(second
+                .iter()
+                .all(|summary| summary.source == SummarySource::Provider));
+        });
+    }
+
+    #[test]
     fn a_diff_omitted_by_the_prompt_budget_can_be_summarized_concurrently() {
         let temp = tempfile::tempdir().unwrap();
         let paths = gyro_core::GyroPaths::from_base_dir(temp.path().join("data"));
@@ -394,9 +485,14 @@ mod tests {
                 deletions: 0,
             },
         ];
-        let hashes: Vec<_> = files
+        let wanted: Vec<_> = files
             .iter()
-            .map(|file| file_review_content_hash(&file.path, &file.diff))
+            .map(|file| {
+                (
+                    file.path.clone(),
+                    file_review_content_hash(&file.path, &file.diff),
+                )
+            })
             .collect();
         let previous = FileChangeInput {
             path: "previous.rs".into(),
@@ -413,16 +509,24 @@ mod tests {
         store
             .store_file_change_summaries(workspace, std::slice::from_ref(&previous_summary))
             .unwrap();
-        let batch = batch_lock(workspace, &hashes).unwrap();
-        let changed = file_review_content_hash(&files[0].path, "@@\n+a later edit\n");
-        assert!(!Arc::ptr_eq(
-            &batch,
-            &batch_lock(workspace, &[hashes[1].clone(), changed]).unwrap(),
-        ));
-        assert!(!Arc::ptr_eq(
-            &batch,
-            &batch_lock("unrelated workspace", &hashes).unwrap(),
-        ));
+        let requested: Vec<_> = files.iter().map(|file| file.path.clone()).collect();
+        let locks = summary_locks(workspace, &wanted, &requested).unwrap();
+        {
+            let revised = [
+                (
+                    files[0].path.clone(),
+                    file_review_content_hash(&files[0].path, "@@\n+a later edit\n"),
+                ),
+                wanted[1].clone(),
+            ];
+            let revised_locks = summary_locks(workspace, &revised, &requested).unwrap();
+            assert!(!Arc::ptr_eq(&locks[0].1, &revised_locks[0].1));
+            assert!(Arc::ptr_eq(&locks[1].1, &revised_locks[1].1));
+            assert!(!Arc::ptr_eq(
+                &locks[1].1,
+                &summary_locks("unrelated workspace", &wanted, &requested).unwrap()[1].1,
+            ));
+        }
         let (started, running) = mpsc::channel();
         let (finish, released) = mpsc::channel();
         let timeout = Duration::from_secs(5);
@@ -458,7 +562,7 @@ mod tests {
             let deadline = Instant::now() + timeout;
             // The second request must reach the locked batch before the first
             // gets its reply. A sequential cache hit cannot pass this check.
-            while Arc::strong_count(&batch) < 3 {
+            while Arc::strong_count(&locks[1].1) < 3 {
                 assert!(
                     Instant::now() < deadline,
                     "second request did not join the batch"

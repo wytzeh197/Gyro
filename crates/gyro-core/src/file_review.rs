@@ -181,7 +181,8 @@ pub fn build_summary_prompt<'a>(
         if budget == 0 {
             break;
         }
-        let (diff, truncated) = truncate_diff(&file.diff, MAX_DIFF_BYTES_PER_FILE.min(budget));
+        let diff = plain_edit_hunks(&file.path, &file.diff).unwrap_or(&file.diff);
+        let (diff, truncated) = truncate_diff(diff, MAX_DIFF_BYTES_PER_FILE.min(budget));
         if diff.trim().is_empty() {
             continue;
         }
@@ -201,6 +202,30 @@ pub fn build_summary_prompt<'a>(
         "Reply with only a JSON object mapping each file path above to its one-sentence description.",
     );
     (prompt, included)
+}
+
+/// The prompt already names the file. For a single regular text edit, the
+/// Git paths and object IDs repeat identity and the hunks describe the change.
+/// Keep other patch forms intact, including separate staged/unstaged diffs.
+fn plain_edit_hunks<'a>(path: &str, diff: &'a str) -> Option<&'a str> {
+    let mut parts = diff.splitn(5, '\n');
+    let paths = parts.next()?.strip_prefix("diff --git a/")?;
+    if paths.strip_prefix(path)?.strip_prefix(" b/")? != path {
+        return None;
+    }
+    let (ids, mode) = parts.next()?.strip_prefix("index ")?.split_once(' ')?;
+    let (before, after) = ids.split_once("..")?;
+    if !matches!(mode, "100644" | "100755")
+        || ![before, after].into_iter().all(|id| {
+            (4..=64).contains(&id.len()) && id.as_bytes().iter().all(u8::is_ascii_hexdigit)
+        })
+        || parts.next()?.strip_prefix("--- a/")? != path
+        || parts.next()?.strip_prefix("+++ b/")? != path
+    {
+        return None;
+    }
+    let hunks = parts.next()?;
+    (hunks.starts_with("@@ ") && !hunks.contains("\ndiff --git ")).then_some(hunks)
 }
 
 /// Cut a diff to a byte ceiling on a line boundary.
@@ -225,21 +250,37 @@ fn truncate_diff(diff: &str, limit: usize) -> (String, bool) {
 /// invents a file cannot put a sentence next to something the turn never
 /// touched. Anything missing or unusable is left to the caller's fallback.
 pub fn parse_summary_response(raw: &str, requested: &[String]) -> Vec<(String, String)> {
-    let Some(object) = extract_json_object(raw) else {
+    let trimmed = raw.trim();
+    let body = trimmed
+        .strip_prefix("```")
+        .and_then(|fence| fence.split_once('\n'))
+        .and_then(|(_, body)| body.strip_suffix("```"))
+        .unwrap_or(trimmed);
+    let Some(value) = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .or_else(|| extract_json_object(raw).and_then(|object| serde_json::from_str(object).ok()))
+    else {
         return Vec::new();
     };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(object) else {
-        return Vec::new();
-    };
-    let Some(map) = value.as_object() else {
-        return Vec::new();
+    // Some models return an array of path-to-summary objects. Read all of
+    // them, applying the same requested-path and sentence checks as a map.
+    let entries = match &value {
+        serde_json::Value::Array(entries) => entries.as_slice(),
+        serde_json::Value::Object(_) => std::slice::from_ref(&value),
+        _ => return Vec::new(),
     };
 
     let mut out: Vec<(String, String)> = Vec::new();
     for path in requested {
-        let Some(sentence) = map.get(path).and_then(|entry| entry.as_str()) else {
+        let mut sentences = entries
+            .iter()
+            .filter_map(|entry| entry.get(path).and_then(|summary| summary.as_str()));
+        let Some(sentence) = sentences.next() else {
             continue;
         };
+        if sentences.any(|other| other != sentence) {
+            continue;
+        }
         let cleaned = clean_sentence(sentence);
         if !cleaned.is_empty() {
             out.push((path.clone(), cleaned));
@@ -421,6 +462,37 @@ mod tests {
     }
 
     #[test]
+    fn summary_prompt_keeps_every_hunk_of_an_ordinary_edit() {
+        let hunks = "@@ -1 +1 @@\n-old\n+new\n@@ -8 +8 @@\n-before\n+after\n";
+        let diff = format!(
+            "diff --git a/src/a.rs b/src/a.rs\nindex 7f8ccbb..996f74d 100644\n--- a/src/a.rs\n+++ b/src/a.rs\n{hunks}"
+        );
+        let (prompt, included) = build_summary_prompt(&[input("src/a.rs", &diff)]);
+        assert_eq!(included, ["src/a.rs"]);
+        assert!(prompt.contains(&format!("=== FILE: src/a.rs ===\n{hunks}")));
+        assert!(!prompt.contains("7f8ccbb") && !prompt.contains("diff --git"));
+    }
+
+    #[test]
+    fn summary_prompt_preserves_structural_and_combined_diffs() {
+        let ordinary = "diff --git a/a.ts b/a.ts\nindex 7f8ccbb..996f74d 100644\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n";
+        let joined = format!("{ordinary}\n{ordinary}");
+        for patch in [
+            joined.as_str(),
+            "diff --git a/b.ts b/a.ts\nsimilarity index 100%\nrename from b.ts\nrename to a.ts\n",
+            "diff --git a/a.ts b/a.ts\nold mode 100644\nnew mode 100755\n",
+            "diff --git a/a.ts b/a.ts\nnew file mode 100644\nindex 0000000..7f8ccbb\n--- /dev/null\n+++ b/a.ts\n@@ -0,0 +1 @@\n+new\n",
+            "diff --git a/a.ts b/a.ts\ndeleted file mode 100644\nindex 7f8ccbb..0000000\n--- a/a.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-old\n",
+            "diff --git a/a.ts b/a.ts\nindex 7f8ccbb..996f74d 100644\nBinary files a/a.ts and b/a.ts differ\n",
+            "diff --git a/a.ts b/a.ts\nindex 7f8ccbb..996f74d 120000\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n",
+        ] {
+            let (prompt, included) = build_summary_prompt(&[input("a.ts", patch)]);
+            assert_eq!(included, ["a.ts"]);
+            assert!(prompt.contains(&format!("=== FILE: a.ts ===\n{patch}")));
+        }
+    }
+
+    #[test]
     fn prompt_skips_a_file_with_no_diff_text() {
         let files = vec![input("a.ts", "   "), input("b.ts", "@@\n+two\n")];
         let (_, included) = build_summary_prompt(&files);
@@ -434,6 +506,19 @@ mod tests {
         assert_eq!(
             parsed,
             vec![("a.ts".to_string(), "Sign-ins now last longer.".to_string())]
+        );
+    }
+
+    #[test]
+    fn recovers_requested_paths_from_an_array_without_using_conflicting_summaries() {
+        let raw = "```json\n[\n  {\"a.ts\": \"Sign-ins now last longer\"},\n  {\"b.ts\": \"Limits retries to four\", \"ghost.ts\": \"Nope\"},\n  {\"c.ts\": \"Keeps deletions\"},\n  {\"c.ts\": \"Removes deletions\"}\n]\n```";
+        let parsed = parse_summary_response(raw, &["a.ts".into(), "b.ts".into(), "c.ts".into()]);
+        assert_eq!(
+            parsed,
+            [
+                ("a.ts".into(), "Sign-ins now last longer.".into()),
+                ("b.ts".into(), "Limits retries to four.".into()),
+            ]
         );
     }
 

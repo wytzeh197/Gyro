@@ -18,9 +18,10 @@ use gyro_core::{
         DesktopProviderApprovalBehavior, DesktopProviderApprovalRequest,
         DesktopProviderApprovalResponse, DESKTOP_PROVIDER_APPROVAL_IPC_SCHEMA_V1,
     },
-    provider_accepts_images, CapabilityId, CapabilityInvocationContext, CapabilityRequest,
-    CapabilityResponse, CapabilityRunMode, CapabilityStatus, GyroPaths,
-    PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
+    provider_accepts_images,
+    provider_runtime::tool_batch::compact_parameter_schema,
+    CapabilityId, CapabilityInvocationContext, CapabilityRequest, CapabilityResponse,
+    CapabilityRunMode, CapabilityStatus, GyroPaths, PROVIDER_CAPABILITY_IPC_SCHEMA_V1,
 };
 use std::{
     borrow::Cow,
@@ -205,23 +206,39 @@ pub(crate) fn desktop_capability_tool_schema(id: CapabilityId) -> serde_json::Va
     desktop_capability_tool_schema_ref(id).into_owned()
 }
 
+#[derive(Default)]
+struct ToolSchemas {
+    full: OnceLock<serde_json::Value>,
+    compact: OnceLock<serde_json::Value>,
+}
+
+// Only schema contents are static. Availability and permissions are evaluated
+// separately. Initialize individual schema variants on first use.
+static TOOL_SCHEMAS: LazyLock<HashMap<CapabilityId, ToolSchemas>> = LazyLock::new(|| {
+    gyro_core::CAPABILITY_DESCRIPTORS
+        .iter()
+        .map(|descriptor| (descriptor.id, ToolSchemas::default()))
+        .collect()
+});
+
 pub(crate) fn desktop_capability_tool_schema_ref(
     id: CapabilityId,
 ) -> Cow<'static, serde_json::Value> {
-    // Schema contents are static. Availability and permissions are evaluated
-    // separately. Initialize individual schemas on first use.
-    static SCHEMAS: LazyLock<HashMap<CapabilityId, OnceLock<serde_json::Value>>> =
-        LazyLock::new(|| {
-            gyro_core::CAPABILITY_DESCRIPTORS
-                .iter()
-                .map(|descriptor| (descriptor.id, OnceLock::new()))
-                .collect()
-        });
-    match SCHEMAS.get(&id) {
-        Some(schema) => {
-            Cow::Borrowed(schema.get_or_init(|| build_desktop_capability_tool_schema(id)))
-        }
+    match TOOL_SCHEMAS.get(&id) {
+        Some(schemas) => Cow::Borrowed(
+            schemas
+                .full
+                .get_or_init(|| build_desktop_capability_tool_schema(id)),
+        ),
         None => Cow::Owned(build_desktop_capability_tool_schema(id)),
+    }
+}
+
+pub(crate) fn desktop_compact_tool_schema_ref(id: CapabilityId) -> Cow<'static, serde_json::Value> {
+    let build = || compact_parameter_schema(desktop_capability_tool_schema_ref(id).as_ref());
+    match TOOL_SCHEMAS.get(&id) {
+        Some(schemas) => Cow::Borrowed(schemas.compact.get_or_init(build)),
+        None => Cow::Owned(build()),
     }
 }
 
@@ -252,6 +269,16 @@ fn cached_tool_schemas_match_the_broker_definitions() {
         assert!(std::ptr::eq(
             cached.as_ref(),
             desktop_capability_tool_schema_ref(id).as_ref()
+        ));
+        let compact = desktop_compact_tool_schema_ref(id);
+        assert_eq!(
+            serde_json::to_vec(compact.as_ref()).unwrap(),
+            serde_json::to_vec(&compact_parameter_schema(cached.as_ref())).unwrap(),
+            "{id}"
+        );
+        assert!(std::ptr::eq(
+            compact.as_ref(),
+            desktop_compact_tool_schema_ref(id).as_ref()
         ));
     }
 }
@@ -588,32 +615,36 @@ pub(crate) fn capability_mcp_response(
             result.capability_id.provider_tool_name(),
             &mut result.data,
         );
-        serde_json::to_string(&serde_json::json!({
+        let mut payload = serde_json::json!({
             "callId": result.call_id,
             "capabilityId": result.capability_id,
             "summary": result.summary,
-            "data": result.data,
             "resource": result.resource,
-        }))?
+        });
+        payload["data"] = result.data;
+        serde_json::to_string(&payload)?
     } else {
         serde_json::to_string(&serde_json::json!({
             "callId": response.call_id,
             "error": response.error,
         }))?
     };
-    let mut content = vec![serde_json::json!({ "type": "text", "text": text })];
+    let mut text_block = serde_json::json!({ "type": "text" });
+    text_block["text"] = serde_json::Value::String(text);
+    let mut content = vec![text_block];
     if let Some(data) = image {
-        content.push(serde_json::json!({ "type": "image", "mimeType": "image/png", "data": data }));
+        let mut image_block = serde_json::json!({ "type": "image", "mimeType": "image/png" });
+        image_block["data"] = serde_json::Value::String(data);
+        content.push(image_block);
     }
-    Ok(serde_json::json!({
-        "content": content,
-        "isError": is_error,
-    }))
+    let mut reply = serde_json::json!({ "isError": is_error });
+    reply["content"] = serde_json::Value::Array(content);
+    Ok(reply)
 }
 
 pub(crate) fn write_desktop_mcp_message(
     output: &mut impl Write,
-    message: &serde_json::Value,
+    message: &impl serde::Serialize,
 ) -> anyhow::Result<()> {
     // Outgoing capability results may carry a base64 PNG. Incoming requests
     // retain the smaller protocol limit; structured IPC results are unchanged.

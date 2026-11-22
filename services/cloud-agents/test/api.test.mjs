@@ -8,6 +8,7 @@ import {
   unseal,
   redact,
   checkedPushBody,
+  packageRegistryRead,
 } from "../src/safety.mjs";
 
 const uid = "11111111-1111-4111-8111-111111111111";
@@ -244,4 +245,27 @@ test("Git push rejects main, branch deletion, and a hidden second ref command", 
       "0000",
   ])
     await assert.rejects(checkedPushBody(stream(text), `gyro/cloud/${id}`));
+});
+
+test("package registries allow only anonymous reads while the agent runs", () => {
+  const read = (u, m = "GET", p = "running") =>
+    packageRegistryRead(new URL(u), m, p);
+  assert.ok(read("https://registry.npmjs.org/left-pad"));
+  assert.ok(read("https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz", "HEAD"));
+  assert.ok(read("https://pypi.org/simple/requests/", "GET", "starting"));
+  assert.ok(read("https://files.pythonhosted.org/packages/ab/cd/x.whl"));
+  // Writes, logins and token endpoints stay blocked.
+  assert.equal(read("https://registry.npmjs.org/left-pad", "PUT"), false);
+  assert.equal(read("https://upload.pypi.org/legacy/", "POST"), false);
+  assert.equal(read("https://pypi.org/legacy/", "POST"), false);
+  assert.equal(read("https://registry.npmjs.org/-/user/org.couchdb.user:x"), false);
+  assert.equal(read("https://registry.npmjs.org/-/npm/v1/tokens"), false);
+  assert.equal(read("https://registry.npmjs.org/-/whoami"), false);
+  // Publishing, other hosts, lookalikes, ports and userinfo stay blocked.
+  assert.equal(read("https://registry.npmjs.org/left-pad", "GET", "publishing"), false);
+  assert.equal(read("https://registry.npmjs.org.evil.test/left-pad"), false);
+  assert.equal(read("https://evil.test/registry.npmjs.org/left-pad"), false);
+  assert.equal(read("https://registry.npmjs.org:8443/left-pad"), false);
+  assert.equal(read("https://u:p@registry.npmjs.org/left-pad"), false);
+  assert.equal(read("http://registry.npmjs.org/left-pad"), false);
 });

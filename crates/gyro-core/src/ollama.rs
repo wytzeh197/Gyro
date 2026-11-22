@@ -4,6 +4,7 @@
 //! local. This module accepts only loopback HTTP endpoints and keeps runtime
 //! discovery separate from persisted provider configuration.
 
+use crate::provider_observation::ChatObservation;
 use crate::usage::{UsageReason, UsageTokens};
 use crate::CancellationToken;
 use anyhow::{anyhow, Context, Result};
@@ -326,7 +327,8 @@ where
     F: FnMut(&str),
     U: FnMut(UsageTokens, Option<u64>),
 {
-    let estimated_window = request_context_window(request)?;
+    let prompt_observation = ChatObservation::for_arrays(&request.messages, Some(&request.tools));
+    let estimated_window = request_context_window(request, || prompt_observation.content_chars())?;
     let mut window = resident_context_window(request, estimated_window, model_digest, cancellation)
         .or(estimated_window);
     crate::provider_retry::stream_response(
@@ -335,6 +337,7 @@ where
             match ollama_tool_chat_once_with_updates(
                 request,
                 window,
+                &prompt_observation,
                 cancellation,
                 &mut emit,
                 &mut on_usage,
@@ -375,12 +378,21 @@ fn ollama_tool_chat_once<F>(
 where
     F: FnMut(&str),
 {
-    ollama_tool_chat_once_with_updates(request, window, cancellation, on_delta, |_, _| {})
+    let prompt_observation = ChatObservation::for_arrays(&request.messages, Some(&request.tools));
+    ollama_tool_chat_once_with_updates(
+        request,
+        window,
+        &prompt_observation,
+        cancellation,
+        on_delta,
+        |_, _| {},
+    )
 }
 
 fn ollama_tool_chat_once_with_updates<F, U>(
     request: &OllamaToolChatRequest<'_>,
     window: Option<u64>,
+    prompt_observation: &ChatObservation<'_>,
     cancellation: &CancellationToken,
     mut on_delta: F,
     mut on_usage: U,
@@ -414,7 +426,6 @@ where
     let mut observation = None;
     let mut receipt = crate::openai_compatible::UsageReceipt::start(cancellation);
     let mut post = crate::chat_http::ChatPost::new(&url, "", payload, CHAT_IDLE_TIMEOUT, true);
-    let prompt_observation = crate::provider_observation::ChatObservation::new(post.payload());
     let response = crate::provider_retry::http_response(cancellation, || {
         observation = Some(prompt_observation.start(post.payload()));
         let response = post.send(&receipt.transport);

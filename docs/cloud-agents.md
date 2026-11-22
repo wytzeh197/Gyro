@@ -123,9 +123,15 @@ configuration. No JWT is persisted by this service. There is no AI login endpoin
 The sandbox receives only placeholder API credentials. Its HTTP/HTTPS traffic is
 intercepted with Internet access disabled. The Worker authenticates only that
 run's provider API and original GitHub repository. Redirects are not followed
-with credentials. Other network destinations, including package registries, are
-blocked in this prototype. Bake needed dependencies into the image; arbitrary
-repo dependency installation is not yet supported.
+with credentials. Anonymous GET/HEAD reads from the public npm and PyPI
+registries (`registry.npmjs.org`, `registry.yarnpkg.com`, `pypi.org`,
+`files.pythonhosted.org`) are forwarded while a run is starting or running, so
+the agent can install a repository's dependencies. No credential is unsealed or
+attached for these reads, account and token endpoints are refused, and the
+publish phase cannot reach them. Install scripts run inside the sandbox with the
+same placeholder credentials as the agent. Private registries, Git
+dependencies, other ecosystems and all other destinations stay blocked. The
+image includes `npm`, `pip` and `venv`; other toolchains must be baked in.
 Codex uses a documented custom Responses provider with an environment-key
 placeholder, rather than creating a login file.
 [Codex custom provider configuration](https://developers.openai.com/codex/config-advanced/).
@@ -217,8 +223,8 @@ do not admit external users until lifecycle/retention operations are added.
 
 ## Verification recorded for this change
 
-- 23 Node tests: API guards/auth, tenant checks, encrypted/tamper-resistant keys,
-  redaction, receive-pack branch restrictions, SSE cursors, lifecycle, cap/idle,
+- 24 Node tests: API guards/auth, tenant checks, encrypted/tamper-resistant keys,
+  redaction, receive-pack branch restrictions, package-registry read policy, SSE cursors, lifecycle, cap/idle,
   pause/resume, crash and database-outage recovery, bounded DO log storage.
   A public-source boundary check rejects privileged Cloud credential references
   and Worker imports in desktop, CLI/core and shared packages.
@@ -242,10 +248,27 @@ do not admit external users until lifecycle/retention operations are added.
   Two generic scanner matches in bundled xterm/TypeScript code were verified as
   unquoted JavaScript assignments, not credential values. Neither privileged
   Worker credential identifier appears in that bundle.
-- Full image build was attempted but Docker was unavailable. The image, installed
-  CLI flags in Linux, native Cloudflare alarms/intercepts/snapshots, private repo
-  access, authenticated live model execution and Mac-sleep continuity are untested.
-  No live AI call, deployment, topup, hosted schema change, purchase or push occurred.
+- 2026-11-21: the runner image built locally for `linux/amd64` (Colima with
+  emulation, 826 MB compressed, 2.43 GB unpacked). An offline smoke run with
+  `--network none` passed 24 checks: pinned Claude Code 2.1.325 and Codex 0.169.0,
+  every CLI flag `runner.py` passes, git, ripgrep, setpriv, pkill, sandbox-shim,
+  `gyro` as uid 1000 owning `/workspace`, all capabilities dropped by `setpriv`,
+  and npm, pip and venv working as `gyro`. The five runner tests also pass inside
+  the image.
+- That run found and fixed two runner bugs. `CODEX_HOME=/home/gyro/.codex` did
+  not exist, so Codex quit at startup on every run; the image now creates it.
+  Agents also inherited the runner's stdin, which Codex appends to the prompt;
+  they now get `/dev/null`, with a regression test. After the fix, Codex run
+  exactly as `runner.py` launches it (custom API-key provider, no login file)
+  got as far as the network and kept retrying, as expected without one.
+- Claude Code could not be run in the image locally. Its Bun binary needs AVX,
+  which the Mac's x86 emulation lacks, so it crashed with a segfault. Cloudflare's
+  x86 hosts have AVX, so this is a local limit, not an image defect. Claude
+  execution stays unverified until the image runs on real x86.
+- Still untested: native Cloudflare alarms, intercepts and snapshots, the
+  registry proxy path, private repo access, authenticated live model execution
+  and Mac-sleep continuity. No live AI call, deployment, image push, topup, hosted
+  schema change, purchase or push occurred.
 
 App/CLI integration, core Keychain handoff, usage-safety preflight, unified run-list
 UI and pull-into-local-worktree review remain phase two. They require their own

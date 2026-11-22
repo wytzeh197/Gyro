@@ -107,8 +107,10 @@ class Runner:
 
     def execute(self, argv, cwd, provider=None):
         self.last_output = time.monotonic()
-        proc = subprocess.Popen(as_user(argv), cwd=cwd, env=env_for(provider), stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, start_new_session=True)
+        # Codex appends piped stdin to its prompt. The agent never gets the
+        # runner's config stream.
+        proc = subprocess.Popen(as_user(argv), cwd=cwd, env=env_for(provider), stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
         selector = selectors.DefaultSelector()
         selector.register(proc.stdout, selectors.EVENT_READ)
         pending = b""

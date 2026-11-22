@@ -469,6 +469,14 @@ assert.equal(
   mergeTerminalUpdate(initial, snapshot("new", 0, 3, "replacement")).output,
   "new",
 );
+const terminalLimit = 512 * 1024;
+const unicodeRetained = "😀\ufeff" + "x".repeat(terminalLimit - 7);
+const remoteRollover = mergeTerminalUpdate(
+  snapshot(unicodeRetained, 0, terminalLimit),
+  snapshot("é", terminalLimit, terminalLimit + 2),
+);
+assert.equal(remoteRollover.output, unicodeRetained.slice(2) + "é");
+assert.equal(remoteRollover.outputCursor.start, 4);
 console.log(
   "Remote regressions passed: ordered/coalesced input, uncertain-send failure, shared request budget, partial catalog, terminal cursor gap/duplicate/restart.",
 );

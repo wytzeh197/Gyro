@@ -6,6 +6,10 @@ use anyhow::{ensure, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
 
+const UPSERT_TURN_RECEIPT: &str = "insert into project_memory_turn_receipts
+    (session_id, turn_id, provider_id, receipt_json) values (?1, ?2, ?3, ?4)
+    on conflict(session_id, turn_id, provider_id) do update set receipt_json = excluded.receipt_json";
+
 pub(super) fn ensure_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "create table if not exists project_memory_settings (
@@ -102,6 +106,23 @@ impl SessionStore {
             json.len() <= 32 * 1024,
             "memory receipt exceeds its size limit"
         );
+        let session_id = session.to_string();
+        let turn_id = turn.to_string();
+        let values = params![session_id, turn_id, provider, json];
+        if receipt.supplied_bytes == 0
+            && receipt.estimated_tokens == 0
+            && receipt.reused_count == 0
+            && receipt.removed_keys.is_empty()
+            && receipt
+                .roots
+                .iter()
+                .all(|root| root.entries.is_empty() && root.omitted_count == 0)
+        {
+            // Acknowledge even an empty selection so the next resume knows no
+            // memory was supplied. There is nothing to mirror into the transcript.
+            self.conn.execute(UPSERT_TURN_RECEIPT, values)?;
+            return Ok(());
+        }
         let operation = crate::mutations::content_hash(
             format!("{session}:{turn}:{provider}:{json}").as_bytes(),
         );
@@ -109,7 +130,7 @@ impl SessionStore {
             &self.conn,
             rusqlite::TransactionBehavior::Immediate,
         )?;
-        transaction.execute("insert into project_memory_turn_receipts (session_id,turn_id,provider_id,receipt_json) values (?1,?2,?3,?4) on conflict(session_id,turn_id,provider_id) do update set receipt_json=excluded.receipt_json",params![session.to_string(),turn.to_string(),provider,json])?;
+        transaction.execute(UPSERT_TURN_RECEIPT, values)?;
         let inserted = transaction.execute("insert or ignore into project_memory_receipt_outbox (operation_id,session_id) values (?1,?2)",params![operation,session.to_string()])? > 0;
         let emitted: bool = transaction.query_row(
             "select emitted from project_memory_receipt_outbox where operation_id=?1",

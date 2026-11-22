@@ -101,5 +101,23 @@ class RunnerTest(unittest.TestCase):
                     self.assertLess(time.monotonic()-start,3)
                     self.assertEqual(worker.stop,"waiting" if mode=="idle" else "blocked")
 
+    def test_agent_does_not_inherit_the_config_stdin(self):
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory(prefix="gyro-cloud-stdin-") as root:
+            conf,patches=self.harness(root,"")
+            read,write=os.pipe()
+            os.write(write,b"secret config")
+            saved=os.dup(0); os.dup2(read,0)
+            try:
+                with ExitStack() as stack:
+                    for p in patches: stack.enter_context(p)
+                    worker=runner.Runner(conf)
+                    worker.execute([sys.executable,"-c","import sys; print(repr(sys.stdin.read()))"],root)
+                    text="".join(e["text"] for e in runner.read("logs",[]))
+            finally:
+                os.dup2(saved,0); os.close(saved); os.close(read); os.close(write)
+            self.assertIn("''",text)
+            self.assertNotIn("secret config",text)
+
 if __name__ == "__main__":
     unittest.main()

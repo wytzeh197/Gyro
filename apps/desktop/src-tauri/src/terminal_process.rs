@@ -198,7 +198,7 @@ impl TerminalProcessManager {
         // the pane map while doing it.
         launch.ensure_current()?;
         let mut process = spawn_terminal_process(request, &launch)?;
-        let snapshot = snapshot_terminal_process(&mut process, None);
+        let snapshot = snapshot_terminal_process(&mut process, OutputRead::FULL);
         let pane_id = process.request.pane_id.clone();
         let replaced = {
             // Keep cancellation and insertion atomic with respect to Close.
@@ -246,7 +246,7 @@ impl TerminalProcessManager {
             writer.flush()?;
         }
         let mut process = lock_pane(&pane);
-        Ok(snapshot_terminal_process(&mut process, None))
+        Ok(snapshot_terminal_process(&mut process, OutputRead::FULL))
     }
 
     pub(crate) fn read(
@@ -254,13 +254,11 @@ impl TerminalProcessManager {
         pane_id: &str,
         known_output_revision: Option<u64>,
     ) -> anyhow::Result<TerminalPaneSnapshot> {
-        self.with_pane(pane_id, |process| {
-            Ok(snapshot_terminal_process(process, known_output_revision))
-        })
+        self.read_since(pane_id, known_output_revision, None)
     }
 
-    /// Local renderers can ask for only the unseen UTF-8 bytes. Legacy and
-    /// remote consumers may continue to request complete bounded snapshots.
+    /// Local and remote renderers can ask for only the unseen UTF-8 bytes.
+    /// Without a usable cursor, return the complete bounded snapshot.
     pub(crate) fn read_since(
         &self,
         pane_id: &str,
@@ -268,33 +266,10 @@ impl TerminalProcessManager {
         cursor: Option<&TerminalOutputCursor>,
     ) -> anyhow::Result<TerminalPaneSnapshot> {
         self.with_pane(pane_id, |process| {
-            let same_generation = cursor.is_some_and(|cursor| {
-                process
-                    .output
-                    .lock()
-                    .is_ok_and(|output| output.generation == cursor.generation)
-            });
-            let mut snapshot = snapshot_terminal_process(
+            Ok(snapshot_terminal_process(
                 process,
-                if cursor.is_some() && !same_generation {
-                    None
-                } else {
-                    revision
-                },
-            );
-            if let (Some(cursor), Some(text)) = (cursor, snapshot.output.as_mut()) {
-                if cursor.generation == snapshot.output_cursor.generation
-                    && cursor.end >= snapshot.output_cursor.start
-                    && cursor.end <= snapshot.output_cursor.end
-                {
-                    let offset = (cursor.end - snapshot.output_cursor.start) as usize;
-                    if text.is_char_boundary(offset) {
-                        *text = text.split_off(offset);
-                        snapshot.output_cursor.start = cursor.end;
-                    }
-                }
-            }
-            Ok(snapshot)
+                OutputRead::Since { revision, cursor },
+            ))
         })
     }
 
@@ -310,11 +285,13 @@ impl TerminalProcessManager {
         pane_id: &str,
         include_output: bool,
     ) -> anyhow::Result<TerminalPaneSnapshot> {
+        let read = if include_output {
+            OutputRead::FULL
+        } else {
+            OutputRead::Metadata
+        };
         self.with_pane(pane_id, |process| {
-            let known_output_revision = (!include_output)
-                .then(|| process.output.lock().map(|output| output.revision).ok())
-                .flatten();
-            Ok(snapshot_terminal_process(process, known_output_revision))
+            Ok(snapshot_terminal_process(process, read))
         })
     }
 
@@ -335,25 +312,20 @@ impl TerminalProcessManager {
             process.rows = rows;
             process.request.cols = Some(cols);
             process.request.rows = Some(rows);
-            Ok(snapshot_terminal_process(process, None))
+            Ok(snapshot_terminal_process(process, OutputRead::FULL))
         })
     }
 
     pub(crate) fn has_foreground_job(&self, pane_id: &str) -> anyhow::Result<bool> {
-        self.with_pane(pane_id, |process| {
-            let snapshot = snapshot_terminal_process(process, None);
-            if snapshot.status != "running" {
-                return Ok(false);
-            }
-            Ok(snapshot.has_foreground_job.unwrap_or(true))
-        })
+        let snapshot = self.observe(pane_id, false)?;
+        Ok(snapshot.status == "running" && snapshot.has_foreground_job.unwrap_or(true))
     }
 
     pub(crate) fn stop(&self, pane_id: &str) -> anyhow::Result<TerminalPaneSnapshot> {
         self.with_pane(pane_id, |process| {
             terminate_terminal_process(process);
             process.status = "failed".into();
-            Ok(snapshot_terminal_process(process, None))
+            Ok(snapshot_terminal_process(process, OutputRead::FULL))
         })
     }
 
@@ -442,7 +414,7 @@ impl TerminalProcessManager {
         let panes = self.lock_panes()?.values().cloned().collect::<Vec<_>>();
         Ok(panes
             .iter()
-            .map(|pane| snapshot_terminal_process(&mut lock_pane(pane), None))
+            .map(|pane| snapshot_terminal_process(&mut lock_pane(pane), OutputRead::FULL))
             .collect())
     }
 }
@@ -775,9 +747,24 @@ fn retain_terminal_text(output: &mut TerminalOutputBuffer, text: &str) {
     }
 }
 
+enum OutputRead<'a> {
+    Metadata,
+    Since {
+        revision: Option<u64>,
+        cursor: Option<&'a TerminalOutputCursor>,
+    },
+}
+
+impl OutputRead<'_> {
+    const FULL: Self = Self::Since {
+        revision: None,
+        cursor: None,
+    };
+}
+
 fn snapshot_terminal_process(
     process: &mut TerminalProcess,
-    known_output_revision: Option<u64>,
+    read: OutputRead<'_>,
 ) -> TerminalPaneSnapshot {
     match process.child.try_wait() {
         Ok(Some(status)) => {
@@ -807,8 +794,8 @@ fn snapshot_terminal_process(
         .output
         .lock()
         .map(|value| {
-            let (output, revision) = snapshot_terminal_output(&value, known_output_revision);
-            (output, revision, value.reader_finished, value.cursor())
+            let (output, cursor) = read_terminal_output(&value, read);
+            (output, value.revision, value.reader_finished, cursor)
         })
         .unwrap_or_else(|poisoned| {
             let value = poisoned.into_inner();
@@ -870,24 +857,63 @@ fn terminal_process_has_foreground_job(process: &TerminalProcess) -> Option<bool
     Some(true)
 }
 
+#[cfg(test)]
 pub(crate) fn snapshot_terminal_output(
     output: &TerminalOutputBuffer,
     known_output_revision: Option<u64>,
 ) -> (Option<String>, u64) {
-    let text = (known_output_revision != Some(output.revision))
-        .then(|| terminal_output_text(&output.bytes));
+    let (text, _) = read_terminal_output(
+        output,
+        OutputRead::Since {
+            revision: known_output_revision,
+            cursor: None,
+        },
+    );
     (text, output.revision)
 }
 
-fn terminal_output_text(output: &VecDeque<u8>) -> String {
+fn read_terminal_output(
+    output: &TerminalOutputBuffer,
+    read: OutputRead<'_>,
+) -> (Option<String>, TerminalOutputCursor) {
+    let mut retained = output.cursor();
+    let OutputRead::Since { revision, cursor } = read else {
+        return (None, retained);
+    };
+    let same_generation = cursor.is_none_or(|known| known.generation == retained.generation);
+    if same_generation && revision == Some(output.revision) {
+        return (None, retained);
+    }
+    let offset = cursor
+        .filter(|known| same_generation && (retained.start..=retained.end).contains(&known.end))
+        .map(|known| (known.end - retained.start) as usize)
+        // The PTY buffer stores decoded UTF-8 and evicts at character boundaries.
+        .filter(|offset| {
+            !output
+                .bytes
+                .get(*offset)
+                .is_some_and(|byte| byte & 0xc0 == 0x80)
+        })
+        .unwrap_or(0);
+    retained.start += offset as u64;
+    (Some(terminal_output_text(&output.bytes, offset)), retained)
+}
+
+fn terminal_output_text(output: &VecDeque<u8>, offset: usize) -> String {
     let (first, second) = output.as_slices();
+    let (first, second) = if offset < first.len() {
+        (&first[offset..], second)
+    } else {
+        (&second[offset - first.len()..], &[][..])
+    };
     if second.is_empty() {
         return String::from_utf8_lossy(first).into_owned();
     }
-    let mut bytes = Vec::with_capacity(output.len());
+    let mut bytes = Vec::with_capacity(first.len() + second.len());
     bytes.extend_from_slice(first);
     bytes.extend_from_slice(second);
-    String::from_utf8_lossy(&bytes).into_owned()
+    String::from_utf8(bytes)
+        .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned())
 }
 
 #[cfg(test)]
@@ -919,6 +945,78 @@ mod tests {
         assert_eq!(before.generation, after.generation);
         assert_eq!(after.end - before.end, 8);
         assert_eq!(after.end - after.start, MAX_TERMINAL_OUTPUT_BYTES as u64);
+    }
+
+    #[test]
+    fn scrollback_delta_preserves_utf8_across_the_ring_wrap_and_falls_back_safely() {
+        let mut bytes = VecDeque::with_capacity(32);
+        let capacity = bytes.capacity();
+        bytes.extend(std::iter::repeat_n(b'a', capacity - 1));
+        bytes.drain(..capacity - 5);
+        bytes.extend("🦀 last line".bytes());
+        assert!(!bytes.as_slices().1.is_empty());
+        let buffer = TerminalOutputBuffer {
+            bytes,
+            end: (capacity - 1 + "🦀 last line".len()) as u64,
+            revision: 2,
+            ..TerminalOutputBuffer::default()
+        };
+        let retained = buffer.cursor();
+        let known = |end| TerminalOutputCursor {
+            end,
+            ..retained.clone()
+        };
+        for (offset, expected) in [(4, "🦀 last line"), (8, " last line")] {
+            let previous = known(retained.start + offset);
+            let (text, cursor) = read_terminal_output(
+                &buffer,
+                OutputRead::Since {
+                    revision: Some(1),
+                    cursor: Some(&previous),
+                },
+            );
+            assert_eq!(text.as_deref(), Some(expected));
+            assert_eq!(cursor.start, previous.end);
+            assert_eq!(cursor.end, retained.end);
+        }
+        for previous in [
+            known(retained.start - 1),
+            known(retained.start + 5),
+            known(retained.end + 1),
+            TerminalOutputCursor {
+                generation: "old terminal".into(),
+                ..known(retained.end)
+            },
+        ] {
+            let (text, cursor) = read_terminal_output(
+                &buffer,
+                OutputRead::Since {
+                    revision: Some(1),
+                    cursor: Some(&previous),
+                },
+            );
+            assert_eq!(text.as_deref(), Some("aaaa🦀 last line"));
+            assert_eq!(cursor.start, retained.start);
+        }
+        let old_generation = TerminalOutputCursor {
+            generation: "old terminal".into(),
+            ..known(retained.end)
+        };
+        assert_eq!(
+            read_terminal_output(
+                &buffer,
+                OutputRead::Since {
+                    revision: Some(buffer.revision),
+                    cursor: Some(&old_generation),
+                },
+            )
+            .0
+            .as_deref(),
+            Some("aaaa🦀 last line")
+        );
+        assert!(read_terminal_output(&buffer, OutputRead::Metadata)
+            .0
+            .is_none());
     }
 
     #[test]

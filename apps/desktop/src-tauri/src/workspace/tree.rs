@@ -58,24 +58,52 @@ pub(crate) fn list_workspace_tree_blocking(
         .canonicalize()
         .map_err(to_string)?;
     let max_depth = depth.unwrap_or(4).clamp(1, 8);
-    scan_workspace_tree(&root, max_depth).map(|snapshot| snapshot.files)
+    workspace_directory_metadata(&root)?;
+    Ok(collect_workspace_entries(&root, max_depth, |_| {}))
 }
 
 pub(crate) fn scan_workspace_tree(
     root: &Path,
     max_depth: usize,
 ) -> Result<WorkspaceTreeSnapshot, String> {
-    let mut entries = Vec::new();
-    let root_metadata = fs::symlink_metadata(root).map_err(to_string)?;
-    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
-        return Err("workspace root is not a regular directory".into());
-    }
+    let root_metadata = workspace_directory_metadata(root)?;
     let mut directories = vec![WorkspaceDirectoryStamp {
         path: root.to_path_buf(),
         modified: root_metadata.modified().ok(),
         len: root_metadata.len(),
     }];
+    let files = collect_workspace_entries(root, max_depth, |entry| {
+        if let Ok(metadata) = entry.metadata() {
+            directories.push(WorkspaceDirectoryStamp {
+                path: entry.path().to_path_buf(),
+                modified: metadata.modified().ok(),
+                len: metadata.len(),
+            });
+        }
+    });
+    Ok(WorkspaceTreeSnapshot {
+        files,
+        directories,
+        scanned_at: Instant::now(),
+        generation: 0,
+    })
+}
 
+fn workspace_directory_metadata(root: &Path) -> Result<fs::Metadata, String> {
+    let metadata = fs::symlink_metadata(root).map_err(to_string)?;
+    if !metadata.is_dir() {
+        return Err("workspace root is not a regular directory".into());
+    }
+    Ok(metadata)
+}
+
+// Only cached snapshots use directory metadata to revalidate the tree.
+fn collect_workspace_entries(
+    root: &Path,
+    max_depth: usize,
+    mut visit_directory: impl FnMut(&walkdir::DirEntry),
+) -> Vec<WorkspaceFile> {
+    let mut entries = Vec::new();
     for entry in WalkDir::new(root)
         .min_depth(1)
         .max_depth(max_depth)
@@ -97,13 +125,7 @@ pub(crate) fn scan_workspace_tree(
             continue;
         };
         let kind = if entry.file_type().is_dir() {
-            if let Ok(metadata) = entry.metadata() {
-                directories.push(WorkspaceDirectoryStamp {
-                    path: entry.path().to_path_buf(),
-                    modified: metadata.modified().ok(),
-                    len: metadata.len(),
-                });
-            }
+            visit_directory(&entry);
             "directory".into()
         } else {
             "file".into()
@@ -116,12 +138,7 @@ pub(crate) fn scan_workspace_tree(
     }
 
     workspace_tree_order::sort(&mut entries);
-    Ok(WorkspaceTreeSnapshot {
-        files: entries,
-        directories,
-        scanned_at: Instant::now(),
-        generation: 0,
-    })
+    entries
 }
 
 #[cfg(test)]

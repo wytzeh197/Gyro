@@ -217,7 +217,7 @@ pub(crate) fn execute_provider_capability(
             } else {
                 format!("Returned {found} workspace matches")
             };
-            (summary, serde_json::to_value(results)?, None)
+            (summary, serde_json::Value::Array(results), None)
         }
         CapabilityId::WorkspaceRead
         | CapabilityId::WorkspaceReadRange

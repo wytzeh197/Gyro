@@ -14,6 +14,12 @@ pub trait ToolCatalog: Send + Sync {
     fn schema_ref(&self, id: CapabilityId) -> Cow<'_, Value> {
         Cow::Owned(self.schema(id))
     }
+    /// The model-facing schema for tools whose full documentation is deferred.
+    fn compact_schema_ref(&self, id: CapabilityId) -> Cow<'_, Value> {
+        Cow::Owned(super::tool_batch::compact_parameter_schema(
+            self.schema_ref(id).as_ref(),
+        ))
+    }
     fn observation_byte_limit(&self, arguments: &Value) -> anyhow::Result<usize>;
 }
 

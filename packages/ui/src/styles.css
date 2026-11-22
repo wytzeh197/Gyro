@@ -6226,6 +6226,10 @@ textarea:focus-visible {
   outline: none;
 }
 
+.gyro-command-palette.is-global-search > header:has(input:focus-visible) {
+  box-shadow: inset 0 -2px var(--gyro-focus-ring);
+}
+
 .gyro-command-palette.is-global-search > header input::placeholder {
   color: var(--gyro-faint);
 }
@@ -20675,7 +20679,7 @@ button.gyro-account-menu-row:hover,
 /* Git decorations — VS Code's status letter palette. */
 
 :root[data-theme="light"] .gyro-scm-panel {
-  --gyro-scm-modified: #895503;
+  --gyro-scm-modified: #774600;
   --gyro-scm-added: #28702a;
   --gyro-scm-deleted: #ad0707;
   --gyro-scm-renamed: #007100;
@@ -22423,7 +22427,6 @@ button.gyro-account-menu-row:hover,
   color: var(--gyro-premium-faint);
   font-size: var(--gyro-font-micro);
   line-height: 1.35;
-  opacity: 0.72;
   padding: 4px 8px 8px 31px;
 }
 
@@ -23791,6 +23794,7 @@ textarea:focus-visible,
   .gyro-scm-panel
   .gyro-sidebar-scm-row
   .gyro-sidebar-scm-directory {
+  color: var(--gyro-muted);
   font-size: var(--gyro-font-caption);
 }
 .gyro-sidebar-section .gyro-scm-panel .gyro-sidebar-scm-sync {

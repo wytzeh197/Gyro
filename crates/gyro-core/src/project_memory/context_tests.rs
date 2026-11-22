@@ -149,6 +149,61 @@ fn receipts_are_idempotent_content_free_and_bound_to_acknowledged_provider_threa
     );
 }
 
+#[test]
+fn empty_memory_receipts_preserve_thread_acknowledgement_without_a_transcript_write() {
+    let temp = tempfile::tempdir().unwrap();
+    let paths = GyroPaths::from_base_dir(temp.path().join("private"));
+    let store = SessionStore::open(paths.clone()).unwrap();
+    let session = store
+        .create_session(temp.path(), SessionOrigin::Desktop, "memory")
+        .unwrap();
+    let mut prepared = prepare_memory_context(&store, &session, &request(&session), None).unwrap();
+    let (text, receipt) = prepared.render(false);
+    assert!(text.is_empty());
+    let revision = store.transcript_revision(session.id).unwrap();
+    let turn = uuid::Uuid::new_v4();
+    let cursor = json!({"kind":"codex-session","sessionId":"provider-thread"});
+
+    store
+        .record_project_memory_receipt(session.id, turn, "openai", &receipt)
+        .unwrap();
+    assert_eq!(store.transcript_revision(session.id).unwrap(), revision);
+    let records = store.project_memory_receipts(session.id).unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        records[0]["receipt"],
+        serde_json::to_value(&receipt).unwrap()
+    );
+    assert!(store
+        .previous_project_memory_receipt(session.id, "openai", &cursor)
+        .unwrap()
+        .is_none());
+
+    store
+        .acknowledge_project_memory_receipt(session.id, turn, "openai", &cursor, &receipt)
+        .unwrap();
+    drop(store);
+    let reopened = SessionStore::open(paths).unwrap();
+    prepared.previous = reopened
+        .previous_project_memory_receipt(session.id, "openai", &cursor)
+        .unwrap();
+    assert_eq!(prepared.previous.as_ref(), Some(&receipt));
+    assert!(prepared.render(true).0.is_empty());
+
+    let mut unknown_thread = prepared;
+    unknown_thread.previous = None;
+    let (text, reset) = unknown_thread.render(true);
+    assert!(text.contains("disregard all earlier project memory"));
+    reopened
+        .record_project_memory_receipt(session.id, uuid::Uuid::new_v4(), "openai", &reset)
+        .unwrap();
+    assert!(reopened
+        .read_events(session.id)
+        .unwrap()
+        .iter()
+        .any(|event| event.payload["kind"] == "project-memory-context"));
+}
+
 #[cfg(unix)]
 #[test]
 fn confined_reads_reject_symlinked_directories_files_and_nonregular_sources() {

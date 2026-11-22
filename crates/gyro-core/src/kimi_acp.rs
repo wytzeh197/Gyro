@@ -134,9 +134,6 @@ pub fn answer_looks_cut_off(text: &str) -> bool {
         before_trailing_control_lines, has_complete_clarification,
     };
     let prose = before_trailing_control_lines(text);
-    if has_complete_clarification(prose, &text[prose.len()..]) {
-        return false;
-    }
     let trimmed = prose.trim();
     if trimmed.chars().take(80).count() < 80 {
         return false;
@@ -145,13 +142,10 @@ pub fn answer_looks_cut_off(text: &str) -> bool {
         return false;
     }
     let trimmed = trimmed.trim_end_matches(['"', '\'', '\u{2019}', '*', '_', '`', ')', ']', '}']);
-    if trimmed.ends_with("...") || trimmed.ends_with('\u{2026}') {
-        return true;
-    }
-    matches!(
-        trimmed.chars().next_back(),
-        Some(last) if !matches!(last, '.' | '!' | '?' | ':')
-    )
+    let looks_cut_off = trimmed.ends_with("...")
+        || trimmed.ends_with('\u{2026}')
+        || matches!(trimmed.chars().next_back(), Some(last) if !matches!(last, '.' | '!' | '?' | ':'));
+    looks_cut_off && !has_complete_clarification(prose, &text[prose.len()..])
 }
 
 /// A boolean the provider set on this result. Token totals and prose are not a cut.
@@ -4423,12 +4417,13 @@ done
 
     #[cfg(unix)]
     #[test]
-    fn complete_plan_with_control_trailers_uses_one_generation() {
+    fn plan_continuation_respects_clarifications_and_token_limits() {
         let prose = "Verify the new worker reads the existing lease, preserves queued work, and correctly handles an expired lease.";
-        let answer = format!(
-            "{prose}\n{}\n{}",
-            r#"GYRO_QUESTIONS: {"questions":[{"question":"Which rollout?","options":[{"label":"Pilot"},{"label":"All"}]}]}"#,
-            r#"GYRO_TASKS: {"tasks":[{"title":"Measure queue age","prompt":"Capture the wait time"}]}"#,
+        let question = r#"GYRO_QUESTIONS: {"questions":[{"question":"Which rollout?","options":[{"label":"Pilot"},{"label":"All"}]}]}"#;
+        let tasks = r#"GYRO_TASKS: {"tasks":[{"title":"Measure queue age","prompt":"Capture the wait time"}]}"#;
+        let answer = format!("{prose}\n{question}\n{tasks}");
+        let clarification = format!(
+            "The inspection is complete and the remaining decision is which rollout you want me to plan for\n{question}\n{tasks}"
         );
         let update = |text: &str| {
             json!({
@@ -4461,8 +4456,9 @@ done
 "#;
         for (initial, stop, continuation) in [
             (answer.as_str(), "end_turn", None),
+            (clarification.as_str(), "end_turn", None),
             ("Verify the new worker reads the existing lease, preserves queued work, and correctly handles an", "end_turn", Some(" expired lease.")),
-            (answer.as_str(), "max_tokens", Some("\nThe provider finished the final check.")),
+            (clarification.as_str(), "max_tokens", Some("\nThe provider finished the final check.")),
         ] {
             let (temp, program) = acp_fixture(&script
                 .replace("FIRST_UPDATE", &update(initial))
@@ -4482,6 +4478,28 @@ done
             assert_eq!(output.response, format!("{initial}{}", continuation.unwrap_or("")));
             assert!(!output.truncated);
         }
+    }
+
+    #[test]
+    fn plan_cutoff_still_detects_broken_question_trailers_and_unfinished_examples() {
+        let lead = "The inspection is complete and the remaining decision is which rollout you want me to plan for";
+        let question = r#"GYRO_QUESTIONS: {"questions":[{"question":"Which rollout?","options":["Pilot","All"]}]}"#;
+        assert!(!answer_looks_cut_off(&format!("{lead}\n{question}")));
+        for trailer in [
+            r#"GYRO_QUESTIONS: {"questions":[{"question":"Which rollout?","options":["Pilot"]}]}"#,
+            r#"GYRO_QUESTIONS: {"questions":[{"question":"Which rollout?","options":["Pilot","#,
+        ] {
+            assert!(answer_looks_cut_off(&format!("{lead}\n{trailer}")));
+        }
+        assert!(answer_looks_cut_off(&format!(
+            "{lead}\n```json\n{question}"
+        )));
+        assert!(answer_looks_cut_off(&format!(
+            "{lead}\n~~~~text\n{question}"
+        )));
+        assert!(!answer_looks_cut_off(&format!(
+            "```text\n[completed example]\n```\n{lead}\n{question}"
+        )));
     }
 
     #[cfg(unix)]

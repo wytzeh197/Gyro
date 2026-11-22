@@ -407,6 +407,7 @@ function terminalThemeFor(theme: ResolvedTheme) {
       magenta: "#8724ac",
       red: "#b5273d",
       selectionBackground: "#bcd9ff",
+      selectionForeground: "#2c2c2c",
       white: "#535b66",
       yellow: "#835800",
     };
@@ -432,6 +433,7 @@ function terminalThemeFor(theme: ResolvedTheme) {
     magenta: "#be83ff",
     red: "#ff7789",
     selectionBackground: "#245489",
+    selectionForeground: "#ededed",
     white: "#dddddd",
     yellow: "#f6c968",
   };

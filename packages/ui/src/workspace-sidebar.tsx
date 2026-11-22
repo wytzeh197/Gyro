@@ -3843,7 +3843,7 @@ export function WorkspaceSidebarContent({
                 type="button"
               >
                 <Plus size={15} />
-                New session
+                <span>New session</span>
               </button>
               <SurfacePresence>{newSessionMenuView !== "closed" ? (
                 <div

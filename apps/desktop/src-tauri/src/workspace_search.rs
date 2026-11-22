@@ -264,45 +264,31 @@ pub(super) fn bound_model_search_results(
     results: Vec<WorkspaceSearchResult>,
     max_bytes: usize,
 ) -> anyhow::Result<(Vec<serde_json::Value>, bool)> {
-    let results = results
-        .into_iter()
-        .map(model_search_preview)
-        .collect::<anyhow::Result<Vec<_>>>()?;
     let original_count = results.len();
-    // Encode each match once. A compact JSON array is `[` + items joined by
-    // `,` + `]`, so the longest fitting prefix is a running sum — not a fresh
-    // serialization of the whole prefix at every binary-search step.
-    let mut item_lengths = Vec::with_capacity(original_count);
-    for result in &results {
-        item_lengths.push(serde_json::to_vec(result)?.len());
-    }
-    let keep = longest_json_array_prefix(&item_lengths, max_bytes);
-    if keep == 0 && original_count > 0 {
-        anyhow::bail!("A Workspace search match exceeds maxBytes; narrow the query or increase the byte budget");
-    }
-    let mut results = results;
-    results.truncate(keep);
-    Ok((results, keep < original_count))
-}
-
-/// How many leading items fit in a compact JSON array of at most `max_bytes`.
-fn longest_json_array_prefix(item_lengths: &[usize], max_bytes: usize) -> usize {
     let mut used = 2usize; // `[]`
-    let mut keep = 0usize;
-    for (index, size) in item_lengths.iter().copied().enumerate() {
-        let Some(with_item) = used.checked_add(size) else {
-            break;
-        };
-        let Some(next) = with_item.checked_add(usize::from(index > 0)) else {
+    let mut previews = Vec::new();
+    for result in results {
+        let preview = model_search_preview(result)?;
+        let size = serde_json::to_vec(&preview)?.len();
+        let Some(next) = used
+            .checked_add(size)
+            .and_then(|bytes| bytes.checked_add(usize::from(!previews.is_empty())))
+        else {
             break;
         };
         if next > max_bytes {
+            // The reply contains a prefix in search order. Later matches
+            // cannot be returned, so their lines need no preview or redaction.
             break;
         }
         used = next;
-        keep = index + 1;
+        previews.push(preview);
     }
-    keep
+    if previews.is_empty() && original_count > 0 {
+        anyhow::bail!("A Workspace search match exceeds maxBytes; narrow the query or increase the byte budget");
+    }
+    let limited = previews.len() < original_count;
+    Ok((previews, limited))
 }
 
 fn model_search_preview(result: WorkspaceSearchResult) -> anyhow::Result<serde_json::Value> {
@@ -333,21 +319,24 @@ fn model_search_preview(result: WorkspaceSearchResult) -> anyhow::Result<serde_j
     }
     let (start, start_column) = start.unwrap_or((0, 0));
     let end_column = units;
-    let visible = result
-        .ranges
-        .iter()
-        .filter(|range| range.end_column > start_column + 1 && range.start_column <= end_column + 1)
+    let mut visible = result.ranges.iter().filter(|range| {
+        range.end_column > start_column + 1 && range.start_column <= end_column + 1
+    });
+    let ranges = visible
+        .by_ref()
+        .take(MAX_PREVIEW_RANGES)
         .collect::<Vec<_>>();
+    let ranges_truncated = visible.next().is_some();
     let mut data = serde_json::json!({
         "path": result.path, "lineNumber": result.line_number,
         "line": &line[start..end],
-        "ranges": visible.iter().take(MAX_PREVIEW_RANGES).collect::<Vec<_>>(),
+        "ranges": ranges,
     });
     if start != 0 || end != line.len() {
         data["lineStartColumn"] = serde_json::json!(start_column + 1);
         data["lineTruncated"] = serde_json::json!(true);
     }
-    if visible.len() > MAX_PREVIEW_RANGES {
+    if ranges_truncated {
         data["rangesTruncated"] = serde_json::json!(true);
     }
     if line != result.line {
@@ -895,10 +884,9 @@ mod tests {
         assert!(expected > 0 && expected < previews.len());
         let (bounded, limited) = bound_model_search_results(inputs, budget).unwrap();
         assert!(limited);
-        assert_eq!(bounded.len(), expected);
         assert_eq!(
-            serde_json::to_vec(&bounded).unwrap().len(),
-            serde_json::to_vec(&previews[..expected]).unwrap().len()
+            serde_json::to_vec(&bounded).unwrap(),
+            serde_json::to_vec(&previews[..expected]).unwrap()
         );
     }
 

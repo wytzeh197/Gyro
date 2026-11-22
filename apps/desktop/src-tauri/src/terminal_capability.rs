@@ -11,14 +11,14 @@ use crate::{
         },
         provider_run::BoundProviderCapabilityContext,
     },
-    terminal::types::{TerminalPaneSnapshot, TerminalProcessManager},
+    terminal::types::{TerminalOutputCursor, TerminalPaneSnapshot, TerminalProcessManager},
     terminal_wait,
 };
 use gyro_core::{
     timing, CapabilityId, CapabilityRequest, CapabilityResourceRef, WorkspaceContextSnapshot,
 };
 use serde_json::{json, Value};
-use std::{collections::VecDeque, sync::Mutex, time::Duration};
+use std::{borrow::Cow, collections::VecDeque, sync::Mutex, time::Duration};
 use tauri::Manager;
 
 const RETAINED_OUTPUT_COUNT: usize = 16;
@@ -207,7 +207,15 @@ pub(super) fn execute(
     let arguments = &request.arguments;
     workspace_result_byte_limit(arguments)?;
     capability_output_budget::offset(arguments, "outputOffset")?;
-    let known_revision = if arguments.get("outputOffset").is_some() {
+    let known_cursor: Option<TerminalOutputCursor> = match request.capability_id {
+        CapabilityId::TerminalRead | CapabilityId::TerminalWait => arguments
+            .get("knownOutputCursor")
+            .map(|cursor| serde_json::from_value(cursor.clone()))
+            .transpose()
+            .map_err(|_| anyhow::anyhow!("knownOutputCursor must be a pane.outputCursor from a previous terminal read or wait"))?,
+        _ => None,
+    };
+    let known_revision = if known_cursor.is_some() || arguments.get("outputOffset").is_some() {
         None
     } else {
         capability_output_budget::offset(arguments, "knownOutputRevision")?
@@ -272,11 +280,33 @@ pub(super) fn execute(
     if known_revision == Some(snapshot.output_revision) {
         snapshot.output = None;
     }
+    let output_delta = known_cursor.as_ref().map(|cursor| {
+        retain_appended_output(&mut snapshot.output, &mut snapshot.output_cursor, cursor)
+    });
     let resource = CapabilityResourceRef {
         id: owned.resource_id,
         kind: "terminal".into(),
         label: snapshot.title.clone(),
     };
+    let mut data = json!({
+        "completed": snapshot.status != "running",
+        "exitCode": snapshot.exit_code,
+        "pane": snapshot,
+        "stoppedBy": if request.capability_id == CapabilityId::TerminalStop {
+            Some("model")
+        } else {
+            None
+        },
+        "owner": {
+            "kind": "model",
+            "sessionId": owned.session_id,
+            "turnId": owned.turn_id,
+            "callId": owned.call_id,
+        }
+    });
+    if let Some(delta) = output_delta {
+        data["outputDelta"] = json!(delta);
+    }
     Ok((
         if request.capability_id == CapabilityId::TerminalWait {
             if snapshot.status == "running" {
@@ -305,27 +335,45 @@ pub(super) fn execute(
         } else {
             "Stopped model terminal".into()
         },
-        bound_terminal_result(
-            serde_json::json!({
-                "completed": snapshot.status != "running",
-                "exitCode": snapshot.exit_code,
-                "pane": snapshot,
-                "stoppedBy": if request.capability_id == CapabilityId::TerminalStop {
-                    serde_json::Value::from("model")
-                } else {
-                    serde_json::Value::Null
-                },
-                "owner": {
-                    "kind": "model",
-                    "sessionId": owned.session_id,
-                    "turnId": owned.turn_id,
-                    "callId": owned.call_id,
-                }
-            }),
-            arguments,
-        )?,
+        bound_terminal_result(data, arguments)?,
         Some(resource),
     ))
+}
+
+/// Offsets refer to the retained UTF-8 stream before model-facing redaction.
+/// When a secret needs masking, keep the whole window for the usual redactor
+/// so trimming its prefix cannot expose a credential split at the cursor.
+fn retain_appended_output(
+    output: &mut Option<String>,
+    retained: &mut TerminalOutputCursor,
+    known: &TerminalOutputCursor,
+) -> bool {
+    let Some(text) = output.as_mut() else {
+        return false;
+    };
+    let Some(offset) = known
+        .end
+        .checked_sub(retained.start)
+        .and_then(|bytes| usize::try_from(bytes).ok())
+    else {
+        return false;
+    };
+    if known.generation != retained.generation
+        || known.start > known.end
+        || retained.end.checked_sub(retained.start) != Some(text.len() as u64)
+        || !text.is_char_boundary(offset)
+    {
+        return false;
+    }
+    if offset != 0
+        && offset != text.len()
+        && matches!(gyro_core::security::redact_secrets_cow(text), Cow::Owned(_))
+    {
+        return false;
+    }
+    text.drain(..offset);
+    retained.start = known.end;
+    true
 }
 
 /// Control keys a model may send. Named keys keep escape sequences out of the
@@ -472,6 +520,160 @@ pub(super) fn bound_command_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_cursor_sends_only_new_evidence_through_api_and_mcp() {
+        use gyro_core::{CapabilityResponse, CapabilityResult, GyroPaths};
+        let paths =
+            GyroPaths::from_base_dir(std::env::temp_dir().join("gyro-terminal-cursor-test"));
+        let previous = "compile cache hit\n".repeat(380);
+        let appended = "FAILED: final check 🦀\n";
+        let known = TerminalOutputCursor {
+            generation: "same-command".into(),
+            start: 0,
+            end: previous.len() as u64,
+        };
+        let full = format!("{previous}{appended}");
+        let full_cursor = TerminalOutputCursor {
+            end: full.len() as u64,
+            ..known.clone()
+        };
+        let mut output = Some(full.clone());
+        let mut cursor = full_cursor.clone();
+        assert!(retain_appended_output(&mut output, &mut cursor, &known));
+        assert_eq!(output.as_deref(), Some(appended));
+        assert_eq!(cursor.start, known.end);
+        assert_eq!(cursor.end, full_cursor.end);
+        let observation = |output: Option<String>, cursor: &TerminalOutputCursor| {
+            json!({"completed": true, "exitCode": 1,
+                "pane": {"output": output, "outputRevision": 2, "outputCursor": cursor, "status":"failed","outputComplete":true}})
+        };
+        let entire =
+            bound_terminal_result(observation(Some(full), &full_cursor), &json!({})).unwrap();
+        let mut data = observation(output, &cursor);
+        data["outputDelta"] = json!(true);
+        let delta = bound_terminal_result(data, &json!({})).unwrap();
+        for id in [CapabilityId::TerminalRead, CapabilityId::TerminalWait] {
+            let (properties, _) = capability_output_budget::schema(id).unwrap();
+            assert!(properties["knownOutputCursor"].is_object());
+            let response = |data| {
+                CapabilityResponse::completed(
+                    "test",
+                    CapabilityResult {
+                        call_id: uuid::Uuid::nil(),
+                        capability_id: id,
+                        summary: "Terminal observation".into(),
+                        data,
+                        resource: None,
+                    },
+                )
+            };
+            let api_full = gyro_core::provider_runtime::tool_batch::model_response_text(&response(
+                entire.clone(),
+            ))
+            .unwrap();
+            let api = gyro_core::provider_runtime::tool_batch::model_response_text(&response(
+                delta.clone(),
+            ))
+            .unwrap();
+            let mcp_full = crate::capabilities::mcp_server::capability_mcp_response(
+                &paths,
+                response(entire.clone()),
+                false,
+            )
+            .unwrap();
+            let mcp = crate::capabilities::mcp_server::capability_mcp_response(
+                &paths,
+                response(delta.clone()),
+                false,
+            )
+            .unwrap();
+            let mcp = mcp["content"][0]["text"].as_str().unwrap();
+            let mcp_full = mcp_full["content"][0]["text"].as_str().unwrap();
+            println!(
+                "{id}: API {} -> {} bytes, MCP {} -> {} bytes",
+                api_full.len(),
+                api.len(),
+                mcp_full.len(),
+                mcp.len()
+            );
+            assert!(api.len() * 5 < api_full.len());
+            assert!(mcp.len() * 5 < mcp_full.len());
+            let api = serde_json::from_str::<Value>(&api).unwrap();
+            let mcp = serde_json::from_str::<Value>(mcp).unwrap();
+            for data in [&api["result"]["data"], &mcp["data"]] {
+                assert_eq!(data["outputDelta"], true);
+                assert_eq!(data["pane"]["output"], appended);
+                assert_eq!(data["pane"]["outputCursor"]["start"], known.end);
+                assert_eq!(data["pane"]["outputRevision"], 2);
+                assert_eq!(data["pane"]["outputComplete"], true);
+                assert_eq!(data["exitCode"], 1);
+            }
+        }
+    }
+
+    #[test]
+    fn terminal_cursor_falls_back_for_stale_positions_or_credentials_crossing_it() {
+        let text = "🦀 fresh output";
+        let retained = TerminalOutputCursor {
+            generation: "command".into(),
+            start: 50,
+            end: 50 + text.len() as u64,
+        };
+        for invalid in [
+            TerminalOutputCursor {
+                generation: "old-command".into(),
+                ..retained.clone()
+            },
+            TerminalOutputCursor {
+                start: 0,
+                end: 49,
+                ..retained.clone()
+            },
+            TerminalOutputCursor {
+                end: 51,
+                ..retained.clone()
+            },
+            TerminalOutputCursor {
+                end: retained.end + 1,
+                ..retained.clone()
+            },
+        ] {
+            let mut output = Some(text.into());
+            let mut cursor = retained.clone();
+            assert!(!retain_appended_output(&mut output, &mut cursor, &invalid));
+            assert_eq!(output.as_deref(), Some(text));
+            assert_eq!(cursor.start, retained.start);
+        }
+        let mut output = Some(text.into());
+        let mut cursor = retained.clone();
+        assert!(retain_appended_output(&mut output, &mut cursor, &retained));
+        assert_eq!(output.as_deref(), Some(""));
+        assert_eq!(cursor.start, retained.end);
+
+        let prefix = "{\"token\":\"";
+        let suffix = "test-only-terminal-value\"}\n";
+        assert!(matches!(
+            gyro_core::security::redact_secrets_cow(suffix),
+            Cow::Borrowed(_)
+        ));
+        let full = format!("{prefix}{suffix}");
+        let mut output = Some(full.clone());
+        let mut retained = TerminalOutputCursor {
+            generation: "command".into(),
+            start: 0,
+            end: full.len() as u64,
+        };
+        let known = TerminalOutputCursor {
+            end: prefix.len() as u64,
+            ..retained.clone()
+        };
+        assert!(!retain_appended_output(&mut output, &mut retained, &known));
+        let bounded = bound_terminal_result(json!({"pane":{"output":output}}), &json!({})).unwrap();
+        let text = bounded["pane"]["output"].as_str().unwrap();
+        assert!(text.contains("[REDACTED]"));
+        assert!(!text.contains("test-only-terminal-value"));
+    }
 
     #[test]
     fn terminal_replies_are_compact_on_api_and_mcp_for_every_operation() {

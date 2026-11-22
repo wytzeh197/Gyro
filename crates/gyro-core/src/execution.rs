@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 const EXECUTION_CHANNEL_CAPACITY: usize = 128;
 const EXECUTION_READ_CHUNK_BYTES: usize = 8 * 1024;
 const EXECUTION_POLL_INTERVAL: Duration = Duration::from_millis(20);
+const EXECUTION_CLOSED_PIPE_INITIAL_WAIT: Duration = Duration::from_micros(250);
+const EXECUTION_CLOSED_PIPE_MAX_WAIT: Duration = Duration::from_millis(2);
 const EXECUTION_TERMINATION_GRACE: Duration = Duration::from_millis(250);
 /// How often a terminating process group is checked for having exited, so a
 /// group that dies on SIGTERM is not held for the whole grace period.
@@ -343,6 +345,9 @@ where
 
     let started_at = Instant::now();
     let mut last_activity_at = Instant::now();
+    let mut closed_pipe_wait = EXECUTION_CLOSED_PIPE_INITIAL_WAIT;
+    #[cfg(target_os = "macos")]
+    let mut exit_watch = None;
     let mut stdout_text = String::new();
     let mut stderr_text = String::new();
     let mut stdout_chars = 0usize;
@@ -407,25 +412,51 @@ where
                 return Err(error).context("poll execution process");
             }
         }
-        if let Ok(chunk) = receiver.recv_timeout(EXECUTION_POLL_INTERVAL) {
-            last_activity_at = Instant::now();
-            handle_chunk(
-                chunk,
-                &mut on_chunk,
-                &mut stdout_text,
-                &mut stderr_text,
-                &mut stdout_chars,
-                &mut stderr_chars,
-                request.max_stdout_chars,
-                request.max_stderr_chars,
-                &mut stdout_truncated,
-                &mut stderr_truncated,
-                &mut output_budget,
-            );
-            if output_budget.exceeded {
-                child.terminate();
-                break ExecutionTermination::OutputLimit;
+        let mut wait =
+            EXECUTION_POLL_INTERVAL.min(request.timeout.saturating_sub(started_at.elapsed()));
+        if let Some(timeout) = request.inactivity_timeout {
+            wait = wait.min(timeout.saturating_sub(last_activity_at.elapsed()));
+        }
+        let chunk = match receiver.recv_timeout(wait) {
+            Ok(chunk) => chunk,
+            // A child may close or redirect its output long before it exits.
+            // The disconnected receiver returns immediately. Back off without
+            // delaying exit by the longer poll used while output can wake us.
+            Err(RecvTimeoutError::Disconnected) => {
+                #[cfg(target_os = "macos")]
+                {
+                    if let Some(watch) = exit_watch.get_or_insert_with(|| {
+                        crate::process_guard::ChildExitWatch::new(child.child.id()).ok()
+                    }) {
+                        if watch.wait(wait).is_ok() {
+                            continue;
+                        }
+                        exit_watch = Some(None);
+                    }
+                }
+                thread::sleep(wait.min(closed_pipe_wait));
+                closed_pipe_wait = (closed_pipe_wait * 2).min(EXECUTION_CLOSED_PIPE_MAX_WAIT);
+                continue;
             }
+            Err(RecvTimeoutError::Timeout) => continue,
+        };
+        last_activity_at = Instant::now();
+        handle_chunk(
+            chunk,
+            &mut on_chunk,
+            &mut stdout_text,
+            &mut stderr_text,
+            &mut stdout_chars,
+            &mut stderr_chars,
+            request.max_stdout_chars,
+            request.max_stderr_chars,
+            &mut stdout_truncated,
+            &mut stderr_truncated,
+            &mut output_budget,
+        );
+        if output_budget.exceeded {
+            child.terminate();
+            break ExecutionTermination::OutputLimit;
         }
     };
 
@@ -1040,6 +1071,39 @@ mod tests {
 
         assert_eq!(outcome.termination, ExecutionTermination::Cancelled);
         assert_eq!(outcome.duration_ms, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn closing_output_does_not_end_a_running_command() {
+        let mut request = ExecutionRequest::new("/bin/sh");
+        request.args = vec![
+            "-c".into(),
+            "printf 'last output\\n'; exec 1>&- 2>&-; sleep 0.05; exit 7".into(),
+        ];
+        request.timeout = Duration::from_secs(3);
+
+        let outcome = run_command(request, CancellationToken::default(), |_| {}).unwrap();
+
+        assert_eq!(outcome.exit_code(), Some(7));
+        assert_eq!(outcome.stdout, "last output\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn closing_output_still_allows_the_inactivity_deadline_to_stop_the_command() {
+        let mut request = ExecutionRequest::new("/bin/sh");
+        request.args = vec![
+            "-c".into(),
+            "printf 'last output\\n'; exec 1>&- 2>&-; exec sleep 10".into(),
+        ];
+        request.timeout = Duration::from_secs(3);
+        request.inactivity_timeout = Some(Duration::from_millis(80));
+
+        let outcome = run_command(request, CancellationToken::default(), |_| {}).unwrap();
+
+        assert_eq!(outcome.termination, ExecutionTermination::Inactive);
+        assert_eq!(outcome.stdout, "last output\n");
     }
 
     #[test]

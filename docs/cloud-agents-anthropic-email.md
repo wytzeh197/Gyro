@@ -1,6 +1,6 @@
 # Anthropic approval email draft
 
-Prepared 2026-11-16 and revised 2026-11-18 for Wytze's review. Unsent draft.
+Prepared 2026-11-16 and revised 2026-11-21 for Wytze’s review. Unsent draft.
 Anthropic's [Claude Code commercial guidance](https://code.claude.com/docs/en/legal-and-compliance#can-customers-offer-claude-code-in-their-products)
 directs questions about authentication to [Anthropic Sales](https://www.anthropic.com/contact-sales).
 
@@ -27,10 +27,13 @@ and subscription tokens out of Gyro's control plane.
 
 Is that outbound key handling compatible with your commercial conditions on
 intermediating usage? The prototype restricts outbound traffic to the provider
-API and the user's selected GitHub repository. Your guidance says hosted
-products must preserve Claude Code's built-in authentication methods. Which
-authentication flows must the sandbox network permit before we can run this
-pilot, and is a separate agreement needed for Gyro to charge for sandbox time?
+API, public npm and PyPI package reads, and the user's selected GitHub
+repository, which means Claude account sign-in cannot complete inside the
+sandbox. Your guidance says hosted products may not remove, disable or restrict
+Claude Code's built-in authentication methods. Does an API-key-only pilot with
+that network restriction meet this condition, or must the sandbox network
+permit Claude account sign-in before we run it? Is a separate agreement needed
+for Gyro to charge for sandbox time?
 
 For a later phase, we’re considering letting the user sign in directly through
 Anthropic’s own flow inside the unmodified Claude Code CLI. Gyro would neither

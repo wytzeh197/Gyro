@@ -17,7 +17,7 @@
   width: calc(15px * var(--gyro-ui-scale, 1));
   height: calc(15px * var(--gyro-ui-scale, 1));
   margin: 0;
-  border: 1px solid color-mix(in srgb, var(--gyro-text) 28%, transparent);
+  border: 1px solid var(--gyro-control-edge);
   border-radius: var(--gyro-radius-xs);
   background: var(--gyro-surface-soft);
   color: var(--gyro-primary-text, var(--gyro-surface));
@@ -48,7 +48,7 @@
   border-radius: 50%;
 }
 :where(:is(input[type="checkbox"], input[type="radio"]):hover:not(:disabled)) {
-  border-color: color-mix(in srgb, var(--gyro-accent) 70%, transparent);
+  border-color: var(--gyro-accent);
 }
 :where(:is(input[type="checkbox"], input[type="radio"]):checked),
 :where(:is(input[type="checkbox"]):indeterminate) {
@@ -86,7 +86,7 @@
 :where(input[type="range"])::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: var(--gyro-radius-pill);
-  background: color-mix(in srgb, var(--gyro-text) 14%, transparent);
+  background: var(--gyro-control-edge);
 }
 :where(input[type="range"])::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -102,11 +102,9 @@
 :where(:is(input[type="range"]):hover)::-webkit-slider-thumb {
   transform: scale(1.12);
 }
-:where(:is(input[type="range"]):focus-visible) {
-  outline: none;
-}
-:where(:is(input[type="range"]):focus-visible)::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px var(--gyro-accent-soft);
+:where(input[type="range"]):focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
 }
 :where(:is(input[type="range"]):disabled) {
   cursor: not-allowed;

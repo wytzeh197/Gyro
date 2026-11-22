@@ -33,6 +33,36 @@ pub(super) fn offset_schema() -> Value {
     json!({"type":"integer","minimum":0,"description":"Character offset from the previous result's window. Reuse its nextOffset or previousOffset to read another page."})
 }
 
+struct TextSource<'a> {
+    field: TextField<'a>,
+    text: String,
+    total: usize,
+    requested_start: Option<usize>,
+    first_char: usize,
+    boundaries: Option<Vec<usize>>,
+}
+
+impl TextSource<'_> {
+    fn byte_offset(&self, char_offset: usize) -> usize {
+        let index = char_offset - self.first_char;
+        self.boundaries
+            .as_ref()
+            .map_or(index, |offsets| offsets[index])
+    }
+}
+
+fn char_byte_offset(text: &str, total: usize, offset: usize) -> usize {
+    if offset == total {
+        return text.len();
+    }
+    let index = if offset <= total / 2 {
+        text.char_indices().nth(offset)
+    } else {
+        text.char_indices().rev().nth(total - offset - 1)
+    };
+    index.expect("character offset is within the text").0
+}
+
 pub(super) fn text_result(
     mut data: Value,
     fields: &[TextField<'_>],
@@ -45,30 +75,55 @@ pub(super) fn text_result(
         let Some(text) = data.pointer(field.pointer).and_then(Value::as_str) else {
             continue;
         };
-        let text = text.to_owned();
-        let boundaries = text
-            .char_indices()
-            .map(|(index, _)| index)
-            .chain(std::iter::once(text.len()))
-            .collect::<Vec<_>>();
-        let start = offset(arguments, field.offset)?.map(|start| start.min(boundaries.len() - 1));
-        sources.push((*field, text, boundaries, start));
+        let total = text.chars().count();
+        let requested_start = offset(arguments, field.offset)?.map(|start| start.min(total));
+        // Every candidate in the byte-budget search uses at most max_bytes
+        // characters. Retain only the range those candidates can address.
+        let first_char = requested_start.unwrap_or_else(|| {
+            if field.tail {
+                total.saturating_sub(max_bytes)
+            } else {
+                0
+            }
+        });
+        let count = (total - first_char).min(max_bytes);
+        let (text, boundaries) = if total == text.len() {
+            (&text[first_char..first_char + count], None)
+        } else {
+            let tail = &text[char_byte_offset(text, total, first_char)..];
+            let boundaries: Vec<_> = tail
+                .char_indices()
+                .map(|(index, _)| index)
+                .chain(std::iter::once(tail.len()))
+                .take(count + 1)
+                .collect();
+            let end = *boundaries.last().expect("window has an end boundary");
+            (&tail[..end], Some(boundaries))
+        };
+        sources.push(TextSource {
+            field: *field,
+            text: text.to_owned(),
+            total,
+            requested_start,
+            first_char,
+            boundaries,
+        });
     }
     let update = |data: &mut Value, count: usize| {
-        for (field, text, boundaries, requested_start) in &sources {
-            let total = boundaries.len() - 1;
-            let start = requested_start.unwrap_or_else(|| {
-                if field.tail {
+        for source in &sources {
+            let total = source.total;
+            let start = source.requested_start.unwrap_or_else(|| {
+                if source.field.tail {
                     total.saturating_sub(count)
                 } else {
                     0
                 }
             });
             let end = start.saturating_add(count).min(total);
-            if let Some(value) = data.pointer_mut(field.pointer) {
-                *value = json!(&text[boundaries[start]..boundaries[end]]);
+            if let Some(value) = data.pointer_mut(source.field.pointer) {
+                *value = json!(&source.text[source.byte_offset(start)..source.byte_offset(end)]);
             }
-            data[field.window] = json!({
+            data[source.field.window] = json!({
                 "offset": start, "returnedChars": end - start, "totalChars": total,
                 "truncated": start > 0 || end < total,
                 "nextOffset": (end < total).then_some(end),
@@ -88,7 +143,7 @@ pub(super) fn text_result(
     }
     update(&mut data, low);
     if serde_json::to_vec(&data)?.len() > max_bytes
-        || (low == 0 && sources.iter().any(|(_, text, _, _)| !text.is_empty()))
+        || (low == 0 && sources.iter().any(|source| source.total != 0))
     {
         anyhow::bail!("Observation metadata exceeds maxBytes; increase the byte budget");
     }
@@ -197,6 +252,20 @@ pub(super) fn github_logs_result(
     )
 }
 
+fn terminal_output_cursor_schema() -> Value {
+    json!({
+        "type":"object",
+        "description":"Copy pane.outputCursor from the previous tail read for newly appended output only. When outputDelta is true, use the same cursor with outputOffset to page that output. Omit the cursor to inspect the full retained output.",
+        "additionalProperties":false,
+        "required":["generation","start","end"],
+        "properties":{
+            "generation":{"type":"string"},
+            "start":{"type":"integer","minimum":0},
+            "end":{"type":"integer","minimum":0}
+        }
+    })
+}
+
 pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
     let properties = match id {
         CapabilityId::WorkspaceContext => json!({
@@ -262,6 +331,7 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
         }),
         CapabilityId::TerminalWait => json!({
             "knownOutputRevision": { "type":"integer","minimum":0,"description":"Output revision already received; unchanged output is omitted." },
+            "knownOutputCursor": terminal_output_cursor_schema(),
             "outputOffset": offset_schema(),
             "maxBytes": workspace_result_bytes_schema(),
             "resourceId": { "type": "string", "description": "resource.id returned when this chat started the command" },
@@ -274,7 +344,13 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
             "knownOutputRevision": { "type":"integer","minimum":0,"description":"Output revision already received; unchanged output is omitted." },
             "maxBytes": workspace_result_bytes_schema()
         }),
-        CapabilityId::TerminalRead | CapabilityId::TerminalStop => json!({
+        CapabilityId::TerminalRead => json!({
+            "knownOutputRevision": { "type":"integer","minimum":0,"description":"Output revision already received; unchanged output is omitted." },
+            "knownOutputCursor": terminal_output_cursor_schema(),
+            "outputOffset": offset_schema(),
+            "maxBytes": workspace_result_bytes_schema()
+        }),
+        CapabilityId::TerminalStop => json!({
             "knownOutputRevision": { "type":"integer","minimum":0,"description":"Output revision already received; unchanged output is omitted." },
             "outputOffset": offset_schema(),
             "maxBytes": workspace_result_bytes_schema()
@@ -548,6 +624,38 @@ mod tests {
             cursor = next;
         }
         assert_eq!(reconstructed, source);
+    }
+
+    #[test]
+    fn text_pages_seek_to_a_late_character_offset_in_mixed_width_output() {
+        let source = "aé🦀\t\n".repeat(10_000);
+        let total = source.chars().count();
+        let fields = [TextField {
+            pointer: "/output",
+            window: "outputWindow",
+            offset: "outputOffset",
+            tail: true,
+        }];
+        for requested in [total - 2_117, total - 3, total + 31] {
+            let result = text_result(
+                json!({"output":source}),
+                &fields,
+                &json!({"outputOffset":requested,"maxBytes":1024}),
+            )
+            .unwrap();
+            let window = &result["outputWindow"];
+            let start = requested.min(total);
+            let count = window["returnedChars"].as_u64().unwrap() as usize;
+            let expected: String = source.chars().skip(start).take(count).collect();
+            assert_eq!(result["output"], expected);
+            assert_eq!(window["offset"], start);
+            assert_eq!(window["totalChars"], total);
+            assert_eq!(
+                window["nextOffset"],
+                json!((start + count < total).then_some(start + count))
+            );
+            assert!(serde_json::to_vec(&result).unwrap().len() <= 1024);
+        }
     }
 
     #[test]

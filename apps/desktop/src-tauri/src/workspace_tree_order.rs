@@ -79,6 +79,16 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink(outside.path(), temp.path().join("linked")).unwrap();
         let snapshot = crate::workspace::tree::scan_workspace_tree(temp.path(), 8).unwrap();
+        let listing = crate::workspace::tree::list_workspace_tree_blocking(
+            temp.path().display().to_string(),
+            Some(8),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(listing).unwrap(),
+            serde_json::to_value(&snapshot.files).unwrap()
+        );
+        assert_eq!(snapshot.directories.len(), 3);
         assert!(
             !snapshot
                 .files

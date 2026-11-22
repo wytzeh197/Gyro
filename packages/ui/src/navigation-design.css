@@ -721,6 +721,18 @@
   > button {
   width: 100%;
   font-weight: 500;
+  gap: var(--gyro-space-compact);
+  grid-template-columns: 16px minmax(0, 1fr);
+  padding-block: 0;
+  padding-inline-end: var(--gyro-space-compact);
+}
+
+:root[data-theme]
+  .gyro-sidebar-quick-actions
+  .gyro-sidebar-new-session
+  > button > span {
+  line-height: 1.15;
+  white-space: normal;
 }
 
 :root[data-theme] .gyro-sidebar-quick-actions .gyro-sidebar-icon-action {

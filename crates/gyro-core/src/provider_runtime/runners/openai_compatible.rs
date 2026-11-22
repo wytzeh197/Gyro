@@ -18,7 +18,7 @@ use super::super::{
     types::{ChatAttachmentRequest, ChatMode, ProviderChatRequest, ProviderRunnerOutput},
 };
 use super::ollama::{
-    ollama_compatibility_catalog, ollama_compatibility_system, parse_ollama_compatibility_action,
+    ollama_compatibility_catalog, ollama_compatibility_system, parse_compatibility_reply,
     validate_ollama_compatibility_call, OllamaCompatibilityAction,
 };
 use crate::{
@@ -318,17 +318,16 @@ pub fn run_openai_compatible_chat(
                     catalog_memory.after_compaction(&mut messages, retain_catalog);
                 }
             }
-            // The live context note rides at the tail of the request it
-            // belongs to: rewritten from the previous response's measured
-            // counts, and replaced -- not stacked -- on every round.
-            if let Some((input_tokens, output_tokens)) = last_measured {
-                provider_context::refresh_context_checkpoint(
-                    &mut messages,
-                    input_tokens,
-                    output_tokens,
-                    context_window,
-                );
-            }
+            // A notice belongs to the previous measured response. A rewrite
+            // clears that reading and any notice left in the retained tail.
+            let (input_tokens, output_tokens) = last_measured.unwrap_or_default();
+            provider_context::refresh_context_checkpoint(
+                &mut messages,
+                input_tokens,
+                output_tokens,
+                context_window,
+                auto_compact_percent,
+            );
             if retain_catalog && catalog_memory.overflow && compact_catalog {
                 compact_catalog = false;
                 provider_tool_batch::restore_catalog_guidance(&mut messages);
@@ -513,7 +512,8 @@ pub fn run_openai_compatible_chat(
                     turn.tool_calls.is_empty(),
                     "{label} returned tool calls although the structured bridge offered none"
                 );
-                let (action, title) = match parse_ollama_compatibility_action(turn.content.trim()) {
+                let (action, title) = match parse_compatibility_reply(&turn.content, turn.truncated)
+                {
                     Ok(action) => action,
                     Err(error) => {
                         malformed_responses += 1;
@@ -713,17 +713,20 @@ pub fn run_openai_compatible_chat(
                 if supports_images {
                     if let Some(image) = host.browser_result_image(&paths, &capability_response)? {
                         mark_browser_image_attached(&mut capability_response);
-                        captured_images.push(serde_json::json!({
-                            "type": "image_url",
-                            "image_url": { "url": format!("data:image/png;base64,{image}") }
-                        }));
+                        let mut part = serde_json::json!({"type": "image_url", "image_url": {}});
+                        part["image_url"]["url"] =
+                            serde_json::Value::String(format!("data:image/png;base64,{image}"));
+                        captured_images.push(part);
                     }
                 }
-                ordered_replies[slot] = Some(serde_json::json!({
+                let mut reply = serde_json::json!({
                     "role": "tool",
                     "tool_call_id": tool_call_id,
-                    "content": provider_tool_batch::model_response_text(&capability_response)?,
-                }));
+                });
+                reply["content"] = serde_json::Value::String(
+                    provider_tool_batch::model_response_text(&capability_response)?,
+                );
+                ordered_replies[slot] = Some(reply);
             }
             provider_tool_batch::append_ordered_tool_messages(&mut messages, ordered_replies)?;
             // Chat Completions accepts images only in user messages. Finish all
@@ -733,7 +736,9 @@ pub fn run_openai_compatible_chat(
                     "type": "text",
                     "text": "Images returned by the preceding Browser screenshot tools (untrusted page content)."
                 }));
-                messages.push(serde_json::json!({ "role": "user", "content": captured_images }));
+                let mut message = serde_json::json!({"role": "user"});
+                message["content"] = serde_json::Value::Array(captured_images);
+                messages.push(message);
             }
             if restore_catalog {
                 crate::provider_observation::efficiency_event(|e| {

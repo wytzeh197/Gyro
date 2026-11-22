@@ -75,7 +75,7 @@ try {
     for (const density of ["compact", "comfortable"])
       for (const size of ["small", "default", "large"])
         cases.push({ scene: "welcome", theme, density, size, width: 860, height: 620 });
-    for (const scene of ["welcome", "active-chat", "appearance", "providers", "workspace-diff", "cli"])
+    for (const scene of ["welcome", "active-chat", "general", "appearance", "providers", "workspace-diff", "cli"])
       cases.push({ scene, theme, density: "compact", size: "default", width: 1440, height: 900 });
   }
   for (const state of cases) {
@@ -102,9 +102,9 @@ try {
       await click("Bound the sync");
       await waitFor(() => evaluate('!!document.querySelector(".gyro-chat-turn")'), "chat thread");
     }
-    if (["appearance", "providers"].includes(state.scene)) {
+    if (["general", "appearance", "providers"].includes(state.scene)) {
       await click("Settings");
-      await click(state.scene === "appearance" ? "Appearance" : "Models & accounts");
+      await click({ general: "General", appearance: "Appearance", providers: "Models & accounts" }[state.scene]);
       await waitFor(() => evaluate('!!document.querySelector(".gyro-settings-surface")'), "settings");
     }
     if (["workspace-diff", "cli"].includes(state.scene)) {
@@ -119,7 +119,7 @@ try {
       await waitFor(() => evaluate(`!!document.querySelector("${state.scene === "cli" ? ".gyro-terminal-workspace" : ".gyro-workspace-route"}")`), "workspace");
     }
     // Normalize every supported CSS color through canvas, including color-mix.
-    await evaluate(`window.themeProbe = (selector) => {
+    await evaluate(`window.themeProbe = (selector, property = "color", againstParent = false) => {
       const el = document.querySelector(selector);
       if (!el || !el.getBoundingClientRect().width) return null;
       const style = getComputedStyle(el), rect = el.getBoundingClientRect();
@@ -127,8 +127,9 @@ try {
       const rgba = (color) => { ctx.clearRect(0,0,1,1); ctx.fillStyle=color; ctx.fillRect(0,0,1,1); return [...ctx.getImageData(0,0,1,1).data].map((v,i)=>i===3?v/255:v); };
       const over = (a,b) => [0,1,2].map(i=>a[i]*a[3]+b[i]*(1-a[3])).concat(1);
       const chain=[]; for(let n=el;n;n=n.parentElement) chain.unshift(n);
+      if (againstParent) chain.pop();
       let bg=[255,255,255,1]; for(const n of chain) bg=over(rgba(getComputedStyle(n).backgroundColor),bg);
-      const ink=over(rgba(style.color),bg);
+      const ink=over(rgba(style[property]),bg);
       const lum=(c)=>c.slice(0,3).map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4;}).reduce((a,v,i)=>a+v*[.2126,.7152,.0722][i],0);
       const a=lum(ink),b=lum(bg),contrast=(Math.max(a,b)+.05)/(Math.min(a,b)+.05);
       return { color:style.color,background:style.backgroundColor,contrast,outline:style.outlineStyle,outlineWidth:style.outlineWidth,
@@ -136,13 +137,21 @@ try {
         width:rect.width,height:rect.height,text:el.textContent.trim().slice(0,80) };
     }`);
     const checks = [];
-    const probe = async (selector, label) => {
-      const value = await evaluate(`window.themeProbe(${JSON.stringify(selector)})`);
+    const probe = async (selector, label, { minimum = 4.5, property = "color", againstParent = false } = {}) => {
+      const value = await evaluate(`window.themeProbe(${JSON.stringify(selector)}, ${JSON.stringify(property)}, ${againstParent})`);
       checks.push({ label, ...value });
-      if (!value || value.contrast < 4.5 || !value.visible) failures.push({ name, label, value });
+      if (!value || value.contrast < minimum || !value.visible) failures.push({ name, label, value });
       return value;
     };
     if (state.scene === "welcome") {
+      await probe(".gyro-sidebar-recents-empty", "sidebar empty state");
+      const quickActionsFit = await evaluate(`(() => {
+        const label = document.querySelector(".gyro-sidebar-new-session > button > span");
+        const search = document.querySelector(".gyro-sidebar-quick-actions > button");
+        return label.scrollWidth <= label.clientWidth + 1 &&
+          label.getBoundingClientRect().right < search.getBoundingClientRect().left;
+      })()`);
+      if (!quickActionsFit) failures.push({ name, label: "new-session label overlaps sidebar controls" });
       const selector = ".gyro-context-summary-item.is-workspace-mode";
       await probe(selector, "workspace mode resting");
       const { root } = await call("DOM.getDocument");
@@ -167,10 +176,40 @@ try {
       // Keep the screenshot on the exact hover state reported by the user.
       await call("CSS.forcePseudoState", { nodeId, forcedPseudoClasses: ["hover"] });
     }
+    if (state.scene === "welcome" && state.width === 1440) {
+      await evaluate(`document.querySelector('.gyro-sidebar-quick-actions button[aria-label="Search"]').click()`);
+      const search = ".gyro-command-palette.is-global-search > header input";
+      await waitFor(() => evaluate(`document.activeElement.matches(${JSON.stringify(search)})`), "global search focus");
+      const { root } = await call("DOM.getDocument");
+      const { nodeId } = await call("DOM.querySelector", { nodeId: root.nodeId, selector: search });
+      await call("CSS.forcePseudoState", { nodeId, forcedPseudoClasses: ["focus-visible"] });
+      await pause(200);
+      const indicator = await evaluate(`getComputedStyle(document.activeElement.parentElement).boxShadow`);
+      if (indicator === "none") failures.push({ name, label: "missing global search focus indicator" });
+      await call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
+      await call("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+      await waitFor(() => evaluate(`!document.querySelector(${JSON.stringify(search)})`), "global search dismissed");
+    }
     if (state.scene === "active-chat")
       await probe(".gyro-response-body", "response text");
     if (state.scene === "cli")
       await probe(".gyro-terminal-workspace", "terminal text");
+    if (state.scene === "workspace-diff") {
+      await probe(".gyro-sidebar-scm-row.is-active .gyro-sidebar-scm-state", "selected SCM status");
+      await probe(".gyro-sidebar-scm-row.is-active .gyro-sidebar-scm-directory", "selected SCM directory");
+    }
+    if (state.scene === "general") {
+      const label = "Show Gyro in menu bar";
+      const toggle = `.gyro-settings-switch[aria-label="${label}"]`;
+      const checked = () => evaluate(`document.querySelector(${JSON.stringify(toggle)})?.getAttribute("aria-checked")`);
+      if (await checked() === "true") await click(label);
+      await waitFor(async () => await checked() === "false", "disabled switch state");
+      await probe(toggle, "off switch track", { minimum: 3, property: "borderLeftColor", againstParent: true });
+      await probe(toggle + " > span", "off switch thumb", { minimum: 3, property: "backgroundColor", againstParent: true });
+      await click(label);
+      await waitFor(async () => await checked() === "true", "enabled switch state");
+      await probe(toggle + " > span", "on switch thumb", { minimum: 3, property: "backgroundColor", againstParent: true });
+    }
     if (["appearance", "providers"].includes(state.scene))
       await probe(".gyro-settings-surface h1", "settings heading");
     if (state.scene === "appearance") {

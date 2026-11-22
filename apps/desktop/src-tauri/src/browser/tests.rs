@@ -149,7 +149,6 @@ fn text_research_keeps_source_rules_without_sending_the_surface_guide() {
     for task in [
         "Click the Downloads button on https://example.com",
         "Summarize https://example.com and show its screenshot",
-        "Build a Canvas item about the latest model releases",
     ] {
         request.message = task.into();
         let prompt = provider_context_message_with_capabilities(&request, None, true, true);
@@ -163,6 +162,62 @@ fn text_research_keeps_source_rules_without_sending_the_surface_guide() {
         full.len(),
         research.len()
     );
+}
+
+#[test]
+fn canvas_instructions_include_browser_guidance_only_when_needed() {
+    use gyro_core::provider_runtime::prompts::{claude_chat_prompt, openai_codex_chat_prompt};
+
+    let mut request = anthropic_provider_request();
+    let cases = [
+        (
+            "Build a Canvas calculator for compound interest",
+            false,
+            false,
+        ),
+        (
+            "Build a Canvas item about the latest model releases",
+            false,
+            true,
+        ),
+        (
+            "Put the Browser screenshot next to the explanation in Canvas",
+            true,
+            true,
+        ),
+        (
+            "Click Download on https://example.com and put the result in Canvas",
+            true,
+            true,
+        ),
+    ];
+    for (task, browser, research) in cases {
+        request.message = task.into();
+        let prompt = provider_context_message_with_capabilities(&request, None, true, true);
+        for framed in [
+            claude_chat_prompt(&prompt, None, false, true, false),
+            openai_codex_chat_prompt(&prompt, None, None, false, true, false),
+            prompt,
+        ] {
+            assert_eq!(
+                framed.matches(browser_knowledge::SIDE_PANEL_GUIDE).count(),
+                1,
+                "{task}"
+            );
+            assert_eq!(framed.contains(browser_knowledge::GUIDE), browser, "{task}");
+            assert_eq!(
+                framed.contains("Current browser capability contract"),
+                browser,
+                "{task}"
+            );
+            assert_eq!(
+                framed.contains(browser_knowledge::web_research_context()),
+                research,
+                "{task}"
+            );
+            assert!(framed.ends_with(task));
+        }
+    }
 }
 
 #[test]

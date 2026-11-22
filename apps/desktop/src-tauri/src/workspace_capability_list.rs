@@ -2,9 +2,7 @@
 use crate::{
     capability_workspace_helpers::workspace_result_byte_limit,
     ide::debug::redact_json_strings,
-    workspace::{
-        files::assert_workspace_path, tree::list_workspace_tree_blocking, types::WorkspaceFile,
-    },
+    workspace::{files::assert_workspace_path, tree::list_workspace_tree_blocking},
 };
 use gyro_core::CapabilityResourceRef;
 use serde_json::{json, Value};
@@ -59,34 +57,45 @@ pub(super) fn execute(
     if !directory.is_dir() {
         anyhow::bail!("Workspace list path must be an existing directory");
     }
-    let mut entries = list_workspace_tree_blocking(directory.display().to_string(), Some(depth))
+    let entries = list_workspace_tree_blocking(directory.display().to_string(), Some(depth))
         .map_err(anyhow::Error::msg)?;
-    if let Some(scope) = scope.as_deref() {
-        let prefix_depth = Path::new(scope).components().count();
-        for entry in &mut entries {
+    let total = entries.len();
+    let prefix = scope
+        .as_deref()
+        .map(|scope| (scope, Path::new(scope).components().count()));
+    let mut window = Vec::new();
+    let mut array_lengths = vec![2usize]; // An empty array is `[]`.
+    for mut entry in entries.into_iter().skip(offset).take(limit) {
+        if let Some((scope, prefix_depth)) = prefix {
             entry.path = format!("{scope}/{}", entry.path);
             entry.depth += prefix_depth;
         }
+        // Redact and measure each candidate once. If its array alone is too
+        // large, that prefix cannot fit with the surrounding metadata either.
+        let entry = redact_json_strings(serde_json::to_value(entry)?);
+        let bytes = serde_json::to_vec(&entry)?.len();
+        let used = array_lengths[window.len()];
+        let Some(length) = used.checked_add(bytes + usize::from(!window.is_empty())) else {
+            break;
+        };
+        if length > max_bytes {
+            break;
+        }
+        window.push(entry);
+        array_lengths.push(length);
     }
-    let total = entries.len();
-    let window: Vec<WorkspaceFile> = entries.iter().skip(offset).take(limit).cloned().collect();
-    // Each entry is encoded once. The old loop encoded the whole page again
-    // after every accepted path, so a 200-entry page paid a triangular copy.
-    let entry_lengths = window
-        .iter()
-        .map(redacted_entry_json_len)
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    let keep =
-        entries_within_byte_budget(scope.as_deref(), &entry_lengths, total, offset, max_bytes)?;
-    let page = window[..keep].to_vec();
-    if page.is_empty() && offset < total {
+    let redacted_scope = redact_json_strings(json!(scope));
+    let returned =
+        entries_within_byte_budget(&redacted_scope, &array_lengths, total, offset, max_bytes)?;
+    if returned == 0 && offset < total {
         anyhow::bail!("A Workspace path is too long to return; list a narrower directory");
     }
-    let returned = page.len();
-    let data = redact_json_strings(page_result(scope.as_deref(), &page, total, offset));
-    if serde_json::to_vec(&data)?.len() > max_bytes {
+    let mut data = page_metadata(&redacted_scope, total, offset, returned);
+    if compact_page_len(&data, array_lengths[returned])?.is_none_or(|len| len > max_bytes) {
         anyhow::bail!("Workspace list metadata exceeds maxBytes; increase the byte budget");
     }
+    window.truncate(returned);
+    data["entries"] = Value::Array(window);
     let summary = format!(
         "Listed {returned} of {total} Workspace entries{}",
         scope
@@ -97,32 +106,28 @@ pub(super) fn execute(
     Ok((summary, data, None))
 }
 
-/// Compact JSON length of one redacted entry, as it appears inside `entries`.
-fn redacted_entry_json_len(entry: &WorkspaceFile) -> anyhow::Result<usize> {
-    let value = redact_json_strings(serde_json::to_value(entry)?);
-    Ok(serde_json::to_vec(&value)?.len())
-}
-
 /// How many leading entries fit in the redacted page.
 ///
-/// `page_result` grows as entries are added: the array gains objects, and
+/// `array_lengths[n]` is the encoded array length for the first `n` entries.
+/// The page grows as entries are added: the array gains objects, and
 /// `returned` / `nextOffset` / `hasMore` change. Those three fields are a
 /// small object, so the search re-encodes only that shell. Entry bodies are
 /// the precomputed lengths. Adding an entry cannot shrink the page: the
 /// smallest entry object is larger than the bytes saved when `nextOffset`
 /// flips from a number to `null` on the last page.
 fn entries_within_byte_budget(
-    scope: Option<&str>,
-    entry_lengths: &[usize],
+    scope: &Value,
+    array_lengths: &[usize],
     total: usize,
     offset: usize,
     max_bytes: usize,
 ) -> anyhow::Result<usize> {
     let mut low = 0usize;
-    let mut high = entry_lengths.len();
+    let mut high = array_lengths.len() - 1;
     while low < high {
         let mid = low + (high - low + 1) / 2;
-        match compact_page_len(scope, &entry_lengths[..mid], total, offset)? {
+        let metadata = page_metadata(scope, total, offset, mid);
+        match compact_page_len(&metadata, array_lengths[mid])? {
             Some(len) if len <= max_bytes => low = mid,
             _ => high = mid - 1,
         }
@@ -130,62 +135,25 @@ fn entries_within_byte_budget(
     Ok(low)
 }
 
-/// Byte length of `redact(page_result)` without encoding the entry array again.
+/// Compact JSON length with the already measured entries array.
 ///
 /// The page is the metadata object plus one `"entries"` field. A non-empty
 /// object gains exactly one comma when that field is added, independent of
 /// key order. `None` means the length overflowed.
-fn compact_page_len(
-    scope: Option<&str>,
-    entry_lengths: &[usize],
-    total: usize,
-    offset: usize,
-) -> anyhow::Result<Option<usize>> {
-    let count = entry_lengths.len();
-    let next_offset = offset.saturating_add(count);
-    let has_more = next_offset < total;
-    let metadata = redact_json_strings(json!({
-        "path": scope,
-        "total": total,
-        "returned": count,
-        "offset": offset,
-        "hasMore": has_more,
-        "nextOffset": if has_more { Some(next_offset) } else { None },
-    }));
-    let metadata_len = serde_json::to_vec(&metadata)?.len();
-    let Some(array_len) = json_array_len(entry_lengths) else {
-        return Ok(None);
-    };
-    let Some(with_field) = metadata_len.checked_add(1 + "\"entries\":".len()) else {
-        return Ok(None);
-    };
-    Ok(with_field.checked_add(array_len))
+fn compact_page_len(metadata: &Value, array_len: usize) -> anyhow::Result<Option<usize>> {
+    let metadata_len = serde_json::to_vec(metadata)?.len();
+    Ok(metadata_len
+        .checked_add(",\"entries\":".len())
+        .and_then(|length| length.checked_add(array_len)))
 }
 
-fn json_array_len(item_lengths: &[usize]) -> Option<usize> {
-    let mut total = 2usize; // `[]`
-    for (index, len) in item_lengths.iter().copied().enumerate() {
-        total = total.checked_add(len)?;
-        if index > 0 {
-            total = total.checked_add(1)?;
-        }
-    }
-    Some(total)
-}
-
-fn page_result(
-    scope: Option<&str>,
-    entries: &[WorkspaceFile],
-    total: usize,
-    offset: usize,
-) -> Value {
-    let next_offset = offset.saturating_add(entries.len());
+fn page_metadata(scope: &Value, total: usize, offset: usize, returned: usize) -> Value {
+    let next_offset = offset.saturating_add(returned);
     let has_more = next_offset < total;
     json!({
         "path": scope,
-        "entries": entries,
         "total": total,
-        "returned": entries.len(),
+        "returned": returned,
         "offset": offset,
         "hasMore": has_more,
         "nextOffset": if has_more { Some(next_offset) } else { None },
@@ -195,6 +163,7 @@ fn page_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workspace::types::WorkspaceFile;
     use std::fs;
 
     #[test]
@@ -329,43 +298,48 @@ mod tests {
     fn page_byte_length_matches_the_encoded_document() {
         let files = sample_files();
         let total = files.len();
-        let lengths = files
-            .iter()
-            .map(redacted_entry_json_len)
-            .collect::<anyhow::Result<Vec<_>>>()
-            .unwrap();
-        for (offset, scope) in [(0usize, None), (4, Some("src"))] {
+        for (offset, scope) in [
+            (0usize, Value::Null),
+            (4, json!(format!("sk-{}", "a".repeat(24)))),
+        ] {
+            let redacted_scope = redact_json_strings(scope.clone());
+            let mut array_lengths = Vec::new();
             for count in 0..=files.len() - offset {
                 let slice = &files[offset..offset + count];
-                let encoded = serde_json::to_vec(&redact_json_strings(page_result(
-                    scope, slice, total, offset,
-                )))
-                .unwrap()
-                .len();
+                let mut page = page_metadata(&scope, total, offset, count);
+                page["entries"] = json!(slice);
+                let page = redact_json_strings(page);
+                let array_len = serde_json::to_vec(&page["entries"]).unwrap().len();
+                array_lengths.push(array_len);
+                let metadata = page_metadata(&redacted_scope, total, offset, count);
                 assert_eq!(
-                    compact_page_len(scope, &lengths[offset..offset + count], total, offset)
-                        .unwrap(),
-                    Some(encoded),
+                    compact_page_len(&metadata, array_len).unwrap(),
+                    Some(serde_json::to_vec(&page).unwrap().len()),
                     "count {count} offset {offset}"
                 );
             }
-        }
-        // The last count in this loop is the full remainder, so hasMore is false
-        // and nextOffset is null. Earlier counts still have a numeric nextOffset.
-        let keep = entries_within_byte_budget(None, &lengths, total, 0, 900).unwrap();
-        let mut linear = 0usize;
-        for count in 1..=lengths.len() {
-            let len = compact_page_len(None, &lengths[..count], total, 0)
-                .unwrap()
-                .unwrap();
-            if len <= 900 {
-                linear = count;
-            } else {
-                break;
+            // Check caps around every prefix, including where hasMore flips.
+            for (count, array_len) in array_lengths.iter().copied().enumerate() {
+                let metadata = page_metadata(&redacted_scope, total, offset, count);
+                let cap = compact_page_len(&metadata, array_len).unwrap().unwrap();
+                assert_eq!(
+                    entries_within_byte_budget(&redacted_scope, &array_lengths, total, offset, cap)
+                        .unwrap(),
+                    count
+                );
+                assert_eq!(
+                    entries_within_byte_budget(
+                        &redacted_scope,
+                        &array_lengths,
+                        total,
+                        offset,
+                        cap - 1,
+                    )
+                    .unwrap(),
+                    count.saturating_sub(1)
+                );
             }
         }
-        assert_eq!(keep, linear);
-        assert!(keep > 0 && keep < lengths.len());
     }
 
     fn sample_files() -> Vec<WorkspaceFile> {

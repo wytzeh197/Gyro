@@ -371,6 +371,58 @@ fn register(queue: &OwnedFd, changes: &[libc::kevent]) -> io::Result<()> {
     Ok(())
 }
 
+/// Wait for a specific child to exit when its output pipes can no longer wake
+/// the command runner. The runner still owns status collection and cleanup.
+pub(crate) struct ChildExitWatch(OwnedFd);
+
+impl ChildExitWatch {
+    pub(crate) fn new(pid: u32) -> io::Result<Self> {
+        let fd = unsafe { libc::kqueue() };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let queue = unsafe { OwnedFd::from_raw_fd(fd) };
+        if unsafe { libc::fcntl(queue.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        register(
+            &queue,
+            &[event(pid as usize, libc::EVFILT_PROC, libc::NOTE_EXIT)],
+        )?;
+        Ok(Self(queue))
+    }
+
+    pub(crate) fn wait(&self, timeout: Duration) -> io::Result<()> {
+        let timeout = libc::timespec {
+            tv_sec: timeout.as_secs() as _,
+            tv_nsec: timeout.subsec_nanos() as _,
+        };
+        let mut observed = std::mem::MaybeUninit::<libc::kevent>::uninit();
+        let count = unsafe {
+            libc::kevent(
+                self.0.as_raw_fd(),
+                std::ptr::null(),
+                0,
+                observed.as_mut_ptr(),
+                1,
+                &timeout,
+            )
+        };
+        if count < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::Interrupted {
+                return Err(error);
+            }
+        } else if count > 0 {
+            let observed = unsafe { observed.assume_init() };
+            if observed.flags & libc::EV_ERROR != 0 {
+                return Err(io::Error::from_raw_os_error(observed.data as i32));
+            }
+        }
+        Ok(())
+    }
+}
+
 fn run_body(has_lease: bool) -> io::Result<()> {
     let owner = trusted_parent().ok_or_else(|| io::Error::from_raw_os_error(libc::EPERM))?;
     let owner_started =

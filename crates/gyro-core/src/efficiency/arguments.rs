@@ -1,5 +1,6 @@
 //! Recoverable replay of completed edits. This never changes an executing call.
 use serde_json::Value;
+use std::{borrow::Cow, cell::OnceCell};
 
 const MIN_FIELD_BYTES: usize = 2_048;
 
@@ -21,11 +22,7 @@ pub(super) fn retire(
         let Some(calls) = message.get_mut("tool_calls").and_then(Value::as_array_mut) else {
             continue;
         };
-        let replies: Vec<&Value> = after
-            .iter()
-            .take_while(|m| m["role"] != "assistant")
-            .filter(|m| m["role"] == "tool")
-            .collect();
+        let replies = OnceCell::new();
         let call_count = calls.len();
         for (call_index, call) in calls.iter_mut().enumerate() {
             let Some(name) = call["function"]["name"].as_str() else {
@@ -44,14 +41,14 @@ pub(super) fn retire(
             {
                 continue;
             }
-            let (original, mut parsed, encoded) = match arguments {
+            let parsed = match arguments {
                 Value::String(text) => {
                     let Ok(parsed) = serde_json::from_str::<Value>(text) else {
                         continue;
                     };
-                    (text.clone(), parsed, true)
+                    Cow::Owned(parsed)
                 }
-                Value::Object(_) => (arguments.to_string(), arguments.clone(), false),
+                Value::Object(_) => Cow::Borrowed(arguments),
                 _ => continue,
             };
             let (tool, prefix) = if name == "gyro_tool_invoke" {
@@ -79,6 +76,14 @@ pub(super) fn retire(
             }
             // Only the result paired with this call can establish completion.
             // Stop at the next assistant exchange so a later call cannot qualify it.
+            // Read-only rounds and small edits never need to collect replies.
+            let replies = replies.get_or_init(|| {
+                after
+                    .iter()
+                    .take_while(|m| m["role"] != "assistant")
+                    .filter(|m| m["role"] == "tool")
+                    .collect::<Vec<_>>()
+            });
             let reply = match call.get("id") {
                 Some(Value::String(id)) if !id.is_empty() => replies
                     .iter()
@@ -103,7 +108,12 @@ pub(super) fn retire(
             if !completed {
                 continue;
             }
+            let original = match arguments.as_str() {
+                Some(text) => Cow::Borrowed(text),
+                None => Cow::Owned(arguments.to_string()),
+            };
             let address = super::spill::address(capability, "arguments", &original);
+            let mut parsed = parsed.into_owned();
             for pointer in fields {
                 let Some(Value::String(text)) = parsed.pointer_mut(&pointer) else {
                     continue;
@@ -124,7 +134,7 @@ pub(super) fn retire(
                 continue;
             }
             saved += original.len() - compact.len();
-            call["function"]["arguments"] = if encoded {
+            call["function"]["arguments"] = if arguments.is_string() {
                 Value::String(compact)
             } else {
                 parsed

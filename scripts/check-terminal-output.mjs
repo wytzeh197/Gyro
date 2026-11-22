@@ -76,6 +76,42 @@ const rolled = mergeTerminalOutput(
 assert.equal(new TextEncoder().encode(rolled.output).length, 512 * 1024);
 assert.equal(rolled.outputCursor.start, 4);
 assert.ok(rolled.output.endsWith("😀"));
+
+const unicodePrefix = "😀" + repeated.slice(4);
+const utf8Rollover = mergeTerminalOutput(
+  unicodePrefix,
+  cursor(12, 12 + repeated.length),
+  "é",
+  cursor(12 + repeated.length, 14 + repeated.length),
+);
+assert.equal(utf8Rollover.outputCursor.start, 16);
+assert.equal(utf8Rollover.output, repeated.slice(4) + "é");
+assert.deepEqual(
+  terminalOutputUpdate(
+    unicodePrefix,
+    utf8Rollover.output,
+    cursor(12, 12 + repeated.length),
+    utf8Rollover.outputCursor,
+  ),
+  { reset: false, data: "é" },
+);
+const mixed = "line é😀\r\n".repeat(1024);
+const mixedEnd = new TextEncoder().encode(mixed).length;
+const update = "\x1b[2K😀\r\n";
+assert.deepEqual(
+  terminalOutputUpdate(
+    mixed,
+    mixed + update,
+    cursor(0, mixedEnd),
+    cursor(0, mixedEnd + new TextEncoder().encode(update).length),
+  ),
+  { reset: false, data: update },
+);
+assert.deepEqual(
+  terminalOutputUpdate("", "😀", cursor(0, 2), cursor(0, 4)),
+  { reset: false, data: "��" },
+  "the byte decoder still handles a cursor inside a character",
+);
 console.log(
   "Terminal cursor, restart, repeated-output and UTF-8 delta checks passed",
 );

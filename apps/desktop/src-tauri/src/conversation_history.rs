@@ -77,7 +77,7 @@ fn history_from_store(
     }
     // Scan the existing bounded event window before selecting conversation.
     // Tool activity must not consume the 40-message history allowance.
-    let events = store.read_events(session_uuid).ok()?;
+    let (events, _) = store.read_prompt_history_events(session_uuid).ok()?;
     if model_switch_awaits_first_reply(&events) {
         let transcript = store.read_transcript_events(session_uuid).unwrap_or(events);
         // Model switches use task state independently of experimental prompt
@@ -991,14 +991,23 @@ mod tests {
             Value::Null,
         );
         append(SessionEventKind::UserMessage, "Proceed", Value::Null);
+        append(
+            SessionEventKind::CommandOutput,
+            "unused command output",
+            serde_json::json!({"stdout":"log line\n".repeat(5_000)}),
+        );
         let prefetch = || {
-            let (events, revision) = store.read_events_with_revision(session.id).unwrap();
+            let (events, revision) = store.read_prompt_history_events(session.id).unwrap();
             PrefetchedHistory::new(session.id, revision.unwrap(), events)
         };
         let render = |history| history_from_store(&store, session.id, Default::default(), history);
         let snapshot = prefetch().unwrap();
         assert!(snapshot.is_current(&store, session.id));
         assert!(!snapshot.is_current(&store, Uuid::new_v4()));
+        assert_eq!(
+            snapshot.text,
+            conversation_history_from_events(store.read_events(session.id).unwrap())
+        );
         assert_eq!(render(Some(snapshot)), render(None));
 
         let stale = prefetch().unwrap();

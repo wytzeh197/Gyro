@@ -176,13 +176,24 @@ pub fn session_title_instruction(suggest_title: bool) -> &'static str {
 pub const CHAT_IMAGE_REPLY_INSTRUCTION: &str = "To show the user an image you already have (a screenshot you captured, a workspace image, or an attachment), put it in your reply as a standalone line: ![short description](/absolute/path.png). Only PNG, JPEG, or WebP files inside the selected workspace, the session's attachments, or Gyro's browser-captures directory are rendered; any other path stays as plain text. Never invent a path, and do not claim an image is shown unless you wrote that line.\n";
 pub const SIDE_PANEL_GUIDE: &str = include_str!("../../../../docs/product-knowledge/side-panel.md");
 
-/// Canvas, app previews, or interaction with a web target need the surface guide.
-/// Plain link reading and research use the web reading instructions instead.
+/// The current user request can need Canvas, Browser, or text research
+/// instructions independently.
+pub struct SurfaceGuidance {
+    pub canvas: bool,
+    pub browser: bool,
+    pub web_research: bool,
+}
+
 pub fn needs_surface_guide(message: &str) -> bool {
+    let guidance = surface_guidance(message);
+    guidance.canvas || guidance.browser
+}
+
+pub fn surface_guidance(message: &str) -> SurfaceGuidance {
     let lower = message.to_ascii_lowercase();
-    [
-        "canvas",
-        "gyro_artifacts",
+    let canvas = lower.contains("canvas") || lower.contains("gyro_artifacts");
+    let web_research = web_research_cue(&lower);
+    let browser = [
         "ui preview",
         "component preview",
         "app preview",
@@ -192,7 +203,19 @@ pub fn needs_surface_guide(message: &str) -> bool {
     ]
     .iter()
     .any(|cue| lower.contains(cue))
-        || (web_research_cue(&lower)
+        || (canvas
+            && [
+                "browser",
+                "screenshot",
+                "website",
+                "webpage",
+                "web page",
+                "localhost",
+                "127.0.0.1",
+            ]
+            .iter()
+            .any(|cue| lower.contains(cue)))
+        || (web_research
             && [
                 "click",
                 "scroll",
@@ -209,7 +232,12 @@ pub fn needs_surface_guide(message: &str) -> bool {
                 "127.0.0.1",
             ]
             .iter()
-            .any(|cue| lower.contains(cue)))
+            .any(|cue| lower.contains(cue)));
+    SurfaceGuidance {
+        canvas,
+        browser,
+        web_research,
+    }
 }
 
 pub fn needs_web_research_guidance(message: &str) -> bool {
@@ -417,6 +445,11 @@ pub(crate) fn has_complete_clarification(prose: &str, trailers: &str) -> bool {
     else {
         return false;
     };
+    // The desktop uses the first question payload in the reply. An earlier
+    // marker could take precedence over the trailer being inspected here.
+    if prose.contains(GYRO_QUESTIONS_MARKER) {
+        return false;
+    }
     let Ok(payload) = serde_json::from_str::<serde_json::Value>(payload) else {
         return false;
     };
@@ -447,7 +480,9 @@ fn ends_inside_code_fence(prose: &str) -> bool {
         }
         let rest = &line[width..];
         match fence {
-            Some((opening, minimum)) if marker == opening && width >= minimum && rest.trim().is_empty() => {
+            Some((opening, minimum))
+                if marker == opening && width >= minimum && rest.trim().is_empty() =>
+            {
                 fence = None;
             }
             None if marker == b'~' || !rest.contains('`') => fence = Some((marker, width)),

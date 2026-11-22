@@ -170,36 +170,64 @@ mod tests {
 
     #[test]
     fn live_context_note_replaces_itself_instead_of_stacking() {
-        let mut messages = vec![serde_json::json!({"role": "user", "content": "do the task"})];
-        refresh_context_checkpoint(&mut messages, Some(54_321), Some(1_200), Some(272_000));
-        assert_eq!(messages.len(), 2);
-        let note = messages[1]["content"].as_str().unwrap();
+        let mut messages = vec![
+            serde_json::json!({"role": "system", "content": "instructions"}),
+            serde_json::json!({"role": "user", "content": "do the task"}),
+        ];
+        refresh_context_checkpoint(&mut messages, Some(205_000), Some(1_200), Some(272_000), 85);
+        assert_eq!(messages.len(), 3);
+        let note = messages[2]["content"].as_str().unwrap();
         assert!(note.starts_with(CONTEXT_CHECKPOINT_MARKER));
-        assert!(note.contains("54321 prompt + 1200 output tokens"));
-        assert!(note.contains("272000-token window (79% free)"));
-        assert_eq!(messages[0]["content"], "do the task");
+        assert!(note.contains("205000 prompt + 1200 output tokens"));
+        assert!(note.contains("272000-token window (24% free)"));
+        assert_eq!(messages[1]["content"], "do the task");
 
-        refresh_context_checkpoint(&mut messages, Some(60_000), Some(900), Some(272_000));
-        assert_eq!(messages.len(), 2, "the earlier note is rewritten in place");
-        let note = messages[1]["content"].as_str().unwrap();
-        assert!(note.contains("60000 prompt + 900 output tokens"));
+        refresh_context_checkpoint(&mut messages, Some(220_000), Some(900), Some(272_000), 85);
+        assert_eq!(messages.len(), 3, "the earlier note is rewritten in place");
+        let note = messages[2]["content"].as_str().unwrap();
+        assert!(note.contains("220000 prompt + 900 output tokens"));
     }
 
     #[test]
-    fn live_context_note_needs_a_measurement_and_names_an_unknown_window() {
-        let mut messages = Vec::new();
-        refresh_context_checkpoint(&mut messages, None, Some(12), Some(272_000));
-        assert!(messages.is_empty(), "an unmeasured request writes no note");
+    fn live_context_note_needs_measured_pressure_and_clears_stale_readings() {
+        let mut messages = loop_with_exchanges(0, 0);
+        let head = messages.len();
+        refresh_context_checkpoint(&mut messages, None, Some(12), Some(272_000), 85);
+        assert_eq!(messages.len(), head, "an unmeasured request writes no note");
 
-        refresh_context_checkpoint(&mut messages, Some(1_000), None, None);
-        let note = messages[0]["content"].as_str().unwrap();
-        assert!(note.contains("1000 prompt tokens"));
-        assert!(note.contains("no window size known"));
+        refresh_context_checkpoint(&mut messages, Some(1_000), None, None, 85);
+        assert_eq!(messages.len(), head, "the remaining space is unknown");
 
-        // A round the provider left unmeasured clears the stale reading
-        // instead of leaving a number the model would read as current.
-        refresh_context_checkpoint(&mut messages, None, None, None);
-        assert!(messages.is_empty());
+        refresh_context_checkpoint(&mut messages, Some(74_999), None, Some(100_000), 85);
+        assert_eq!(messages.len(), head, "low pressure needs no notice");
+        refresh_context_checkpoint(&mut messages, Some(74_999), Some(1), Some(100_000), 85);
+        assert_eq!(messages.len(), head + 1, "output also occupies the window");
+        refresh_context_checkpoint(&mut messages, Some(74_999), Some(1), Some(100_000), 90);
+        assert_eq!(messages.len(), head, "the threshold follows the setting");
+
+        refresh_context_checkpoint(&mut messages, Some(2_048), None, Some(4_096), 85);
+        assert_eq!(
+            messages.len(),
+            head + 1,
+            "one fresh read would fill a small window"
+        );
+        // A compaction clears the measured reading as well as its notice.
+        refresh_context_checkpoint(&mut messages, None, None, Some(4_096), 85);
+        assert_eq!(messages.len(), head);
+    }
+
+    #[test]
+    fn refreshing_the_context_note_keeps_marker_text_from_the_user_and_tools() {
+        let mut messages = vec![
+            serde_json::json!({"role":"system","content":"instructions"}),
+            serde_json::json!({"role":"user","content":"[gyro.ctx] Explain this marker."}),
+            serde_json::json!({"role":"tool","content":"[gyro.ctx] Log excerpt."}),
+        ];
+        let original = messages.clone();
+        refresh_context_checkpoint(&mut messages, Some(205_000), Some(1_200), Some(272_000), 85);
+        assert_eq!(messages.len(), original.len() + 1);
+        refresh_context_checkpoint(&mut messages, None, None, Some(272_000), 85);
+        assert_eq!(messages, original);
     }
 
     fn tool_exchange(round: usize, result_characters: usize) -> Vec<Value> {
@@ -355,10 +383,22 @@ mod tests {
             .expect("first compaction");
         messages.extend(tool_exchange(6, 4_000));
         messages.extend(tool_exchange(7, 4_000));
+        let before = messages.clone();
         let compaction =
             auto_compact_messages(&mut messages, Some(7_000), Some(0), Some(8_000), 80)
                 .expect("the new rounds cross the share again");
         assert!(compaction.exchanges >= 1);
+        // The old note was replaced. Only the dropped exchanges count toward
+        // the amount of evidence the new note says was removed.
+        let tail_start = before.len() - (messages.len() - 3);
+        assert_eq!(&messages[3..], &before[tail_start..]);
+        assert_eq!(
+            compaction.characters,
+            before[3..tail_start]
+                .iter()
+                .map(|message| message_size(message).0)
+                .sum::<u64>()
+        );
         assert_eq!(
             messages
                 .iter()
@@ -395,7 +435,7 @@ mod tests {
         messages.push(serde_json::json!({
             "role": "user", "content": "screenshot observation", "images": ["image-data"]
         }));
-        refresh_context_checkpoint(&mut messages, Some(99_000), Some(0), Some(8_000));
+        refresh_context_checkpoint(&mut messages, Some(99_000), Some(0), Some(8_000), 80);
         auto_compact_messages(&mut messages, Some(99_000), Some(0), Some(8_000), 80)
             .expect("older exchanges can be compacted");
         assert_eq!(messages[3]["tool_calls"][0]["id"], "call-9");
@@ -433,7 +473,7 @@ mod tests {
     #[test]
     fn a_checkpoint_before_the_only_exchange_does_not_trigger_compaction() {
         let mut messages = loop_with_exchanges(0, 0);
-        refresh_context_checkpoint(&mut messages, Some(7_000), Some(0), Some(8_000));
+        refresh_context_checkpoint(&mut messages, Some(7_000), Some(0), Some(8_000), 80);
         messages.extend(tool_exchange(1, 400_000));
         let unchanged = messages.clone();
         assert!(

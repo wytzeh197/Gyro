@@ -21,6 +21,9 @@ impl ToolCatalog for DesktopToolCatalog {
     fn schema_ref(&self, id: CapabilityId) -> Cow<'_, Value> {
         crate::capabilities::mcp_server::desktop_capability_tool_schema_ref(id)
     }
+    fn compact_schema_ref(&self, id: CapabilityId) -> Cow<'_, Value> {
+        crate::capabilities::mcp_server::desktop_compact_tool_schema_ref(id)
+    }
     fn observation_byte_limit(&self, arguments: &Value) -> anyhow::Result<usize> {
         crate::capability_workspace_helpers::workspace_result_byte_limit(arguments)
     }

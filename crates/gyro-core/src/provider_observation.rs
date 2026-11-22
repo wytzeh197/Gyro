@@ -302,50 +302,79 @@ pub struct Request {
     accounted_receipt: Option<UsageTokens>,
 }
 
-/// The arrays are immutable for one HTTP exchange, including its retries.
+/// The arrays are immutable for one model round, including its retries.
 /// Each wire attempt still gets its own receipt and envelope measurement.
 pub(crate) struct ChatObservation<'a> {
     messages: &'a [Value],
     tools: Option<&'a [Value]>,
-    array_size: OnceCell<(usize, bool)>,
+    array_size: OnceCell<ChatArraySize>,
     attribution: OnceCell<Attribution>,
+}
+
+struct ChatArraySize {
+    content_chars: usize,
+    payload_chars: usize,
+    unmeasured_content: bool,
 }
 
 impl<'a> ChatObservation<'a> {
     pub(crate) fn new(payload: &ChatPayload<'a>) -> Self {
+        Self::for_arrays(
+            payload.array("messages").unwrap_or_default(),
+            payload.array("tools"),
+        )
+    }
+
+    pub(crate) fn for_arrays(messages: &'a [Value], tools: Option<&'a [Value]>) -> Self {
         Self {
-            messages: payload.array("messages").unwrap_or_default(),
-            tools: payload.array("tools"),
+            messages,
+            tools,
             array_size: OnceCell::new(),
             attribution: OnceCell::new(),
         }
     }
 
+    /// Ollama's allocation heuristic adds its own overhead per message and tool.
+    pub(crate) fn content_chars(&self) -> usize {
+        self.array_size().content_chars
+    }
+
+    fn array_size(&self) -> &ChatArraySize {
+        self.array_size.get_or_init(|| {
+            let mut size = ChatArraySize {
+                content_chars: 0,
+                payload_chars: 2,
+                unmeasured_content: false,
+            };
+            for (key, values) in [
+                Some(("messages", self.messages)),
+                self.tools.map(|tools| ("tools", tools)),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                let (chars, hidden) = array_elements_size(values);
+                size.content_chars = size.content_chars.saturating_add(chars);
+                // Quoted key, separator and array brackets, then one separator
+                // per entry, matching the existing usage estimate.
+                size.payload_chars = size
+                    .payload_chars
+                    .saturating_add(key.len() + 6)
+                    .saturating_add(values.len())
+                    .saturating_add(chars);
+                size.unmeasured_content |= hidden;
+            }
+            size
+        })
+    }
+
     pub(crate) fn start(&self, payload: &ChatPayload<'a>) -> Request {
         Request::start_observed(
             || {
-                let array_size = *self.array_size.get_or_init(|| {
-                    [
-                        Some(("messages", self.messages)),
-                        self.tools.map(|tools| ("tools", tools)),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .fold(
-                        (2usize, false),
-                        |(chars, unknown), (key, values)| {
-                            let (size, hidden) = text_array_size(values);
-                            (
-                                chars.saturating_add(key.len() + 4).saturating_add(size),
-                                unknown || hidden,
-                            )
-                        },
-                    )
-                });
-                payload
-                    .fields
-                    .iter()
-                    .fold(array_size, |(chars, unknown), (key, field)| {
+                let size = self.array_size();
+                payload.fields.iter().fold(
+                    (size.payload_chars, size.unmeasured_content),
+                    |(chars, unknown), (key, field)| {
                         let ChatField::Value(value) = field else {
                             return (chars, unknown);
                         };
@@ -354,7 +383,8 @@ impl<'a> ChatObservation<'a> {
                             chars.saturating_add(key.len() + 4).saturating_add(size),
                             unknown || hidden,
                         )
-                    })
+                    },
+                )
             },
             || {
                 self.attribution
@@ -524,7 +554,9 @@ pub fn text_size(value: &Value) -> (usize, bool) {
                 u || unknown,
             )
         }),
-        _ => (value.to_string().len(), false),
+        Value::Null | Value::Bool(true) => (4, false),
+        Value::Bool(false) => (5, false),
+        Value::Number(_) => (value.to_string().len(), false),
     }
 }
 
@@ -537,11 +569,16 @@ fn text_string_size(text: &str) -> (usize, bool) {
 }
 
 fn text_array_size(items: &[Value]) -> (usize, bool) {
+    let (chars, unknown) = array_elements_size(items);
+    (chars.saturating_add(items.len()).saturating_add(2), unknown)
+}
+
+fn array_elements_size(items: &[Value]) -> (usize, bool) {
     items
         .iter()
         .map(text_size)
-        .fold((2, false), |(n, u), (s, v)| {
-            (n.saturating_add(s + 1), u || v)
+        .fold((0usize, false), |(n, u), (s, v)| {
+            (n.saturating_add(s), u || v)
         })
 }
 
@@ -860,7 +897,10 @@ mod tests {
             {"type":"text","text":"Inspect café 🦀."},
             {"type":"image_url","image_url":{"url":"data:image/png;base64,fixture"}}
         ]})];
-        let tools = vec![serde_json::json!({"type":"function", "function":{"name":"read"}})];
+        let tools = vec![serde_json::json!({"type":"function", "function":{
+            "name":"read", "parameters":{"additionalProperties":false,"default":null,
+                "properties":{"limit":{"type":"integer","maximum":10}}}
+        }})];
         for schemas in [None, Some(tools.as_slice())] {
             let mut payload = ChatPayload::new(&messages, schemas);
             payload.insert("stream", true.into());
@@ -887,6 +927,12 @@ mod tests {
             let borrowed = {
                 let _scope = Scope::start();
                 let observation = ChatObservation::new(&payload);
+                let expected_content_chars = messages
+                    .iter()
+                    .chain(schemas.into_iter().flatten())
+                    .map(|value| text_size(value).0)
+                    .sum::<usize>();
+                assert_eq!(observation.content_chars(), expected_content_chars);
                 observation.start(&payload).rejected();
                 payload.fields.remove("stream_options");
                 let retry = observation.start(&payload);

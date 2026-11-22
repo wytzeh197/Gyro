@@ -99,6 +99,7 @@ impl<'a> MemoryDocument<'a> {
             index += 1;
         }
         validate_graph(&mut entries, &mut diagnostics, source);
+        diagnostics.sort_by(|a, b| (a.line, &a.message).cmp(&(b.line, &b.message)));
         Ok(Self {
             source,
             document_hash,
@@ -127,58 +128,105 @@ fn parse_metadata(line: &str) -> Result<MemoryMetadata> {
     Ok(metadata)
 }
 
+#[derive(Clone, Copy)]
+enum ChainStatus {
+    Unchecked,
+    Visiting,
+    Valid,
+    Cycle,
+    AmbiguousTarget,
+    DuplicateId,
+}
+
 fn validate_graph(
     entries: &mut [MemoryEntry<'_>],
     diagnostics: &mut Vec<MemoryDiagnostic>,
     source: &str,
 ) {
     use std::collections::{HashMap, HashSet};
-    let mut ids: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut ids = HashMap::new();
+    let mut has_duplicate_ids = false;
     for (index, entry) in entries
         .iter()
         .enumerate()
-        .filter(|(_, e)| e.metadata.is_some())
+        .filter(|(_, entry)| entry.metadata.is_some())
     {
-        ids.entry(entry.id.clone()).or_default().push(index);
+        ids.entry(entry.id.as_str())
+            .and_modify(|target| {
+                *target = None;
+                has_duplicate_ids = true;
+            })
+            .or_insert(Some(index));
     }
-    let mut invalid: HashMap<usize, &str> = HashMap::new();
-    for duplicates in ids.values().filter(|indices| indices.len() > 1) {
-        for index in duplicates {
-            invalid.insert(*index, "Duplicate managed memory ID");
+    if ids.is_empty() {
+        return;
+    }
+
+    let mut statuses = vec![ChainStatus::Unchecked; entries.len()];
+    let mut path = Vec::new();
+    for (start, entry) in entries.iter().enumerate() {
+        if entry.metadata.is_none() {
+            continue;
         }
-    }
-    for (index, entry) in entries.iter().enumerate() {
-        let mut visited = HashSet::new();
-        let mut cursor = entry;
-        while let Some(next) = cursor
-            .metadata
-            .as_ref()
-            .and_then(|meta| meta.supersedes.as_ref())
-        {
-            if !visited.insert(next) {
-                invalid.insert(index, "Memory supersession cycle");
-                break;
+        let mut cursor = start;
+        let status = loop {
+            match statuses[cursor] {
+                ChainStatus::Unchecked => {}
+                ChainStatus::Visiting => break ChainStatus::Cycle,
+                status => break status,
             }
-            let Some(targets) = ids.get(next) else {
-                break;
+            let next = entries[cursor]
+                .metadata
+                .as_ref()
+                .and_then(|meta| meta.supersedes.as_deref());
+            let status = match next.and_then(|id| ids.get(id)) {
+                Some(Some(index)) => {
+                    statuses[cursor] = ChainStatus::Visiting;
+                    path.push(cursor);
+                    cursor = *index;
+                    continue;
+                }
+                Some(None) => ChainStatus::AmbiguousTarget,
+                None => ChainStatus::Valid,
             };
-            if targets.len() != 1 {
-                invalid.insert(index, "Supersession target is ambiguous");
-                break;
-            }
-            cursor = &entries[targets[0]];
+            statuses[cursor] = status;
+            break status;
+        };
+        // Every entry on this path reaches the same terminal condition.
+        for index in path.drain(..) {
+            statuses[index] = status;
         }
     }
-    for (index, message) in invalid {
-        let entry = &mut entries[index];
+    if has_duplicate_ids {
+        // A chain error takes precedence over a duplicate ID on the starting entry.
+        for (entry, status) in entries.iter().zip(&mut statuses) {
+            if matches!(status, ChainStatus::Valid)
+                && ids.get(entry.id.as_str()).is_some_and(Option::is_none)
+            {
+                *status = ChainStatus::DuplicateId;
+            }
+        }
+    }
+
+    let mut line = 1;
+    let mut previous_start = 0;
+    for (entry, status) in entries.iter_mut().zip(statuses) {
+        let message = match status {
+            ChainStatus::Cycle => "Memory supersession cycle",
+            ChainStatus::AmbiguousTarget => "Supersession target is ambiguous",
+            ChainStatus::DuplicateId => "Duplicate managed memory ID",
+            _ => continue,
+        };
+        let start = entry.source_span.start;
+        line += source[previous_start..start]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count();
+        previous_start = start;
         entry.status = MemoryStatus::Invalid;
         diagnostics.push(MemoryDiagnostic {
             entry_id: Some(entry.id.clone()),
-            line: source[..entry.source_span.start]
-                .bytes()
-                .filter(|byte| *byte == b'\n')
-                .count()
-                + 1,
+            line,
             message: message.into(),
         });
     }
@@ -195,7 +243,6 @@ fn validate_graph(
             entry.status = MemoryStatus::Superseded;
         }
     }
-    diagnostics.sort_by(|a, b| (a.line, &a.message).cmp(&(b.line, &b.message)));
 }
 
 fn split_entry(line: &str) -> Option<(&str, &str)> {

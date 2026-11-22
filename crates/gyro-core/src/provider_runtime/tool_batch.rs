@@ -205,14 +205,9 @@ pub fn model_tools_for(
         .filter(|descriptor| allow_delegation || !delegation_tool(descriptor.id))
         .filter(|descriptor| !compact || inline_tool_schema(descriptor.id))
         .map(|descriptor| {
-            serde_json::json!({
-                "type": "function",
-                "function": {
-                    "name": descriptor.id.provider_tool_name(),
-                    "description": advertised_description(descriptor.id, descriptor.description),
-                    "parameters": advertised_tool_parameters(catalog, descriptor.id),
-                }
-            })
+            let mut tool = serde_json::json!({"type": "function"});
+            tool["function"] = advertised_tool_definition(catalog, descriptor, "parameters");
+            tool
         })
         .collect();
     if compact
@@ -244,13 +239,7 @@ pub fn mcp_tools_for(
         .descriptors(mode)
         .filter(|descriptor| allow_delegation || !delegation_tool(descriptor.id))
         .filter(|descriptor| !compact || inline_tool_schema(descriptor.id))
-        .map(|descriptor| {
-            serde_json::json!({
-                "name": descriptor.id.provider_tool_name(),
-                "description": advertised_description(descriptor.id, descriptor.description),
-                "inputSchema": advertised_tool_parameters(catalog, descriptor.id),
-            })
-        })
+        .map(|descriptor| advertised_tool_definition(catalog, descriptor, "inputSchema"))
         .collect();
     if compact && tools.iter().any(|tool| tool["name"] == "gyro_tool_catalog") {
         tools.push(serde_json::json!({
@@ -470,15 +459,30 @@ pub fn advertised_tool_parameters(
     catalog: &dyn ToolCatalog,
     id: CapabilityId,
 ) -> serde_json::Value {
-    let schema = catalog.schema_ref(id);
     if inline_tool_schema(id) {
-        schema.into_owned()
+        catalog.schema_ref(id).into_owned()
     } else {
         // Keep concise argument guidance (reference sources, units, defaults)
         // so deferred tools are callable without a discovery round. The catalog
         // retains the complete documentation.
-        compact_parameter_schema(&schema)
+        catalog.compact_schema_ref(id).into_owned()
     }
+}
+
+fn advertised_tool_definition(
+    catalog: &dyn ToolCatalog,
+    descriptor: &crate::CapabilityDescriptor,
+    schema_field: &str,
+) -> serde_json::Value {
+    let id = descriptor.id;
+    let mut definition = serde_json::json!({
+        "name": id.provider_tool_name(),
+        "description": advertised_description(id, descriptor.description),
+    });
+    // Moving the owned schema into the object avoids serializing its JSON
+    // tree back into another Value through the json! macro.
+    definition[schema_field] = advertised_tool_parameters(catalog, id);
+    definition
 }
 
 /// Keep the first sentence of schema documentation, without changing validation

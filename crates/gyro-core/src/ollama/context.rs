@@ -29,7 +29,10 @@ pub(super) fn context_overflow_message(value: &Value) -> bool {
 /// The estimate chooses an allocation, never which history to discard. Ollama's
 /// tokenizer remains authoritative: truncate/shift are disabled, and only an
 /// explicit context rejection permits a bounded retry at the model's maximum.
-pub(super) fn request_context_window(request: &OllamaToolChatRequest<'_>) -> Result<Option<u64>> {
+pub(super) fn request_context_window(
+    request: &OllamaToolChatRequest<'_>,
+    content_chars: impl FnOnce() -> usize,
+) -> Result<Option<u64>> {
     let Some(maximum) = request.context_window_tokens else {
         return Ok(None);
     };
@@ -42,26 +45,25 @@ pub(super) fn request_context_window(request: &OllamaToolChatRequest<'_>) -> Res
         minimum <= maximum,
         "Ollama minimum context exceeds the model window"
     );
-    let characters = request
-        .messages
-        .iter()
-        .chain(&request.tools)
-        .map(|value| crate::provider_observation::text_size(value).0 as u64)
-        .fold(0u64, u64::saturating_add);
-    let estimate = characters
-        .div_ceil(3)
-        .saturating_add(2048)
+    let overhead = 2048u64
         .saturating_add((request.messages.len() as u64).saturating_mul(64))
         .saturating_add((request.tools.len() as u64).saturating_mul(32));
     // Ollama reloads the model whenever num_ctx changes, so the allocation
     // grows in power-of-two steps: a growing conversation reloads a handful
     // of times instead of once per 4K of history.
-    let allocation = estimate
-        .max(4096)
-        .max(minimum)
-        .checked_next_power_of_two()
-        .unwrap_or(maximum);
-    Ok(Some(allocation.min(maximum)))
+    let allocate = |estimate: u64| {
+        estimate
+            .max(4096)
+            .max(minimum)
+            .checked_next_power_of_two()
+            .unwrap_or(maximum)
+            .min(maximum)
+    };
+    if allocate(overhead) == maximum {
+        return Ok(Some(maximum));
+    }
+    let tokens = (content_chars() as u64).div_ceil(3);
+    Ok(Some(allocate(overhead.saturating_add(tokens))))
 }
 
 #[derive(Deserialize)]
@@ -124,47 +126,67 @@ mod tests {
             minimum_context_window_tokens: None,
         }
     }
+
+    fn measured_window(request: &OllamaToolChatRequest<'_>) -> Result<Option<u64>> {
+        let observation = crate::provider_observation::ChatObservation::for_arrays(
+            &request.messages,
+            Some(&request.tools),
+        );
+        request_context_window(request, || observation.content_chars())
+    }
+
     #[test]
     fn small_prompts_do_not_allocate_the_entire_model_window() {
         assert_eq!(
-            request_context_window(&request(json!({"content":"Hello"}))).unwrap(),
+            measured_window(&request(json!({"content":"Hello"}))).unwrap(),
             Some(4096)
         );
-        let larger = request_context_window(&request(json!({"content":"x".repeat(27000)})))
+        let larger = measured_window(&request(json!({"content":"x".repeat(27000)})))
             .unwrap()
             .unwrap();
         assert!(larger >= 11000 && larger < 40960);
         assert!(larger.is_power_of_two(), "{larger} is not a stable step");
         // Growing history inside one step keeps num_ctx, so no model reload.
-        let grown = request_context_window(&request(json!({"content":"x".repeat(30000)})))
+        let grown = measured_window(&request(json!({"content":"x".repeat(30000)})))
             .unwrap()
             .unwrap();
         assert_eq!(grown, larger);
         assert_eq!(
-            request_context_window(&request(json!({"content":"x".repeat(500000)}))).unwrap(),
+            measured_window(&request(json!({"content":"x".repeat(500000)}))).unwrap(),
             Some(40960)
         );
     }
     #[test]
     fn images_do_not_allocate_context_from_base64_bytes_and_tools_are_counted() {
         let mut value = request(json!({"content":"Hello", "images":["x".repeat(1000000)]}));
-        assert_eq!(request_context_window(&value).unwrap(), Some(4096));
+        assert_eq!(measured_window(&value).unwrap(), Some(4096));
         value
             .tools
             .push(json!({"description":"schema".repeat(10000)}));
-        assert!(request_context_window(&value).unwrap().unwrap() > 4096);
+        assert!(measured_window(&value).unwrap().unwrap() > 4096);
     }
     #[test]
     fn a_tool_loop_keeps_its_allocated_window_until_the_turn_ends() {
         let mut value = request(json!({"content":"Hello"}));
         value.minimum_context_window_tokens = Some(16384);
-        assert_eq!(request_context_window(&value).unwrap(), Some(16384));
+        assert_eq!(measured_window(&value).unwrap(), Some(16384));
         // A minimum between steps rounds up to the next step, never down.
         value.minimum_context_window_tokens = Some(20000);
-        assert_eq!(request_context_window(&value).unwrap(), Some(32768));
+        assert_eq!(measured_window(&value).unwrap(), Some(32768));
         value.minimum_context_window_tokens = Some(81920);
-        assert!(request_context_window(&value).is_err());
+        assert!(measured_window(&value).is_err());
         value.context_window_tokens = None;
-        assert_eq!(request_context_window(&value).unwrap(), None);
+        assert_eq!(measured_window(&value).unwrap(), None);
+    }
+
+    #[test]
+    fn allocation_at_the_model_limit_does_not_need_prompt_measurement() {
+        let mut value = request(json!({"content":"Hello"}));
+        value.context_window_tokens = Some(4096);
+        let measure = || panic!("the window is already fixed");
+        assert_eq!(request_context_window(&value, measure).unwrap(), Some(4096));
+        value.context_window_tokens = Some(5000);
+        value.minimum_context_window_tokens = Some(4097);
+        assert_eq!(request_context_window(&value, measure).unwrap(), Some(5000));
     }
 }

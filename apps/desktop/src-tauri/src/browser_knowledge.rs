@@ -15,8 +15,8 @@ pub fn contract(tools: bool, images: bool, mode: &str) -> Value {
 }
 
 /// The model already receives tool descriptions and schemas through its tool
-/// registry (or the compatibility catalog). Keep dynamic capability facts,
-/// command names, workflow examples and safety rules in the prompt once.
+/// registry (or the compatibility catalog). The Browser guide supplies the
+/// workflow. The prompt contract reports current support and command names.
 pub fn prompt_contract(tools: bool, images: bool, mode: &str) -> Value {
     browser_contract(tools, images, mode, false)
 }
@@ -35,14 +35,14 @@ fn browser_contract(tools: bool, images: bool, mode: &str, definitions: bool) ->
                         "inputSchema": crate::capabilities::mcp_server::desktop_capability_tool_schema(item.id),
                     })
                 } else {
-                    json!({ "name": item.id.provider_tool_name() })
+                    Value::String(item.id.provider_tool_name().into())
                 }
             })
             .collect()
     } else {
         Vec::new()
     };
-    json!({
+    let mut contract = json!({
         "schema": VERSION,
         "capabilities": {"toolCalls": tools, "imageInput": images},
         "runMode": mode,
@@ -50,15 +50,22 @@ fn browser_contract(tools: bool, images: bool, mode: &str, definitions: bool) ->
         "observationSchema": crate::browser::types::BROWSER_OBSERVATION_SCHEMA_V1,
         "imageEvidence": "Image bytes must be delivered; a file path is insufficient.",
         "commands": commands,
-        "workflow": if tools { json!([
-            {"tool": "gyro_browser_open", "arguments": {"url": "http://127.0.0.1:8766/browser-observation.html"}},
-            {"tool": "gyro_browser_read_page", "arguments": {}},
-            {"tool": "gyro_browser_screenshot", "arguments": {"device": "desktop"}},
-            {"tool": "gyro_browser_click", "arguments": {"ref": "<reference from the latest read or find>"}},
-            {"tool": "gyro_browser_read_page", "arguments": {}}
-        ]) } else { json!([]) },
-        "workflowNote": "Illustrative browser interaction fixture, not the default for reading links. Prefer gyro_web_fetch for text-only research; reveal the browser only when the user explicitly asks to see the page or a required manual handoff needs it. Implementation checks, interactions, and screenshots stay hidden. Use the user's URL and observed references. Plan mode permits only operations allowed by its read-only policy."
-    })
+    });
+    if definitions {
+        contract["workflow"] = if tools {
+            json!([
+                {"tool": "gyro_browser_open", "arguments": {"url": "http://127.0.0.1:8766/browser-observation.html"}},
+                {"tool": "gyro_browser_read_page", "arguments": {}},
+                {"tool": "gyro_browser_screenshot", "arguments": {"device": "desktop"}},
+                {"tool": "gyro_browser_click", "arguments": {"ref": "<reference from the latest read or find>"}},
+                {"tool": "gyro_browser_read_page", "arguments": {}}
+            ])
+        } else {
+            json!([])
+        };
+        contract["workflowNote"] = "Illustrative browser interaction fixture, not the default for reading links. Prefer gyro_web_fetch for text-only research; reveal the browser only when the user explicitly asks to see the page or a required manual handoff needs it. Implementation checks, interactions, and screenshots stay hidden. Use the user's URL and observed references. Plan mode permits only operations allowed by its read-only policy.".into();
+    }
+    contract
 }
 
 pub fn context(tools: bool, images: bool, mode: &str, detailed: bool) -> String {
@@ -75,6 +82,35 @@ pub fn web_research_context() -> &'static str {
         .split_once("## Read links quietly\n")
         .and_then(|(_, research)| research.split_once("\n## Observe, act, verify"))
         .map_or(GUIDE, |(research, _)| research.trim())
+}
+
+pub fn saved_observation_context() -> &'static str {
+    GUIDE
+        .split_once("## Browser attachments and capability limits\n")
+        .map_or(GUIDE, |(_, attachment)| attachment.trim())
+}
+
+/// Only opt into the shorter guide for clearly read-only requests. Keep the
+/// live workflow available for mixed instructions and ambiguous follow-ups.
+pub fn reads_saved_observation(message: &str) -> bool {
+    let lower = message.trim().to_ascii_lowercase();
+    let task = ["please ", "can you ", "could you ", "would you "]
+        .iter()
+        .find_map(|prefix| lower.strip_prefix(prefix))
+        .unwrap_or(&lower);
+    ["summarize ", "describe ", "extract ", "translate "]
+        .iter()
+        .any(|prefix| task.starts_with(prefix))
+        && !task.split(|c: char| !c.is_ascii_alphabetic()).any(|word| {
+            [
+                "open", "click", "tap", "scroll", "fill", "submit", "interact", "navigate",
+                "refresh", "reload", "visit", "browse", "fetch", "research", "search", "verify",
+                "check", "test", "compare", "fix", "edit", "update", "run", "live", "recheck",
+                "follow", "press", "select", "download", "upload", "type", "take", "fresh",
+                "current", "now", "again", "look", "log", "sign", "inspect", "capture",
+            ]
+            .contains(&word)
+        })
 }
 
 #[cfg(test)]
@@ -156,8 +192,6 @@ mod tests {
                         "authorization",
                         "observationSchema",
                         "imageEvidence",
-                        "workflow",
-                        "workflowNote",
                     ] {
                         assert_eq!(compact[key], full[key], "{key}: {mode}/{tools}/{images}");
                     }
@@ -171,14 +205,16 @@ mod tests {
                         .as_array()
                         .unwrap()
                         .iter()
-                        .map(|item| &item["name"])
                         .collect::<Vec<_>>();
                     assert_eq!(compact_names, full_names);
+                    assert!(compact.get("workflow").is_none());
+                    assert!(compact.get("workflowNote").is_none());
                     let rendered = context(tools, images, mode, true);
                     assert!(rendered.contains(GUIDE));
                     assert!(rendered.contains(SIDE_PANEL_GUIDE));
                     assert!(rendered.contains(&compact.to_string()));
                     assert!(!rendered.contains("\"inputSchema\""));
+                    assert!(!rendered.contains("browser-observation.html"));
                 }
             }
         }
@@ -231,6 +267,6 @@ mod tests {
     }
 }
 
-pub(crate) use gyro_core::provider_runtime::prompts::{
-    needs_surface_guide, needs_web_research_guidance, SIDE_PANEL_GUIDE,
-};
+#[cfg(test)]
+use gyro_core::provider_runtime::prompts::{needs_surface_guide, needs_web_research_guidance};
+pub(crate) use gyro_core::provider_runtime::prompts::{surface_guidance, SIDE_PANEL_GUIDE};

@@ -339,12 +339,11 @@ pub fn stable_tools(tools: &mut [Value]) {
     });
 }
 
-/// Replace earlier copies of large, identical disk-read evidence in the newest
-/// exchange with a reference to the newest copy. Every read really ran;
-/// tool-call order, results with changed hashes, and side effects remain
-/// intact. Persisted history is untouched. Messages before the newest assistant
-/// turn were already sent: rewriting one misses the provider cache for it and
-/// everything after it, which costs far more than the copy it removes.
+/// Replace earlier copies of large, identical workspace evidence in the newest
+/// exchange with a reference to the newest copy. Every lookup really ran;
+/// tool-call order and differing results remain intact. Persisted history is
+/// untouched. Rewriting an already-sent message would invalidate that part of
+/// the provider cache and the messages after it.
 pub fn compact_duplicate_reads(messages: &mut [Value]) -> usize {
     use std::collections::HashMap;
     let start = messages
@@ -371,40 +370,60 @@ pub fn compact_duplicate_reads(messages: &mut [Value]) -> usize {
         let Ok(mut payload) = serde_json::from_str::<Value>(text) else {
             continue;
         };
-        if payload["status"] != "completed" {
+        if payload["status"] != "completed"
+            || !payload["error"].is_null()
+            || payload["compatible"] == false
+            || already_omitted(&payload)
+        {
             continue;
         }
         let result = &payload["result"];
-        if !matches!(
-            result["capabilityId"].as_str(),
-            Some("workspace-read" | "workspace-read-range")
-        ) {
-            continue;
-        }
         let data = &result["data"];
-        if data["contentHash"].as_str().is_none() || data["content"].as_str().is_none() {
+        let eligible = match result["capabilityId"].as_str() {
+            Some("workspace-read" | "workspace-read-range") => {
+                data["contentHash"].is_string() && data["content"].is_string()
+            }
+            Some("workspace-list") => data["entries"].is_array(),
+            Some("workspace-search") => data.is_array(),
+            _ => false,
+        };
+        if !eligible {
             continue;
         }
-        let Some(call_id) = payload["callId"].as_str().map(str::to_owned) else {
+        let Some(call_id) = payload["callId"].as_str().filter(|id| !id.is_empty()) else {
             continue;
         };
-        // Compare the whole evidence, including range, root resource, revision,
-        // and truncation metadata. A hash alone cannot identify a read range.
+        // Compare the whole result, including scope, revision, paging and
+        // truncation metadata. Matching rows alone cannot identify a result page.
         // Hash the compact JSON as it is written. `to_vec` copied the whole
         // result, including the file body, only to throw the buffer away.
         let fingerprint = evidence_fingerprint(result);
         if let Some(newest) = latest.get(&fingerprint) {
-            payload["result"]["data"] = serde_json::json!({
-                "evidenceOmitted": true,
-                "sameEvidenceAsCallId": newest,
-                "note": "Identical read evidence is retained in the later tool result in this request."
-            });
+            if newest == call_id {
+                continue;
+            }
+            let listing = result["capabilityId"] == "workspace-list";
+            let data = &mut payload["result"]["data"];
+            if listing {
+                // Keep the directory's navigation fields with the call that
+                // produced them. Only the repeated array needs a reference.
+                data.as_object_mut().unwrap().remove("entries");
+            } else {
+                *data = serde_json::json!({});
+            }
+            data["evidenceOmitted"] = true.into();
+            data["sameEvidenceAsCallId"] = Value::String(newest.clone());
+            data["note"] =
+                "Identical read evidence is retained in the later tool result in this request."
+                    .into();
             if let Ok(compact) = serde_json::to_string(&payload) {
-                saved += text.len().saturating_sub(compact.len());
-                message["content"] = Value::String(compact);
+                if compact.len() < text.len() {
+                    saved += text.len() - compact.len();
+                    message["content"] = Value::String(compact);
+                }
             }
         } else {
-            latest.insert(fingerprint, call_id);
+            latest.insert(fingerprint, call_id.to_owned());
         }
     }
     saved
@@ -1122,6 +1141,97 @@ mod tests {
 
     fn parsed(message: &Value) -> Value {
         serde_json::from_str(message["content"].as_str().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn duplicate_workspace_lookups_keep_scope_paging_and_the_newest_rows() {
+        use serde_json::json;
+
+        let entries = json!((0..100)
+            .map(|i| json!({"path":format!("src/module-{i:03}.rs"),"kind":"file","depth":2}))
+            .collect::<Vec<_>>());
+        let list = json!({
+            "path":"src","entries":entries,"offset":0,"returned":100,
+            "total":200,"hasMore":true,"nextOffset":100
+        });
+        let mut next_page = list.clone();
+        next_page["offset"] = 100.into();
+        next_page["nextOffset"] = Value::Null;
+        next_page["hasMore"] = false.into();
+        let matches = json!((0..40)
+            .map(|i| json!({"path":"src/main.rs","lineNumber":i + 1,
+                "line":"fn symbol_name() { /* observed source */ }",
+                "ranges":[{"startColumn":4,"endColumn":15}]}))
+            .collect::<Vec<_>>());
+        let first_list = tool_body(
+            "first-list",
+            "workspace-list",
+            "Listed entries",
+            list.clone(),
+        );
+        let new_list = tool_body("new-list", "workspace-list", "Listed entries", list.clone());
+        let changed_page = tool_body("next-page", "workspace-list", "Listed entries", next_page);
+        let first_search = tool_body(
+            "first-search",
+            "workspace-search",
+            "Returned 40 matches",
+            matches.clone(),
+        );
+        let new_search = tool_body(
+            "new-search",
+            "workspace-search",
+            "Returned 40 matches",
+            matches.clone(),
+        );
+        let limited_search = tool_body(
+            "limited-search",
+            "workspace-search",
+            "Limit reached",
+            matches,
+        );
+        let mut different_root = parsed(&new_search);
+        different_root["callId"] = "other-root".into();
+        different_root["result"]["resource"] = json!({"id":"workspace:other"});
+        let different_root = json!({"role":"tool","tool_call_id":"other-root",
+            "content":different_root.to_string()});
+        let mut messages = vec![
+            json!({"role":"system","content":"instructions"}),
+            json!({"role":"user","content":"find workspace symbols"}),
+            json!({"role":"assistant","content":"lookup"}),
+            first_list,
+            changed_page.clone(),
+            new_list.clone(),
+            first_search,
+            limited_search.clone(),
+            different_root.clone(),
+            new_search.clone(),
+        ];
+        let bytes = serde_json::to_vec(&messages).unwrap().len();
+        assert!(prepare_owned_model_request(&mut messages) > 10_000);
+        assert!(serde_json::to_vec(&messages).unwrap().len() < bytes);
+        assert_eq!(messages[4], changed_page);
+        assert_eq!(messages[5], new_list);
+        assert_eq!(messages[7], limited_search);
+        assert_eq!(messages[8], different_root);
+        assert_eq!(messages[9], new_search);
+        assert_eq!(messages[3]["tool_call_id"], "first-list");
+        assert_eq!(messages[6]["tool_call_id"], "first-search");
+        let mut listed = parsed(&messages[3])["result"]["data"].clone();
+        assert_eq!(listed["sameEvidenceAsCallId"], "new-list");
+        assert!(listed.get("entries").is_none());
+        let fields = listed.as_object_mut().unwrap();
+        for key in ["sameEvidenceAsCallId", "evidenceOmitted", "note"] {
+            fields.remove(key);
+        }
+        listed["entries"] = parsed(&messages[5])["result"]["data"]["entries"].clone();
+        assert_eq!(listed, list);
+        let searched = parsed(&messages[6]);
+        assert_eq!(searched["callId"], "first-search");
+        assert_eq!(
+            searched["result"]["data"]["sameEvidenceAsCallId"],
+            "new-search"
+        );
+        assert_eq!(prepare_owned_model_request(&mut messages), 0);
     }
 
     #[test]

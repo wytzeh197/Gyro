@@ -13659,10 +13659,10 @@ button.gyro-response-changed-files:hover {
 }
 
 .gyro-composer-blocker > button {
-  background: var(--gyro-accent-soft);
+  background: var(--gyro-primary-bg);
   border: 1px solid transparent;
   border-radius: var(--gyro-radius-sm);
-  color: var(--gyro-accent);
+  color: var(--gyro-primary-text);
   cursor: pointer;
   flex: 0 0 auto;
   font: inherit;
@@ -13673,7 +13673,7 @@ button.gyro-response-changed-files:hover {
 }
 
 .gyro-composer-blocker > button:hover {
-  background: color-mix(in srgb, var(--gyro-accent) 18%, transparent);
+  background: var(--gyro-primary-hover);
 }
 
 .gyro-composer-blocker > button:focus-visible {

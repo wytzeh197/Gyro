@@ -149,21 +149,19 @@
    front; the <bdi> inside keeps the path itself reading left to right. */
 
 /* A clear rim and thumb keep on/off states crisp at every interface size. */
-:root[data-theme] .gyro-settings-switch {
-  border-color: var(--gyro-border-strong);
-}
 :root[data-theme] .gyro-settings-switch > span {
   box-shadow: 0 1px 2px color-mix(in srgb, var(--gyro-shadow) 40%, transparent);
 }
 :root[data-theme] .gyro-settings-switch:not(.is-on) {
   background: var(--gyro-switch-off-track);
-  border-color: var(--gyro-switch-off-rim);
+  border-color: var(--gyro-control-edge);
 }
 :root[data-theme] .gyro-settings-switch:not(.is-on) > span {
   background: var(--gyro-switch-off-thumb);
 }
 :root[data-theme] .gyro-settings-switch.is-on {
-  border-color: color-mix(in srgb, var(--gyro-accent) 80%, var(--gyro-text));
+  background: var(--gyro-primary-bg);
+  border-color: var(--gyro-primary-bg);
 }
 :root[data-theme] .gyro-settings-switch.is-on > span {
   background: var(--gyro-primary-text);

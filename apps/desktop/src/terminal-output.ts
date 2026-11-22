@@ -1,5 +1,32 @@
 import type { TerminalOutputCursor } from "@gyro-dev/ui";
 
+const scrollbackByteLimit = 512 * 1024;
+const encoder = new TextEncoder();
+const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
+
+/** Native cursors describe normalized UTF-8. Keep the byte path for invalid ranges. */
+function outputByteLength(
+  text: string,
+  cursor: TerminalOutputCursor,
+): number | undefined {
+  const bytes = cursor.end - cursor.start;
+  if (
+    Number.isSafeInteger(cursor.start) &&
+    Number.isSafeInteger(cursor.end) &&
+    cursor.start >= 0 &&
+    bytes >= text.length &&
+    bytes <= text.length * 3
+  ) {
+    return bytes;
+  }
+  return undefined;
+}
+
+function nextCharacterBoundary(bytes: Uint8Array, start: number) {
+  while (start < bytes.length && (bytes[start]! & 0xc0) === 0x80) start++;
+  return start;
+}
+
 /** Find only the new PTY text, including when the bounded history rolls over. */
 export function terminalOutputUpdate(
   previous: string,
@@ -16,14 +43,31 @@ export function terminalOutputUpdate(
     ) {
       return { reset: true, data: next };
     }
-    // Offsets count normalized UTF-8 bytes, not JS UTF-16 code units. Repeated
-    // windows still deliver new bytes; emoji cannot split at a surrogate pair.
-    const bytes = new TextEncoder().encode(next);
+    const offset = previousCursor.end - nextCursor.start;
+    const byteLength = outputByteLength(next, nextCursor);
+    if (byteLength !== undefined && Number.isSafeInteger(offset)) {
+      if (byteLength === next.length) {
+        return { reset: false, data: next.slice(offset) };
+      }
+      const added = byteLength - offset;
+      if (added === 0) return { reset: false, data: "" };
+      // Each UTF-16 code unit takes at least one UTF-8 byte. Encode only a
+      // suffix large enough to contain the new bytes, keeping pairs intact.
+      let start = Math.max(0, next.length - added);
+      const unit = next.charCodeAt(start);
+      if (start > 0 && unit >= 0xdc00 && unit <= 0xdfff) start--;
+      const suffix = encoder.encode(next.slice(start));
+      if (suffix.length >= added) {
+        return {
+          reset: false,
+          data: decoder.decode(suffix.subarray(suffix.length - added)),
+        };
+      }
+    }
+    const bytes = encoder.encode(next);
     return {
       reset: false,
-      data: new TextDecoder("utf-8", { ignoreBOM: true }).decode(
-        bytes.subarray(previousCursor.end - nextCursor.start),
-      ),
+      data: decoder.decode(bytes.subarray(offset)),
     };
   }
   if (next.startsWith(previous)) {
@@ -69,11 +113,38 @@ export function mergeTerminalOutput(
   ) {
     return { output: next, outputCursor: nextCursor };
   }
-  const bytes = new TextEncoder().encode(previous + next);
-  let start = Math.max(0, bytes.length - 512 * 1024);
-  while (start < bytes.length && (bytes[start]! & 0xc0) === 0x80) start++;
+  const previousLength = outputByteLength(previous, previousCursor);
+  const nextLength = outputByteLength(next, nextCursor);
+  if (previousLength !== undefined && nextLength !== undefined) {
+    const overflow = previousLength + nextLength - scrollbackByteLimit;
+    if (overflow <= 0) {
+      return {
+        output: previous + next,
+        outputCursor: { ...nextCursor, start: previousCursor.start },
+      };
+    }
+    if (overflow <= previousLength) {
+      let removedBytes = overflow;
+      let removedUnits = overflow;
+      if (previousLength !== previous.length) {
+        // Inspect only the evicted prefix and the next character boundary.
+        const prefix = encoder.encode(previous.slice(0, overflow + 2));
+        removedBytes = nextCharacterBoundary(prefix, overflow);
+        removedUnits = decoder.decode(prefix.subarray(0, removedBytes)).length;
+      }
+      return {
+        output: previous.slice(removedUnits) + next,
+        outputCursor: { ...nextCursor, start: previousCursor.start + removedBytes },
+      };
+    }
+  }
+  const bytes = encoder.encode(previous + next);
+  const start = nextCharacterBoundary(
+    bytes,
+    Math.max(0, bytes.length - scrollbackByteLimit),
+  );
   return {
-    output: new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes.subarray(start)),
+    output: decoder.decode(bytes.subarray(start)),
     outputCursor: {
       ...nextCursor,
       start: nextCursor.end - (bytes.length - start),

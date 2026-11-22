@@ -14,35 +14,36 @@ pub struct OllamaTurnUsage {
 /// instead of appending a fresh copy every round.
 pub const CONTEXT_CHECKPOINT_MARKER: &str = "[gyro.ctx]";
 
-/// One line telling the model how full its context window is, from counts the
-/// provider itself reported.
-///
-/// The runner's own tool loop writes this between requests, because that is
-/// the only place a request's real occupancy is known: a model that can see
-/// how much of its window the previous request held can size its own reads,
-/// which is its one lever over how fast a turn fills up. `None` without a
-/// prompt count, because a percentage derived from nothing is a guess the
-/// model cannot tell apart from a measurement.
+/// Help the model size its next read when reported usage approaches the
+/// compaction threshold or the window has about one 8 KiB text read left.
+/// The ordinary low-occupancy round needs no extra prompt message.
 pub fn context_checkpoint_note(
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
     model_context_window: Option<u64>,
+    auto_compact_percent: u32,
 ) -> Option<String> {
     let input_tokens = input_tokens?;
+    let window = model_context_window.filter(|window| *window > 0)?;
     let occupancy = input_tokens.saturating_add(output_tokens.unwrap_or_default());
+    let remaining = window.saturating_sub(occupancy);
+    // Give the model ten points of warning before a configured compaction.
+    // A runner without automatic compaction still needs a capacity warning.
+    let warn_at = if auto_compact_percent == 0 {
+        80
+    } else {
+        auto_compact_percent.min(100).saturating_sub(10).max(1)
+    };
+    if remaining > 2_048 && occupancy.saturating_mul(100) / window < u64::from(warn_at) {
+        return None;
+    }
     let reading = match output_tokens {
         Some(output_tokens) => format!("{input_tokens} prompt + {output_tokens} output tokens"),
         None => format!("{input_tokens} prompt tokens"),
     };
-    let window = match model_context_window.filter(|window| *window > 0) {
-        Some(window) => format!(
-            "of its {window}-token window ({}% free)",
-            window.saturating_sub(occupancy).saturating_mul(100) / window
-        ),
-        None => "with no window size known for this model".to_string(),
-    };
     Some(format!(
-        "{CONTEXT_CHECKPOINT_MARKER} Previous request measured: {reading} {window}. Size reads to the remaining space; this checkpoint is replaced each request."
+        "{CONTEXT_CHECKPOINT_MARKER} Previous request measured: {reading} of its {window}-token window ({}% free). Size reads to the remaining space; this checkpoint is replaced each request.",
+        remaining.saturating_mul(100) / window
     ))
 }
 
@@ -58,18 +59,30 @@ pub fn refresh_context_checkpoint(
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
     model_context_window: Option<u64>,
+    auto_compact_percent: u32,
 ) {
-    messages.retain(|message| !is_context_checkpoint(message));
-    if let Some(note) = context_checkpoint_note(input_tokens, output_tokens, model_context_window) {
+    let mut index = 0;
+    messages.retain(|message| {
+        index += 1;
+        // The first two entries are the system prompt and the user's request.
+        index <= 2 || !is_context_checkpoint(message)
+    });
+    if let Some(note) = context_checkpoint_note(
+        input_tokens,
+        output_tokens,
+        model_context_window,
+        auto_compact_percent,
+    ) {
         messages.push(serde_json::json!({ "role": "user", "content": note }));
     }
 }
 
 pub fn is_context_checkpoint(message: &Value) -> bool {
-    message
-        .get("content")
-        .and_then(Value::as_str)
-        .is_some_and(|content| content.starts_with(CONTEXT_CHECKPOINT_MARKER))
+    message_role(message) == Some("user")
+        && message
+            .get("content")
+            .and_then(Value::as_str)
+            .is_some_and(|content| content.starts_with(CONTEXT_CHECKPOINT_MARKER))
 }
 
 /// Marker that opens the auto-compaction note, so a loop can find the history
@@ -157,6 +170,9 @@ pub fn auto_compact_messages(
     model_context_window: Option<u64>,
     percent: u32,
 ) -> Option<ContextCompaction> {
+    if percent == 0 || messages.len() < 3 {
+        return None;
+    }
     let window = model_context_window.filter(|window| *window > 0)?;
     // A provider that reports no counts still resends this list on every
     // round, so the text it carries is the size to watch. Without it, the
@@ -175,9 +191,6 @@ pub fn auto_compact_messages(
     .filter(|tokens| *tokens > 0);
     let fill = auto_compaction_fill(input_tokens, output_tokens, Some(window), percent)?;
     let percent = percent.clamp(1, 100);
-    if messages.len() < 3 {
-        return None;
-    }
     let previous_note = messages
         .iter()
         .position(is_context_compaction)
@@ -185,12 +198,7 @@ pub fn auto_compact_messages(
     // The head is the system prompt plus this turn's context message: identity,
     // the workspace briefing and the standing instructions. It is what the turn
     // is, so it is budgeted for but never elided.
-    let sizes = messages.iter().map(message_size).collect::<Vec<_>>();
-    let head_characters = sizes
-        .iter()
-        .take(2)
-        .map(|(characters, _)| *characters)
-        .sum::<u64>();
+    let head_characters = message_size(&messages[0]).0 + message_size(&messages[1]).0;
     let target_percent = u64::from(percent) / COMPACT_TARGET_DIVISOR;
     let budget = (window.saturating_mul(target_percent) / 100)
         .saturating_mul(CHARS_PER_TOKEN)
@@ -200,39 +208,30 @@ pub fn auto_compact_messages(
     // results and image observations. A screenshot can follow a result or sit
     // between results, so contiguous `tool` roles do not describe its boundary.
     // The newest complete exchange must survive even if its result is large.
-    let exchanges = messages
+    let mut exchanges = messages
         .iter()
         .enumerate()
         .skip(2)
+        .rev()
         .filter_map(|(index, message)| {
             (message_role(message) == Some("assistant")).then_some(index)
-        })
-        .collect::<Vec<_>>();
-    let Some(mut split) = exchanges.last().copied() else {
+        });
+    let Some(mut split) = exchanges.next() else {
         if let Some((index, note)) = previous_note {
             messages.insert(index, note);
         }
         return None;
     };
-    let mut used = sizes[split..]
-        .iter()
-        .map(|(characters, _)| *characters)
-        .sum::<u64>();
-    let mut retained_image = sizes[split..].iter().any(|(_, image)| *image);
-    for index in exchanges.iter().rev().skip(1).copied() {
-        let has_image = sizes[index..split].iter().any(|(_, image)| *image);
+    let (mut used, mut retained_image) = exchange_size(&messages[split..]);
+    let mut has_older_exchange = false;
+    for index in exchanges {
+        let (characters, has_image) = exchange_size(&messages[index..split]);
         // Measured occupancy includes visual tokens, but their cost cannot be
         // inferred from encoded bytes. When the window is full, keep the latest
         // image exchange and stop before an older one rather than allowing a
         // text-only estimate to retain every screenshot indefinitely.
-        if has_image && retained_image {
-            break;
-        }
-        let characters = sizes[index..split]
-            .iter()
-            .map(|(characters, _)| *characters)
-            .sum::<u64>();
-        if used.saturating_add(characters) > budget {
+        if (has_image && retained_image) || used.saturating_add(characters) > budget {
+            has_older_exchange = true;
             break;
         }
         used = used.saturating_add(characters);
@@ -240,34 +239,44 @@ pub fn auto_compact_messages(
         split = index;
     }
     // A preceding checkpoint alone is not work worth replacing with a note.
-    if !exchanges.iter().any(|index| *index < split) {
+    if !has_older_exchange {
         if let Some((index, note)) = previous_note {
             messages.insert(index, note);
         }
         return None;
     }
-    let elided: Vec<Value> = messages.drain(2..split).collect();
+    let previous_note_characters = previous_note
+        .as_ref()
+        .map_or(0, |(_, note)| message_size(note).0);
     let compaction = ContextCompaction {
-        exchanges: elided
+        exchanges: messages[2..split]
             .iter()
             .filter(|message| {
                 carries_tool_calls(message) || carries_compatibility_tool_call(message)
             })
             .count(),
-        characters: sizes[2..split]
-            .iter()
-            .map(|(characters, _)| *characters)
-            .sum(),
+        // The full count includes the retained head, tail, and previous note.
+        // Subtract those to report the removed text without measuring it again.
+        characters: characters - head_characters - used - previous_note_characters,
         percent: fill,
     };
-    messages.insert(
-        2,
-        serde_json::json!({
+    messages.splice(
+        2..split,
+        [serde_json::json!({
             "role": "user",
             "content": auto_compaction_note(&compaction, window, percent),
-        }),
+        })],
     );
     Some(compaction)
+}
+
+fn exchange_size(messages: &[Value]) -> (u64, bool) {
+    messages
+        .iter()
+        .map(message_size)
+        .fold((0, false), |(total, any_image), (characters, image)| {
+            (total + characters, any_image || image)
+        })
 }
 
 pub fn auto_compaction_note(compaction: &ContextCompaction, window: u64, percent: u32) -> String {

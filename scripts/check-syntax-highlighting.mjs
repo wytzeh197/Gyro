@@ -19,6 +19,7 @@ try {
     "apps/desktop/src/editor/semantic-tokens.ts",
     "apps/desktop/src/editor/monaco-theme.ts",
     "apps/desktop/src/editor/custom-grammars.ts",
+    "packages/ui/src/appearance.ts",
   ];
   await writeFile(
     entry,
@@ -46,6 +47,7 @@ try {
     semanticLegend,
     createMonacoTheme,
     customGrammars,
+    colorContrast,
   } = await import(pathToFileURL(output));
   const cases = {
     "index.ts": "typescript",
@@ -327,9 +329,41 @@ try {
     "editorBracketHighlight.foreground1",
   ])
     assert.notEqual(dark.colors[color], light.colors[color]);
-  for (const theme of [dark, light])
-    for (const rule of theme.rules)
-      assert.match(rule.foreground, /^[\da-f]{6}$/i);
+  const composite = (overlay, background) => {
+    const alpha = overlay.length === 9 ? parseInt(overlay.slice(7), 16) / 255 : 1;
+    const channels = [1, 3, 5].map((offset) => {
+      const top = parseInt(overlay.slice(offset, offset + 2), 16);
+      const bottom = parseInt(background.slice(offset, offset + 2), 16);
+      return Math.round(top * alpha + bottom * (1 - alpha)).toString(16).padStart(2, "0");
+    });
+    return "#" + channels.join("");
+  };
+  for (const theme of [dark, light]) {
+    const colors = theme.colors;
+    const background = colors["editor.background"];
+    const removed = composite(colors["diffEditor.removedLineBackground"], background);
+    const inserted = composite(colors["diffEditor.insertedLineBackground"], background);
+    const syntaxBackgrounds = {
+      editor: background,
+      "removed line": removed,
+      "inserted line": inserted,
+      "removed text": composite(colors["diffEditor.removedTextBackground"], removed),
+      "inserted text": composite(colors["diffEditor.insertedTextBackground"], inserted),
+    };
+    for (const { token, foreground } of theme.rules) {
+      assert.match(foreground, /^[\da-f]{6}$/i);
+      for (const [surface, color] of Object.entries(syntaxBackgrounds))
+        assert.ok(
+          colorContrast("#" + foreground, color) >= 4.5,
+          `${theme.base} ${token} on ${surface} must meet 4.5:1`,
+        );
+    }
+    for (const selection of ["editor.selectionBackground", "editor.inactiveSelectionBackground"])
+      assert.ok(
+        colorContrast(colors["editor.selectionForeground"], colors[selection]) >= 4.5,
+        `${theme.base} selected text on ${selection} must meet 4.5:1`,
+      );
+  }
   console.log(
     `Syntax checks passed: ${Object.keys(cases).length} filename cases; overrides, ambiguity, shebangs, safety, providers, semantic validation, and themes (${languages.length} registered types).`,
   );

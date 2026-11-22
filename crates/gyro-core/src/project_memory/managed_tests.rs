@@ -93,6 +93,61 @@ fn malformed_newer_duplicate_and_cyclic_metadata_is_visible_but_unusable() {
 }
 
 #[test]
+fn overlapping_supersession_chains_preserve_statuses_and_diagnostic_lines() {
+    use MemoryStatus::{Active, Invalid, Superseded};
+
+    let cycle = "Memory supersession cycle";
+    let ambiguous = "Supersession target is ambiguous";
+    let cases = [
+        ("base", None, Superseded, None),
+        ("next", Some("base"), Superseded, None),
+        ("latest", Some("next"), Active, None),
+        ("dangling", Some("absent"), Active, None),
+        ("dup", None, Invalid, Some("Duplicate managed memory ID")),
+        ("dup", Some("cycle-a"), Invalid, Some(cycle)),
+        ("points-at-dup", Some("dup"), Invalid, Some(ambiguous)),
+        ("cycle-a", Some("cycle-b"), Invalid, Some(cycle)),
+        ("cycle-b", Some("cycle-a"), Invalid, Some(cycle)),
+        ("cycle-tail", Some("cycle-a"), Invalid, Some(cycle)),
+        (
+            "dup-ref-tail",
+            Some("points-at-dup"),
+            Invalid,
+            Some(ambiguous),
+        ),
+    ];
+    let mut source = "# Mémoire\n\n".to_string();
+    let mut expected_diagnostics = Vec::new();
+    for (index, (id, target, _, diagnostic)) in cases.iter().enumerate() {
+        source.push_str(&managed(id, "Decision", json!({"supersedes": target})));
+        source.push('\n');
+        if let Some(message) = diagnostic {
+            expected_diagnostics.push((Some(*id), index * 3 + 3, *message));
+        }
+    }
+
+    let document = MemoryDocument::parse(&source).unwrap();
+    let entries: Vec<_> = document
+        .entries
+        .iter()
+        .map(|entry| (entry.id.as_str(), entry.status))
+        .collect();
+    assert_eq!(entries, cases.map(|(id, _, status, _)| (id, status)));
+    let diagnostics: Vec<_> = document
+        .diagnostics
+        .iter()
+        .map(|diagnostic| {
+            (
+                diagnostic.entry_id.as_deref(),
+                diagnostic.line,
+                diagnostic.message.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(diagnostics, expected_diagnostics);
+}
+
+#[test]
 fn supersession_and_external_text_change_do_not_reactivate_old_decisions() {
     let source = managed("old", "Use old runtime", json!({}))
         + &managed(

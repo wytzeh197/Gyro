@@ -2,9 +2,14 @@
 //! Pure local computation — no model call, no extra round trip, no per-model price table.
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::VecDeque,
     fs,
     io::{self, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
     time::SystemTime,
 };
 
@@ -192,7 +197,7 @@ pub fn retrieval_hint(data: &serde_json::Value) -> Option<String> {
 #[derive(Clone, Debug)]
 pub struct SpillStore {
     root: PathBuf,
-    writes: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    writes: Arc<AtomicUsize>,
 }
 
 impl SpillStore {
@@ -229,24 +234,32 @@ impl SpillStore {
     }
     /// Keep the `keep` most recently written spills; returns how many were removed.
     pub fn gc(&self, keep: usize) -> io::Result<usize> {
-        let mut entries = Vec::new();
         let Ok(directory) = fs::read_dir(&self.root) else {
             return Ok(0);
         };
-        for entry in directory.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|value| value.to_str()) != Some("txt") {
-                continue;
-            }
-            let modified = entry
-                .metadata()
-                .and_then(|meta| meta.modified())
-                .unwrap_or(SystemTime::UNIX_EPOCH);
-            entries.push((modified, path));
-        }
+        let entries = directory
+            .flatten()
+            .filter(|entry| {
+                Path::new(&entry.file_name())
+                    .extension()
+                    .is_some_and(|ext| ext == "txt")
+            })
+            .collect::<Vec<_>>();
         if entries.len() <= keep {
             return Ok(0);
         }
+        // The usual sweep is only a count. Read timestamps when ranking will
+        // actually decide which files to evict.
+        let mut entries = entries
+            .into_iter()
+            .map(|entry| {
+                let modified = entry
+                    .metadata()
+                    .and_then(|meta| meta.modified())
+                    .unwrap_or(SystemTime::UNIX_EPOCH);
+                (modified, entry.path())
+            })
+            .collect::<Vec<_>>();
         entries.sort_by(|left, right| right.0.cmp(&left.0));
         let mut removed = 0;
         for (_, path) in entries.into_iter().skip(keep) {
@@ -273,6 +286,31 @@ impl SpillStore {
 
 /// How many spilled copies the store keeps before the oldest are swept.
 const SPILL_KEEP: usize = 512;
+const SPILL_SWEEP_INTERVAL: usize = 64;
+const MAX_TRACKED_SPILL_SESSIONS: usize = 128;
+
+/// Remember the sweep cadence between scopes, including the separate tool
+/// calls of a native MCP worker. An evicted counter starts with a sweep again.
+struct SpillWriteCounters {
+    recent: VecDeque<(PathBuf, Arc<AtomicUsize>)>,
+}
+
+impl SpillWriteCounters {
+    fn store(&mut self, root: PathBuf) -> SpillStore {
+        let writes = self
+            .recent
+            .iter()
+            .position(|(path, _)| *path == root)
+            .and_then(|index| self.recent.remove(index))
+            .map(|(_, writes)| writes)
+            .unwrap_or_default();
+        if self.recent.len() == MAX_TRACKED_SPILL_SESSIONS {
+            self.recent.pop_front();
+        }
+        self.recent.push_back((root.clone(), Arc::clone(&writes)));
+        SpillStore { root, writes }
+    }
+}
 
 thread_local! {
     static SCOPED_STORE: std::cell::RefCell<Option<SpillStore>> = const { std::cell::RefCell::new(None) };
@@ -288,7 +326,13 @@ pub struct SessionScope {
 
 impl SessionScope {
     pub fn start(paths: &crate::GyroPaths, session: uuid::Uuid) -> Self {
-        let store = SpillStore::new(session_root(paths, session));
+        static WRITES: Mutex<SpillWriteCounters> = Mutex::new(SpillWriteCounters {
+            recent: VecDeque::new(),
+        });
+        let store = WRITES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .store(session_root(paths, session));
         Self {
             previous: SCOPED_STORE.with(|current| current.replace(Some(store))),
             _same_thread: std::marker::PhantomData,
@@ -373,7 +417,6 @@ fn session_store() -> Option<&'static SpillStore> {
 /// Put the full copy of a spilled value on disk, so the address quoted in its preview resolves.
 /// Returns whether the copy is readable; `false` means the preview is all there is.
 pub fn persist(address: &str, text: &str) -> bool {
-    use std::sync::atomic::Ordering;
     let store = SCOPED_STORE
         .with(|current| current.borrow().clone())
         .or_else(|| session_store().cloned());
@@ -383,10 +426,9 @@ pub fn persist(address: &str, text: &str) -> bool {
     let saved = store.save(address, text).is_ok();
     // Sweep occasionally rather than on a timer: this is a cache, so dropping old copies is
     // expected, and a write-count trigger costs nothing on the hot path.
-    // Counter belongs to this store, not the process: interleaved sessions
-    // must not repeatedly sweep one namespace while another grows forever.
-    // A newly bound scope sweeps on its first write as well.
-    if store.writes.fetch_add(1, Ordering::Relaxed) % 64 == 0 {
+    // Each namespace has its own count. The first write in a process also
+    // sweeps copies carried over from earlier processes.
+    if store.writes.fetch_add(1, Ordering::Relaxed) % SPILL_SWEEP_INTERVAL == 0 {
         let _ = store.gc(SPILL_KEEP);
     }
     saved
@@ -909,9 +951,10 @@ mod tests {
             }
         }
         let copies = fs::read_dir(session_root(&paths, second)).unwrap().count();
-        assert!(
-            copies <= SPILL_KEEP + 63,
-            "interleaving must not starve a session's sweep: {copies}"
+        assert_eq!(
+            copies,
+            SPILL_KEEP + (12 * 63 - 1) % SPILL_SWEEP_INTERVAL,
+            "rebinding must preserve this session's write count"
         );
         assert_eq!(
             fs::read_dir(session_root(&paths, first)).unwrap().count(),

@@ -2,6 +2,7 @@
 //! health checks, tool discovery, or other independent tool calls from reaching
 //! the desktop broker. Each submitted operation executes at most once.
 
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
@@ -29,11 +30,34 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn send(output: &Mutex<impl Write>, message: &Value) -> anyhow::Result<()> {
+fn send(output: &Mutex<impl Write>, message: &impl Serialize) -> anyhow::Result<()> {
     let mut output = output
         .lock()
         .map_err(|_| anyhow::anyhow!("MCP output is unavailable"))?;
     crate::capabilities::mcp_server::write_desktop_mcp_message(&mut *output, message)
+}
+
+fn send_result(
+    output: &Mutex<impl Write>,
+    id: &Value,
+    result: &impl Serialize,
+) -> anyhow::Result<()> {
+    // Borrow the result through framing. Screenshots and tool catalogs can be
+    // large enough for a deep JSON copy to matter.
+    #[derive(Serialize)]
+    struct Response<'a, T> {
+        id: &'a Value,
+        jsonrpc: &'static str,
+        result: &'a T,
+    }
+    send(
+        output,
+        &Response {
+            id,
+            jsonrpc: "2.0",
+            result,
+        },
+    )
 }
 
 pub(super) fn serve<R, W, F>(
@@ -63,13 +87,14 @@ where
                     Err(_) => return,
                 };
                 let Ok((id, params)) = request else { return };
+                let key = id.to_string();
                 {
                     let mut active = lock(active);
-                    if active.get(&id.to_string()) == Some(&CallState::Cancelled) {
-                        active.remove(&id.to_string());
+                    if active.get(&key) == Some(&CallState::Cancelled) {
+                        active.remove(&key);
                         continue;
                     }
-                    active.insert(id.to_string(), CallState::Running);
+                    active.insert(key.clone(), CallState::Running);
                 }
                 // A panic in one tool call would otherwise end this worker
                 // without an answer: the provider waits on that id until its
@@ -77,17 +102,23 @@ where
                 // the scope re-raises the panic when the client disconnects.
                 let outcome =
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| call(params)));
-                let result = match outcome {
-                    Ok(Ok(result)) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
-                    Ok(Err(failure)) => error(
-                        id.clone(),
-                        -32603,
-                        gyro_core::sanitize_capability_summary(&failure.to_string()),
+                lock(active).remove(&key);
+                let sent = match outcome {
+                    Ok(Ok(result)) => send_result(output, &id, &result),
+                    Ok(Err(failure)) => send(
+                        output,
+                        &error(
+                            id,
+                            -32603,
+                            gyro_core::sanitize_capability_summary(&failure.to_string()),
+                        ),
                     ),
-                    Err(_) => error(id.clone(), -32603, "Gyro tool call failed unexpectedly"),
+                    Err(_) => send(
+                        output,
+                        &error(id, -32603, "Gyro tool call failed unexpectedly"),
+                    ),
                 };
-                lock(active).remove(&id.to_string());
-                if let Err(failure) = send(output, &result) {
+                if let Err(failure) = sent {
                     *lock(&write_error) = Some(failure.to_string());
                     return;
                 }
@@ -157,7 +188,14 @@ where
                         "serverInfo": {"name": name, "version": env!("CARGO_PKG_VERSION")},
                     }),
                     "ping" => json!({}),
-                    "tools/list" => json!({"tools": tools}),
+                    "tools/list" => {
+                        #[derive(Serialize)]
+                        struct ToolList<'a> {
+                            tools: &'a [Value],
+                        }
+                        send_result(&output, &id, &ToolList { tools: &tools })?;
+                        continue;
+                    }
                     "tools/call" => {
                         let tool_name = params.get("name").and_then(Value::as_str);
                         if !tools
@@ -205,10 +243,7 @@ where
                         continue;
                     }
                 };
-                send(
-                    &output,
-                    &json!({"jsonrpc": "2.0", "id": id, "result": result}),
-                )?;
+                send_result(&output, &id, &result)?;
             }
             Ok(())
         })();

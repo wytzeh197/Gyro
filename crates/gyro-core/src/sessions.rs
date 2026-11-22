@@ -1782,7 +1782,21 @@ impl SessionStore {
         &self,
         session_id: Uuid,
     ) -> Result<(Vec<SessionEvent>, Option<String>)> {
-        self.read_recent_events_impl(session_id, MAX_SESSION_EVENTS_READ, true)
+        self.read_recent_events_impl(session_id, MAX_SESSION_EVENTS_READ, true, |_| true)
+    }
+
+    /// Read conversation, handoff, and compaction signals from the same bounded
+    /// tail as `read_events`, with its revision for safe reuse in this turn.
+    pub fn read_prompt_history_events(
+        &self,
+        session_id: Uuid,
+    ) -> Result<(Vec<SessionEvent>, Option<String>)> {
+        self.read_recent_events_impl(
+            session_id,
+            MAX_SESSION_EVENTS_READ,
+            true,
+            line_can_affect_prompt_history,
+        )
     }
 
     /// Metadata-only display revision. Identity and modification time also
@@ -1870,7 +1884,7 @@ impl SessionStore {
         session_id: Uuid,
         max_recent_events: usize,
     ) -> Result<Vec<SessionEvent>> {
-        self.read_recent_events_impl(session_id, max_recent_events, false)
+        self.read_recent_events_impl(session_id, max_recent_events, false, |_| true)
             .map(|(events, _)| events)
     }
 
@@ -1879,6 +1893,7 @@ impl SessionStore {
         session_id: Uuid,
         max_recent_events: usize,
         include_revision: bool,
+        include_line: impl Fn(&str) -> bool,
     ) -> Result<(Vec<SessionEvent>, Option<String>)> {
         let session = self
             .get_session(session_id)?
@@ -1910,7 +1925,7 @@ impl SessionStore {
             .rev()
             .enumerate()
             .filter_map(|(index, line)| {
-                if line.is_empty() {
+                if line.is_empty() || !include_line(line) {
                     None
                 } else {
                     parse_session_event_line_or_skip(&events_path, index, line)
@@ -2787,6 +2802,21 @@ impl SessionStore {
         )?;
         Ok(())
     }
+}
+
+/// Check for a spoken turn, checkpoint, model switch, or occupancy signal
+/// before decoding an event. A marker anywhere is enough to pass the line to
+/// the ordinary parser. Unicode escapes can disguise a marker in imported
+/// JSONL, so those lines always get parsed as well.
+fn line_can_affect_prompt_history(line: &str) -> bool {
+    static MARKERS: std::sync::LazyLock<regex::bytes::Regex> = std::sync::LazyLock::new(|| {
+        regex::bytes::Regex::new(concat!(
+            r#""(?:session-created|user-message|assistant-message|contextSummary|contextUsage|model-switch)""#,
+            r#"|"activityKind"\s*:\s*"context"|\\u"#,
+        ))
+        .expect("valid prompt history markers")
+    });
+    MARKERS.is_match(line.as_bytes())
 }
 
 fn provider_status_from_payload(payload: &Value) -> Option<String> {
@@ -4276,6 +4306,81 @@ mod tests {
         assert_eq!(appended[2].message, "activity 2");
         assert!(appended.iter().all(|event| event.turn_id == Some(turn_id)));
         assert_eq!(store.read_events(session.id).unwrap().len(), 4);
+    }
+
+    #[test]
+    fn prompt_history_read_keeps_spoken_turns_and_context_signals() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "read prompt history")
+            .unwrap();
+        let append = |kind, payload| {
+            store
+                .append_event(session.id, kind, "fixture", payload)
+                .unwrap()
+        };
+        let cases = [
+            (
+                SessionEventKind::CommandOutput,
+                serde_json::json!({"output":"x".repeat(16_000)}),
+                false,
+            ),
+            (
+                SessionEventKind::SystemEvent,
+                serde_json::json!({"kind":"provider-activity","activityKind":"tool"}),
+                false,
+            ),
+            (SessionEventKind::UserMessage, Value::Null, true),
+            (SessionEventKind::AssistantMessage, Value::Null, true),
+            (
+                SessionEventKind::SystemEvent,
+                serde_json::json!({"kind":"model-switch"}),
+                true,
+            ),
+            (
+                SessionEventKind::SystemEvent,
+                serde_json::json!({"contextSummary":"earlier decisions"}),
+                true,
+            ),
+            (
+                SessionEventKind::SystemEvent,
+                serde_json::json!({
+                    "kind":"provider-activity","activityKind":"context",
+                    "activityId":"context-compaction-1","status":"done",
+                }),
+                true,
+            ),
+            (
+                SessionEventKind::CommandOutput,
+                serde_json::json!({"contextUsage":{"inputTokens":500}}),
+                true,
+            ),
+        ];
+        let mut expected = vec![store.read_events(session.id).unwrap()[0].id];
+        for (kind, payload, keep) in cases {
+            let event = append(kind, payload);
+            if keep {
+                expected.push(event.id);
+            }
+        }
+        let (projected, revision) = store.read_prompt_history_events(session.id).unwrap();
+        assert_eq!(
+            projected.iter().map(|event| event.id).collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(
+            revision.unwrap(),
+            store.transcript_revision(session.id).unwrap()
+        );
+        assert_eq!(
+            store.read_events(session.id).unwrap().len(),
+            projected.len() + 2
+        );
+        // Imported records may escape a key or reorder the header.
+        assert!(line_can_affect_prompt_history(
+            r#"{"payload":{"\u0063ontextUsage":{"inputTokens":2}},"kind":"command-output"}"#
+        ));
     }
 
     #[test]

@@ -8,6 +8,7 @@ import {
   unseal,
   redact,
   checkedPushBody,
+  packageRegistryRead,
 } from "./safety.mjs";
 
 type Run = {
@@ -178,15 +179,27 @@ export class CloudRun extends DurableObject<Env> {
       const url = new URL(request.url);
       if (url.protocol !== "https:" || url.port || url.username || url.password)
         return new Response(null, { status: 403 });
+      const headers = new Headers(request.headers);
+      headers.delete("authorization");
+      headers.delete("x-api-key");
+      headers.delete("cookie");
+      // Anonymous dependency downloads: no stored credential is unsealed or
+      // attached, and the request cannot carry a body.
+      if (packageRegistryRead(url, request.method, state.phase)) {
+        headers.delete("proxy-authorization");
+        return await fetch(
+          new Request(url, {
+            method: request.method,
+            headers,
+            redirect: "manual",
+          }),
+        );
+      }
       const credentials = await unseal(
         state.encrypted,
         this.env.CLOUD_AGENTS_ENCRYPTION_KEY,
         state.run.id,
       );
-      const headers = new Headers(request.headers);
-      headers.delete("authorization");
-      headers.delete("x-api-key");
-      headers.delete("cookie");
       let body = request.body;
       if (
         (state.run.provider === "claude" &&

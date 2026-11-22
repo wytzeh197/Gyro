@@ -104,14 +104,15 @@ pub(crate) fn auto_compact_owned_session(
             &request.provider_id,
             declared_kind,
         );
-        let recent = if matches!(point, CompactionPoint::BeforePrompt)
-            && matches!(
-                adapter.kind,
-                ProviderAdapterKind::OpenAiCompatible | ProviderAdapterKind::Ollama
-            )
-            && !(config.efficiency.policies() && config.efficiency.task_state)
-        {
-            store.read_events_with_revision(session_id)
+        let owned_transcript = matches!(
+            adapter.kind,
+            ProviderAdapterKind::OpenAiCompatible | ProviderAdapterKind::Ollama
+        );
+        let prefetch = matches!(point, CompactionPoint::BeforePrompt)
+            && owned_transcript
+            && !(config.efficiency.policies() && config.efficiency.task_state);
+        let recent = if owned_transcript {
+            store.read_prompt_history_events(session_id)
         } else {
             store.read_events(session_id).map(|events| (events, None))
         };
@@ -130,8 +131,10 @@ pub(crate) fn auto_compact_owned_session(
             catalog_window,
             &events,
         ) {
-            result.history =
-                revision.and_then(|revision| PrefetchedHistory::new(session_id, revision, events));
+            if prefetch {
+                result.history = revision
+                    .and_then(|revision| PrefetchedHistory::new(session_id, revision, events));
+            }
             return Ok(result);
         }
     }

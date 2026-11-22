@@ -286,3 +286,28 @@ export async function checkedPushBody(stream, branch) {
     buffer = next;
   }
 }
+
+// Public package registries the agent may read while installing dependencies.
+// Only anonymous GET/HEAD reads are forwarded: no credentials are attached and
+// publishing, login and private registries stay blocked. Redirects are not
+// followed by the Worker, so each redirect target is checked again here.
+const PACKAGE_REGISTRIES = new Set([
+  "registry.npmjs.org",
+  "registry.yarnpkg.com",
+  "pypi.org",
+  "files.pythonhosted.org",
+]);
+export function packageRegistryRead(url, method, phase) {
+  return (
+    url.protocol === "https:" &&
+    !url.port &&
+    !url.username &&
+    !url.password &&
+    PACKAGE_REGISTRIES.has(url.hostname) &&
+    ["GET", "HEAD"].includes(method) &&
+    ["starting", "running"].includes(phase) &&
+    !url.pathname.startsWith("/-/user") &&
+    !url.pathname.startsWith("/-/npm/v1/tokens") &&
+    !url.pathname.startsWith("/-/whoami")
+  );
+}
