@@ -1,6 +1,6 @@
 {
   "schema": "gyro.model-catalog.v1",
-  "revision": "2026-11-20.1",
+  "revision": "2026-11-23.1",
   "enabled": true,
   "rolloutPercentage": 100,
   "models": [
@@ -223,6 +223,50 @@
       "contextWindowTokens": 1000000,
       "supportedReasoningEfforts": ["low", "medium", "high", "xhigh"],
       "defaultReasoningEffort": "xhigh"
+    },
+    {
+      "providerId": "openrouter",
+      "id": "google/gemini-4-neon",
+      "displayName": "Gemini 4 Neon",
+      "description": "OpenRouter API. Google's fast Gemini 4 model for coding and agentic work. Antigravity serves 512K on its own connection.",
+      "minClientRevision": 2,
+      "insertBefore": "google/gemini-3.8-flash",
+      "contextWindowTokens": 1048576,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh"],
+      "defaultReasoningEffort": "high"
+    },
+    {
+      "providerId": "openrouter",
+      "id": "google/gemini-4-carbon",
+      "displayName": "Gemini 4 Carbon",
+      "description": "OpenRouter API. Google's frontier Gemini 4 model for complex reasoning and agentic work.",
+      "minClientRevision": 2,
+      "insertBefore": "google/gemini-3.8-flash",
+      "contextWindowTokens": 1048576,
+      "supportedReasoningEfforts": ["low", "medium", "high"],
+      "defaultReasoningEffort": "medium"
+    },
+    {
+      "providerId": "openrouter",
+      "id": "google/gemini-4-argon",
+      "displayName": "Gemini 4 Argon",
+      "description": "OpenRouter API. Google's Gemini 4 reasoning model for software engineering and multi-step agents.",
+      "minClientRevision": 2,
+      "insertBefore": "google/gemini-3.8-flash",
+      "contextWindowTokens": 1048576,
+      "supportedReasoningEfforts": ["low", "medium", "high"],
+      "defaultReasoningEffort": "medium"
+    },
+    {
+      "providerId": "openrouter",
+      "id": "google/gemini-4-hydrogen",
+      "displayName": "Gemini 4 Hydrogen",
+      "description": "OpenRouter API. Google's high-efficiency Gemini 4 workhorse for high-throughput agentic work.",
+      "minClientRevision": 2,
+      "insertBefore": "google/gemini-3.8-flash",
+      "contextWindowTokens": 1048576,
+      "supportedReasoningEfforts": ["low", "medium", "high", "xhigh"],
+      "defaultReasoningEffort": "high"
     },
     {
       "providerId": "openrouter",

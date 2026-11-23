@@ -13,7 +13,7 @@
     "opencode": "Configured externally; no fixed context or effort advertised.",
     "deepseek": "https://api-docs.deepseek.com/quick_start/pricing/ rechecked 2026-10-23. Both models publish a 1M context length, stored as 1000000.",
     "mistral": "https://docs.mistral.ai/resources/known-limitations rechecked 2026-10-23. 256k for Medium 3.5, Large 3, and Small 4; 128k for Codestral. mistral-large-latest still resolves to Large 3. Large 4 is a separate 1M id and is not in the picker.",
-    "openrouter": "https://openrouter.ai/api/v1/models fetched 2026-10-23. context_length and top_provider.context_length agree for every curated id. moonshotai/kimi-k3.1-pro is 1048576 with efforts max/high/low (none omitted) and default max. No separate highspeed model id."
+    "openrouter": "https://openrouter.ai/api/v1/models fetched 2026-10-23. context_length and top_provider.context_length agree for every curated id. moonshotai/kimi-k3.1-pro is 1048576 with efforts max/high/low (none omitted) and default max. No separate highspeed model id. Rechecked 2026-11-23: google/gemini-4-neon, google/gemini-4-carbon, google/gemini-4-argon and google/gemini-4-hydrogen are 1048576 (context_length and top_provider agree) and accept reasoning_effort; their effort levels and defaults follow Google's per-model Antigravity levels."
   },
   "columns": [
     "providerId",
@@ -209,6 +209,10 @@
       ["low", "medium", "high", "xhigh"],
       "xhigh"
     ],
+    ["openrouter", "google/gemini-4-neon", 1048576, ["low", "medium", "high", "xhigh"], "high"],
+    ["openrouter", "google/gemini-4-carbon", 1048576, ["low", "medium", "high"], "medium"],
+    ["openrouter", "google/gemini-4-argon", 1048576, ["low", "medium", "high"], "medium"],
+    ["openrouter", "google/gemini-4-hydrogen", 1048576, ["low", "medium", "high", "xhigh"], "high"],
     [
       "openrouter",
       "google/gemini-3.8-flash",

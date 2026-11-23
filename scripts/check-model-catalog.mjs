@@ -859,6 +859,36 @@ assert.equal(
       ],
     },
     {
+      // Antigravity publishes 512K for Neon and no window for the other
+      // Gemini 4 models; OpenRouter's 1M must not be shown there.
+      name: "Gemini 4 Neon",
+      rows: [
+        ["antigravity", "gemini-4-neon", "cli", 512_000],
+        ["openrouter", "google/gemini-4-neon", "api", 1_048_576],
+      ],
+    },
+    {
+      name: "Gemini 4 Carbon",
+      rows: [
+        ["antigravity", "gemini-4-carbon", "cli", null],
+        ["openrouter", "google/gemini-4-carbon", "api", 1_048_576],
+      ],
+    },
+    {
+      name: "Gemini 4 Argon",
+      rows: [
+        ["antigravity", "gemini-4-argon", "cli", null],
+        ["openrouter", "google/gemini-4-argon", "api", 1_048_576],
+      ],
+    },
+    {
+      name: "Gemini 4 Hydrogen",
+      rows: [
+        ["antigravity", "gemini-4-hydrogen", "cli", null],
+        ["openrouter", "google/gemini-4-hydrogen", "api", 1_048_576],
+      ],
+    },
+    {
       // Google publishes no window for Antigravity's Flash; OpenRouter's
       // 1M must not be shown there.
       name: "Gemini 3.8 Flash",
