@@ -1,6 +1,7 @@
 //! Model-owned terminal observations and lifecycle operations.
 use super::*;
 use serde_json::{json, Value};
+use std::io::{self, Write};
 
 const RETAINED_OUTPUT_COUNT: usize = 16;
 const RETAINED_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
@@ -23,7 +24,10 @@ impl RetainedTaskOutputs {
         let Some(id) = data["id"].as_str().map(str::to_owned) else {
             return;
         };
-        let Ok(bytes) = serde_json::to_vec(&data).map(|encoded| encoded.len()) else {
+        // Task stdout is capped at 2 MiB and stderr at 1 MiB before this runs.
+        // Encoding the value only to read its length kept a second copy of
+        // that output, then dropped it. The counter is the same compact JSON.
+        let Ok(bytes) = json_byte_len(&data) else {
             return;
         };
         if bytes > RETAINED_OUTPUT_BYTES {
@@ -276,7 +280,7 @@ pub(super) fn bound_command_result(
         ) {
             let summary = serde_json::to_value(&evidence)?;
             // Preserve the existing byte contract and fall back to raw windows for large/partial summaries.
-            if serde_json::to_vec(&summary)?.len() < workspace_result_byte_limit(arguments)? / 2 {
+            if json_byte_len(&summary)? < workspace_result_byte_limit(arguments)? / 2 {
                 data["evidenceSummary"] = summary;
                 if evidence.coverage == "complete"
                     && !data["sourceTruncated"].as_bool().unwrap_or(false)
@@ -308,6 +312,31 @@ pub(super) fn bound_command_result(
         ],
         arguments,
     )
+}
+
+/// Compact JSON length of `value`.
+///
+/// Retention and the evidence-summary gate only need this length. `Value`
+/// serialization does not fail for a writer that accepts every buffer. A
+/// failure still skips retention, or rejects the command page, which is what
+/// `to_vec` did.
+fn json_byte_len(value: &Value) -> anyhow::Result<usize> {
+    struct ByteCounter(usize);
+
+    impl Write for ByteCounter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0 = self.0.saturating_add(buf.len());
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut counter = ByteCounter(0);
+    serde_json::to_writer(&mut counter, value)?;
+    Ok(counter.0)
 }
 
 #[cfg(test)]
@@ -371,5 +400,41 @@ mod tests {
         assert!(cache.get("workspace", Some("owner"), "large-2").is_some());
         let entries = cache.entries.lock().unwrap();
         assert!(entries.iter().map(|entry| entry.bytes).sum::<usize>() <= RETAINED_OUTPUT_BYTES);
+    }
+
+    #[test]
+    fn retained_output_bytes_match_compact_json() {
+        let cache = RetainedTaskOutputs::default();
+        let samples = [
+            json!({"id":"plain","stdout":"done\n","exitCode":0,"ok":true,"note":null}),
+            json!({"id":"quotes","stdout":"say \"hi\"\npath\\to","stderr":"a\tb"}),
+            json!({"id":"controls","stdout":"a\u{0001}b\n"}),
+            json!({"id":"crab","stdout":"🦀 exact","stderr":"line\r\n"}),
+            json!({"id":"nested","stdout":"x","meta":{"n":1,"ok":false,"z":null}}),
+            json!({"id":"escapes","stdout":"\"\\".repeat(4_096)}),
+        ];
+        for sample in samples {
+            let id = sample["id"].as_str().unwrap().to_owned();
+            let expected = serde_json::to_vec(&sample).unwrap().len();
+            assert_eq!(json_byte_len(&sample).unwrap(), expected);
+            cache.remember("workspace", "owner", sample);
+            let entries = cache.entries.lock().unwrap();
+            let stored = entries.iter().find(|entry| entry.id == id).unwrap();
+            assert_eq!(stored.bytes, expected);
+        }
+    }
+
+    #[test]
+    fn output_whose_encoding_exceeds_the_retention_ceiling_is_not_stored() {
+        let cache = RetainedTaskOutputs::default();
+        let data = json!({
+            "id": "over-ceiling",
+            "stdout": "x".repeat(RETAINED_OUTPUT_BYTES),
+        });
+        assert!(json_byte_len(&data).unwrap() > RETAINED_OUTPUT_BYTES);
+        cache.remember("workspace", "owner", data);
+        assert!(cache
+            .get("workspace", Some("owner"), "over-ceiling")
+            .is_none());
     }
 }
