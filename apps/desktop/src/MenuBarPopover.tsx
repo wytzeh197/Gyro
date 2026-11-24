@@ -10,7 +10,6 @@ import {
   ProviderLogo,
   RefreshIcon,
   isProviderId,
-  gyroLogoMark,
   type MenuBarJob,
   type MenuBarOutcome,
   type MenuBarSnapshot,
@@ -188,7 +187,7 @@ export function MenuBarPopoverView({
         className="gyro-menu-bar-popover"
       >
         <header className="gyro-menu-bar-header">
-          <img alt="" className="gyro-menu-bar-brand-mark" src={gyroLogoMark} />
+          <span aria-hidden="true" className="gyro-menu-bar-brand-mark gyro-brand-mark" />
           <strong>Gyro</strong>
           <span
             className="gyro-menu-bar-status"

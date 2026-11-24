@@ -198,6 +198,16 @@ pub struct Settings {
     pub density: String,
     pub interface_size: String,
     pub motion_speed: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_preset: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_overrides: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_font: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_font: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_material: Option<String>,
 }
 impl Settings {
     pub fn from_preferences(v: &Value) -> Result<Self, Error> {
@@ -208,12 +218,76 @@ impl Settings {
             }
             Ok(s.into())
         };
+        let optional_choice = |name: &str, values: &[&str]| {
+            if v[name].is_null() {
+                Ok(None)
+            } else {
+                text(name, values).map(Some)
+            }
+        };
+        let font = |name: &str| -> Result<Option<String>, Error> {
+            if v[name].is_null() {
+                return Ok(None);
+            }
+            let font = v[name].as_str().ok_or(Error::Input)?;
+            if font.chars().count() > 180
+                || !font.chars().all(|ch| {
+                    ch.is_alphanumeric() || matches!(ch, ' ' | '.' | '_' | '-' | ',' | '\'' | '"')
+                })
+            {
+                return Err(Error::Input);
+            }
+            safe_text(font).map(Some)
+        };
+        let theme_overrides = match v.get("themeOverrides").filter(|value| !value.is_null()) {
+            Some(overrides) => {
+                let fields = overrides.as_object().ok_or(Error::Input)?;
+                for (key, value) in fields {
+                    let valid = match key.as_str() {
+                        "contrast" => value.as_u64().is_some_and(|value| value <= 100),
+                        "accent" | "ink" | "surface" | "diffAdded" | "diffRemoved"
+                        | "attention" => value.as_str().is_some_and(|color| {
+                            color.strip_prefix('#').is_some_and(|hex| {
+                                hex.len() == 6 && hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+                            })
+                        }),
+                        _ => false,
+                    };
+                    if !valid {
+                        return Err(Error::Input);
+                    }
+                }
+                Some(overrides.clone())
+            }
+            None => None,
+        };
         Ok(Self {
             format: "gyro-portable-settings-v1".into(),
             theme: text("theme", &["system", "light", "dark"])?,
-            density: text("density", &["compact", "comfortable"])?,
+            density: text("density", &["compact", "comfortable", "spacious"])?,
             interface_size: text("interfaceSize", &["small", "default", "large"])?,
             motion_speed: text("motionSpeed", &["slower", "default", "faster"])?,
+            theme_preset: optional_choice(
+                "themePreset",
+                &[
+                    "gyro",
+                    "gyro-high-contrast",
+                    "catppuccin",
+                    "dracula",
+                    "nord",
+                    "solarized",
+                    "tokyo-night",
+                    "gruvbox",
+                    "rose-pine",
+                    "everforest",
+                    "one",
+                    "github",
+                ],
+            )?,
+            theme_overrides,
+            ui_font: font("uiFont")?,
+            code_font: font("codeFont")?,
+            window_material: optional_choice("windowMaterial", &["opaque", "translucent"])?,
         })
     }
 }
@@ -655,6 +729,20 @@ mod tests {
         let encoded = serde_json::to_string(&Settings::from_preferences(&v).unwrap()).unwrap();
         assert!(!encoded.contains("providerKey"));
         assert!(!encoded.contains("approvalPolicy"));
+    }
+    #[test]
+    fn settings_projection_validates_custom_appearance() {
+        let mut v = json!({
+            "theme": "dark", "density": "spacious", "interfaceSize": "default",
+            "motionSpeed": "default", "themePreset": "nord", "codeFont": "Monaco",
+            "windowMaterial": "opaque", "themeOverrides": {"contrast": 72, "accent": "#b0a4d0"}
+        });
+        let projected = serde_json::to_value(Settings::from_preferences(&v).unwrap()).unwrap();
+        assert_eq!(projected["themeOverrides"]["contrast"], 72);
+        assert_eq!(projected["density"], "spacious");
+        assert_eq!(projected["codeFont"], "Monaco");
+        v["themeOverrides"]["accent"] = json!("bad color");
+        assert!(Settings::from_preferences(&v).is_err());
     }
     #[test]
     fn credential_like_content_requires_removal_before_upload() {

@@ -1,3 +1,5 @@
+import { Button, IconButton } from "../primitives/button";
+import { Empty } from "../primitives/feedback";
 import {
   CalendarClock,
   ChevronLeft,
@@ -5,7 +7,7 @@ import {
   History,
   Play,
   RefreshCw,
-} from "lucide-react";
+} from "../icons";
 import { FeatureUsageLine } from "../feature-usage";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
@@ -339,13 +341,13 @@ export function WorkflowRuns({
                   the unfinished step.
                 </label>
                 <div className="gyro-workflow-actions">
-                  <button
-                    className="gyro-primary-button"
+                  <Button
+                    size="sm"
                     disabled={busy || !reviewed}
                     onClick={() => void retryRun(true)}
                   >
                     Queue explicit continuation
-                  </button>
+                  </Button>
                   <button disabled={busy} onClick={() => setRetry(undefined)}>
                     Cancel retry
                   </button>
@@ -461,13 +463,14 @@ export function WorkflowRuns({
                       and outputs? Linked chats can be removed separately.
                     </p>
                     <div className="gyro-workflow-actions">
-                      <button
-                        className="gyro-workflow-danger-button"
+                      <Button
+                        variant="destructive"
+                        size="sm"
                         disabled={busy}
                         onClick={() => void deleteRun()}
                       >
                         Delete run record
-                      </button>
+                      </Button>
                       <button
                         disabled={busy}
                         onClick={() => setDeleteConfirmed(false)}
@@ -500,14 +503,14 @@ export function WorkflowRuns({
             Runs
           </h1>
         </div>
-        <button
-          className="gyro-workflow-icon-button"
+        <IconButton
+          size="sm"
           onClick={onRefresh}
-          aria-label="Refresh runs"
+          label="Refresh runs"
           title="Refresh runs"
         >
           <RefreshCw size={14} aria-hidden="true" />
-        </button>
+        </IconButton>
       </header>
       {loading ? (
         <p className="gyro-workflow-muted" role="status">
@@ -520,16 +523,17 @@ export function WorkflowRuns({
         </p>
       ) : null}
       {!loading && !loadError && !runs.length && !pending.length ? (
-        <div className="gyro-workflow-empty">
-          <span className="gyro-workflow-icon-tile is-large">
-            <History size={20} aria-hidden="true" />
-          </span>
-          <h2>No workflow runs yet</h2>
-          <p>Run a saved workflow to see its progress and results here.</p>
-          <button className="gyro-primary-button" onClick={onBrowseWorkflows}>
-            Browse workflows
-          </button>
-        </div>
+        <Empty
+          className="gyro-workflow-empty"
+          icon={<History size={20} />}
+          title={<h2>No workflow runs yet</h2>}
+          description="Run a saved workflow to see its progress and results here."
+          actions={
+            <Button size="sm" onClick={onBrowseWorkflows}>
+              Browse workflows
+            </Button>
+          }
+        />
       ) : null}
       {runGroups.map((group) =>
         !group.jobs.length && !group.runs.length ? null : (

@@ -401,6 +401,7 @@ fn server_runs_round_trip_in_the_store() {
         state: RunState::Running,
         offset: 0,
         result_branch: "gyro/cloud/x".into(),
+        base_commit: None,
         result_commit: None,
         created_at: 1,
     };
@@ -605,6 +606,18 @@ pub(super) async fn exercise(host: &RunnerHost, agent: &[String], work: &Path) {
     );
     let files = git_in(&repo, &["ls-tree", "-r", "--name-only", &branch]);
     assert!(!files.contains("ignored.txt"));
+    assert_eq!(
+        host.fetch_result(&repo, &project, &id).await.unwrap(),
+        fetched
+    );
+    let head = git_in(&repo, &["rev-parse", "HEAD"]);
+    git_in(
+        &repo,
+        &["update-ref", &format!("refs/heads/{branch}"), head.trim()],
+    );
+    let error = host.fetch_result(&repo, &project, &id).await.unwrap_err();
+    assert!(error.to_string().contains("already has a different commit"));
+    assert_eq!(git_in(&repo, &["rev-parse", &branch]), head);
 
     // A long run: drop the stream mid-run, reattach, then stop it.
     let long = new_run_id();

@@ -1,4 +1,7 @@
 import type { WorkbenchPreferences } from "./types";
+import { normalizeThemePreferences, type ThemePreferences } from "./theme/theme-engine.ts";
+
+const themeKeys = ["themePreset", "themeOverrides", "uiFont", "codeFont", "windowMaterial"] as const;
 
 export const TRANSFER_KEYS = [
   "theme",
@@ -13,6 +16,7 @@ export const TRANSFER_KEYS = [
   "desktopNotifications",
   "checkReminders",
   "workspaceKeybindings",
+  ...themeKeys,
 ] as const;
 export type PortableSettings = Pick<
   WorkbenchPreferences,
@@ -20,7 +24,7 @@ export type PortableSettings = Pick<
 >;
 const choices: Record<string, readonly string[]> = {
   theme: ["system", "light", "dark"],
-  density: ["compact", "comfortable"],
+  density: ["compact", "comfortable", "spacious"],
   interfaceSize: ["small", "default", "large"],
   motionSpeed: ["slower", "default", "faster"],
   launchView: ["last", "workspace", "sessions", "terminals"],
@@ -56,6 +60,14 @@ export function parseSettingsTransfer(text: string): Partial<PortableSettings> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(file.settings)) {
     if (!(TRANSFER_KEYS as readonly string[]).includes(key)) return fail();
+    if ((themeKeys as readonly string[]).includes(key)) {
+      const normalized = normalizeThemePreferences({ [key]: value })[key as keyof ThemePreferences];
+      if (normalized === undefined) return fail();
+      if (key === "themeOverrides" && (!object(value) ||
+        Object.keys(value).length !== Object.keys(normalized).length)) return fail();
+      result[key] = normalized;
+      continue;
+    }
     if (key in choices) {
       if (typeof value !== "string" || !choices[key]!.includes(value))
         return fail();

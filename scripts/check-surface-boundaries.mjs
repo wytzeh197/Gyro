@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import { applyAppearancePreferences } from "../packages/ui/src/appearance-runtime.ts";
+import { normalizeThemePreferences } from "../packages/ui/src/theme/theme-engine.ts";
 import { resolveBootSurface } from "../apps/desktop/src/surface-boundary.ts";
 import {
   chatCompanionTabIds,
@@ -67,7 +69,11 @@ for (const framed of [false, true]) {
   window.top = framed ? {} : window;
   if (!framed) window.__gyroBrowserAgentInstalled = true;
   const document = {
-    documentElement: { dataset: {} },
+    documentElement: {
+      dataset: {},
+      ownerDocument: { defaultView: null },
+      style: { setProperty() {}, removeProperty() {} },
+    },
     querySelector: () => null,
     getElementById: () => ({}),
   };
@@ -92,6 +98,8 @@ for (const framed of [false, true]) {
       if (name === "react-dom/client")
         return { createRoot: () => ({ render: (node) => renders.push(node) }) };
       if (name === "./surface-boundary") return { resolveBootSurface };
+      if (name === "@gyro-dev/ui/appearance-runtime")
+        return { applyAppearancePreferences };
       if (name === "@tauri-apps/api/core") return { isTauri: () => false };
       if (name === "./native-appearance" || name === "./ui-storage") {
         const exports = {};
@@ -110,6 +118,14 @@ for (const framed of [false, true]) {
                     throw new Error("Embedded boot must not set a native theme");
                   },
                 };
+              if (dependency === "@tauri-apps/api/window")
+                return {
+                  getCurrentWindow: () => {
+                    throw new Error("Embedded boot must not update a native window");
+                  },
+                };
+              if (dependency === "@gyro-dev/ui/theme")
+                return { normalizeThemePreferences };
               throw new Error(`Embedded boot helper imported ${dependency}`);
             },
           },

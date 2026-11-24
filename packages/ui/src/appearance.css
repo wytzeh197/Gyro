@@ -4,6 +4,7 @@
   --gyro-ui-scale: 0.9;
 }
 
+:root,
 :root[data-interface-size="default"] {
   --gyro-ui-scale: 1;
 }
@@ -22,6 +23,23 @@
 
 :root[data-motion-speed="faster"] {
   --gyro-motion-factor: 0.65;
+}
+
+:root {
+  --gyro-density-scale: 1;
+  --gyro-row-height: calc(1.75rem * var(--gyro-density-scale) * var(--gyro-ui-scale));
+  --gyro-settings-row-pad-y: calc(0.625rem * var(--gyro-density-scale));
+  --gyro-composer-pad: calc(10px * var(--gyro-density-scale));
+  --gyro-composer-min-h: calc(42px * var(--gyro-density-scale) * var(--gyro-ui-scale));
+}
+
+:root[data-density="compact"] { --gyro-density-scale: 0.85; }
+:root[data-density="spacious"] { --gyro-density-scale: 1.15; }
+
+:root.no-transitions *,
+:root.no-transitions *::before,
+:root.no-transitions *::after {
+  transition: none !important;
 }
 
 /* Keep controls together when enlarged, and allow descriptions to wrap. The

@@ -1,5 +1,5 @@
 import React, { useLayoutEffect, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "./icons";
 import { ComposerEffortSelector } from "./composer-effort-selector";
 import { SelectionTrack } from "./selection-track";
 import {
@@ -7,32 +7,9 @@ import {
   SettingsSegmented,
   SettingsSwitch,
 } from "./settings-controls";
-import { useDialogDismiss } from "./use-dialog-dismiss";
+import { Button } from "./primitives/button";
+import { Dialog } from "./primitives/dialog";
 import type { InterfaceSize, MotionSpeed, WorkbenchDensity } from "./types";
-
-function FixtureDialog({ onClose }: { onClose: () => void }) {
-  const { ref, dismiss } = useDialogDismiss(onClose);
-  return (
-    <div
-      ref={ref}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Motion preview"
-      className="gyro-terminal-terminate-overlay"
-      onKeyDown={(event) => {
-        if (event.key === "Escape") dismiss();
-      }}
-    >
-      <section className="gyro-terminal-terminate-card">
-        <h2>Motion preview</h2>
-        <p>This fixture contains no live project or provider data.</p>
-        <button autoFocus onClick={dismiss}>
-          Close preview
-        </button>
-      </section>
-    </div>
-  );
-}
 
 export function SizingMotionFixture() {
   const [theme, setTheme] = useState("dark");
@@ -43,7 +20,6 @@ export function SizingMotionFixture() {
   const [index, setIndex] = useState(2);
   const [single, setSingle] = useState(false);
   const [enabled, setEnabled] = useState(false);
-  const [dialog, setDialog] = useState(false);
   const [commits, setCommits] = useState<number[]>([]);
   const [pressSample, setPressSample] = useState("Not pressed");
   const [activations, setActivations] = useState(0);
@@ -141,7 +117,24 @@ export function SizingMotionFixture() {
           label="Preview switch"
           onChange={setEnabled}
         />
-        <button onClick={() => setDialog(true)}>Open dialog</button>
+        <Dialog.Root disablePointerDismissal>
+          <Dialog.Trigger render={<Button variant="outline" size="sm" />}>
+            Open dialog
+          </Dialog.Trigger>
+          <Dialog.Content size="sm">
+            <Dialog.Header>
+              <Dialog.Title>Motion preview</Dialog.Title>
+              <Dialog.Description>
+                This fixture contains no live project or provider data.
+              </Dialog.Description>
+            </Dialog.Header>
+            <Dialog.Footer>
+              <Dialog.Close render={<Button variant="outline" size="sm" />}>
+                Close preview
+              </Dialog.Close>
+            </Dialog.Footer>
+          </Dialog.Content>
+        </Dialog.Root>
         <button
           onClick={() => {
             setSingle(!single);
@@ -199,7 +192,6 @@ export function SizingMotionFixture() {
       <output aria-label="Saved effort choices">
         Saved choices: {commits.length}; last: {commits.at(-1) ?? "none"}
       </output>
-      {dialog ? <FixtureDialog onClose={() => setDialog(false)} /> : null}
     </main>
   );
 }

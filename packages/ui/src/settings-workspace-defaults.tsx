@@ -1,7 +1,7 @@
 import type { WorkbenchMode } from "./types";
 import {
   SettingsRow,
-  SettingsSelect,
+  SettingsChoice,
 } from "./settings-controls";
 
 export function WorkspaceDefaultSettings({
@@ -16,17 +16,18 @@ export function WorkspaceDefaultSettings({
         label="New chats start in"
         detail="Use the project folder directly, or give the agent a separate Git worktree and branch."
       >
-        <SettingsSelect
+        <SettingsChoice
           aria-label="Default workspace mode for new chats"
           disabled={!onChange}
-          onChange={(event) =>
-            onChange?.(event.target.value === "worktree" ? "worktree" : "local")
+          onValueChange={(value) =>
+            onChange?.(value === "worktree" ? "worktree" : "local")
           }
           value={mode}
-        >
-          <option value="local">Project folder</option>
-          <option value="worktree">Agent workspace</option>
-        </SettingsSelect>
+          options={[
+            { value: "local", label: "Project folder" },
+            { value: "worktree", label: "Agent workspace" },
+          ]}
+        />
       </SettingsRow>
   );
 }

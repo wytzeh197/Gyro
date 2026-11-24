@@ -6,8 +6,8 @@ use crate::{
 use gyro_core::efficiency::pricing::PriceSnapshot;
 use gyro_core::{
     decide_mutation_proposal, CapabilityAccess, CapabilityClass, ExecutionTermination, GyroConfig,
-    GyroPaths, MutationDecision, ProjectCapabilityPolicy, Session, SessionEvent, SessionOrigin,
-    SessionStore, UsageTokens,
+    GyroPaths, MutationDecision, ProjectCapabilityPolicy, Session, SessionOrigin, SessionStore,
+    UsageTokens,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -18,9 +18,31 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
 use uuid::Uuid;
+
+#[path = "efficiency_benchmark/verification.rs"]
+mod verification;
+pub(crate) use verification::capture_verification_start;
+
+// The isolated benchmark process executes one fixture at a time. A smaller
+// harness window gives the long-session cases a reproducible compaction stress.
+static CONTEXT_WINDOW: AtomicU64 = AtomicU64::new(0);
+const STRESS_CONTEXT_WINDOW: u64 = 6_144;
+
+pub(crate) fn context_window_override() -> Option<u64> {
+    let window = CONTEXT_WINDOW.load(Ordering::Relaxed);
+    (window > 0).then_some(window)
+}
+
+struct ContextWindowGuard;
+impl Drop for ContextWindowGuard {
+    fn drop(&mut self) {
+        CONTEXT_WINDOW.store(0, Ordering::Relaxed);
+    }
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Spec {
@@ -34,8 +56,21 @@ struct Spec {
     #[serde(default)]
     prices: Vec<PriceSnapshot>,
     #[serde(default)]
+    native_cli_version: Option<String>,
+    #[serde(default)]
     ollama_endpoint: Option<String>,
+    #[serde(default)]
+    held_out: bool,
+    #[serde(default)]
+    candidate_policies: Option<CandidatePolicies>,
     tasks: Vec<Task>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CandidatePolicies {
+    tool_recovery_feedback: bool,
+    checkpoint_recovery: bool,
+    stable_api_prefix: bool,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -57,9 +92,9 @@ struct NativeComparison {
 struct Budget {
     max_observed_tokens: u64,
     #[serde(default)]
-    max_tool_rounds_per_turn: Option<usize>,
-    #[serde(default)]
     max_tokens_per_turn: Option<u64>,
+    #[serde(default)]
+    max_tool_rounds_per_turn: Option<usize>,
     max_calls: u32,
     max_cost_micros: Option<u64>,
     currency: String,
@@ -70,16 +105,34 @@ struct Task {
     id: String,
     category: String,
     repository_snapshot: String,
+    #[serde(default)]
+    source_revisions: Vec<String>,
     files: BTreeMap<String, String>,
     turns: Vec<String>,
     allowed_changes: Vec<String>,
     verifier: String,
     #[serde(default)]
+    required_verification_commands: Vec<verification::RequiredCommand>,
+    #[serde(default)]
     reference_solution: BTreeMap<String, String>,
+    #[serde(default)]
+    critical: bool,
+    #[serde(default)]
+    reopen_before_turn: Option<usize>,
 }
-pub(super) fn start(app: &tauri::AppHandle, root: PathBuf, spec: Value) -> anyhow::Result<bool> {
+pub(crate) fn start(app: &tauri::AppHandle, root: PathBuf, spec: Value) -> anyhow::Result<bool> {
     let spec: Spec = serde_json::from_value(spec)?;
     validate(&spec)?;
+    check_native_cli_version(&spec)?;
+    if spec.native_cli_version.is_some() {
+        let provider = &spec.providers[0].id;
+        anyhow::ensure!(
+            gyro_core::try_provider_api_key_value(provider)?.is_none()
+                && !gyro_core::credentials::provider_credential_env_vars(provider).iter().any(|key|
+                    std::env::var(key).is_ok_and(|value| !value.trim().is_empty())),
+            "Native subscription comparisons require a CLI account without API credential overrides"
+        );
+    }
     let paths = GyroPaths::for_current_user()?;
     paths.ensure()?;
     let store = SessionStore::open(paths.clone())?;
@@ -107,8 +160,8 @@ fn benchmark_config(spec: &Spec) -> GyroConfig {
     config.efficiency.prices = spec.prices.clone();
     config.usage_guard.max_calls_per_window = spec.execution_budget.max_calls;
     config.usage_guard.max_tokens_per_call = spec.execution_budget.max_observed_tokens;
-    if let Some(limit) = spec.execution_budget.max_tool_rounds_per_turn {
-        config.usage_guard.max_tool_rounds = limit;
+    if let Some(rounds) = spec.execution_budget.max_tool_rounds_per_turn {
+        config.usage_guard.max_tool_rounds = rounds;
     }
     for provider in &mut config.model_providers {
         provider.enabled = spec
@@ -167,6 +220,7 @@ fn validate(spec: &Spec) -> anyhow::Result<()> {
     if let Some(rounds) = spec.execution_budget.max_tool_rounds_per_turn {
         anyhow::ensure!(
             rounds > 0
+                && spec.native_cli_version.is_none()
                 && spec.providers.iter().all(|provider| {
                     gyro_core::efficiency::controls(&provider.id).owns_requests
                         && provider.native_comparison.is_none()
@@ -184,6 +238,94 @@ fn validate(spec: &Spec) -> anyhow::Result<()> {
         gyro_core::ollama_endpoint(Some(endpoint))?;
     }
     let mut ids = HashSet::new();
+    anyhow::ensure!(
+        !spec
+            .providers
+            .iter()
+            .any(|provider| provider.native_comparison.is_some())
+            || spec
+                .tasks
+                .iter()
+                .all(|task| task.required_verification_commands.is_empty()),
+        "Required verification commands need Gyro-owned workspace command receipts"
+    );
+    if let Some(version) = &spec.native_cli_version {
+        anyhow::ensure!(
+            spec.providers.len() == 1
+                && matches!(spec.providers[0].id.as_str(), "openai" | "anthropic")
+                && spec.providers[0].native_comparison.is_none()
+                && spec.execution_budget.max_cost_micros.is_none()
+                && !version.trim().is_empty(),
+            "Native paired runs need one Gyro CLI route, a pinned CLI version, and a separate usage budget"
+        );
+    }
+    if spec.held_out {
+        let source_revisions: HashSet<_> = spec
+            .tasks
+            .iter()
+            .flat_map(|task| &task.source_revisions)
+            .collect();
+        anyhow::ensure!(
+            source_revisions.len() >= 2
+                && spec
+                    .tasks
+                    .iter()
+                    .all(|task| !task.source_revisions.is_empty())
+                && source_revisions.iter().all(|revision| {
+                    revision.len() == 40
+                        && revision
+                            .bytes()
+                            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                }),
+            "Held-out tasks require their frozen source revisions. Prepare a fresh benchmark spec."
+        );
+        anyhow::ensure!(
+            spec.providers.len() == 1
+                && spec.trials == 1
+                && spec.variants == ["baseline", "harness-candidate"]
+                && spec.cache_conditions == ["fresh-session", "resumed-session"]
+                && spec.tasks.len() == 24
+                && [
+                    "small-edit",
+                    "multi-file-fix",
+                    "read-only-diagnosis",
+                    "long-session"
+                ]
+                .into_iter()
+                .all(|category| spec
+                    .tasks
+                    .iter()
+                    .filter(|task| task.category == category)
+                    .count()
+                    == 6)
+                && spec.tasks.iter().any(|task| task.critical)
+                && (spec.native_cli_version.is_some()
+                    || gyro_core::efficiency::controls(&spec.providers[0].id).owns_requests
+                        && spec.providers[0].id != "ollama"),
+            "Held-out runs require the frozen 24-task matrix, a candidate and an eligible route"
+        );
+    }
+    if spec
+        .variants
+        .iter()
+        .any(|variant| variant == "harness-candidate")
+    {
+        anyhow::ensure!(
+            spec.candidate_policies
+                .as_ref()
+                .is_some_and(|policies| (policies.tool_recovery_feedback
+                    || policies.checkpoint_recovery
+                    || policies.stable_api_prefix)
+                    && (!policies.stable_api_prefix
+                        || spec
+                            .providers
+                            .iter()
+                            .all(|provider| gyro_core::efficiency::controls(&provider.id)
+                                .owns_requests
+                                && provider.id != "ollama"))),
+            "Select the evaluated candidate policies explicitly"
+        );
+    }
     for p in &spec.providers {
         anyhow::ensure!(
             ids.insert(&p.id) && gyro_core::provider_descriptor(&p.id).is_some(),
@@ -247,6 +389,9 @@ fn validate(spec: &Spec) -> anyhow::Result<()> {
                     | "fresh-read-16k"
                     | "repeated-work"
                     | "stable-api-prefix"
+                    | "tool-recovery-feedback"
+                    | "checkpoint-recovery"
+                    | "harness-candidate"
                     | "combined"
             ),
             "Unknown optimization variant"
@@ -277,6 +422,14 @@ fn validate(spec: &Spec) -> anyhow::Result<()> {
                 && !task.verifier.is_empty(),
             "Invalid task"
         );
+        anyhow::ensure!(
+            task.reopen_before_turn
+                .is_none_or(|index| index > 0 && index < task.turns.len()),
+            "A reopen must follow a fixture turn and precede another"
+        );
+        for command in &task.required_verification_commands {
+            command.validate()?;
+        }
         for path in task
             .files
             .keys()
@@ -306,6 +459,49 @@ fn validate(spec: &Spec) -> anyhow::Result<()> {
             "Price currency differs from budget"
         );
     }
+    Ok(())
+}
+
+fn check_native_cli_version(spec: &Spec) -> anyhow::Result<()> {
+    let Some(expected) = &spec.native_cli_version else {
+        return Ok(());
+    };
+    let provider = &spec.providers[0];
+    let program = if provider.id == "openai" {
+        "codex"
+    } else {
+        "claude"
+    };
+    let model = Some(provider.model.as_str());
+    let effort = Some(provider.effort.as_str());
+    let catalog = crate::model_catalog::catalog_reasoning_efforts(&provider.id, model);
+    let applied_effort = if provider.id == "openai" {
+        gyro_core::provider_runtime::native_args::codex_reasoning_effort_arg(
+            model,
+            effort,
+            catalog.as_deref(),
+        )
+    } else {
+        gyro_core::provider_runtime::native_args::claude_reasoning_effort_arg(
+            model,
+            effort,
+            catalog.as_deref(),
+        )
+    };
+    anyhow::ensure!(
+        applied_effort.as_deref() == effort,
+        "Native launcher would change or omit the configured effort"
+    );
+    let mut command = command_with_gui_path(program);
+    command.arg("--version");
+    let result = run_bounded_command(&command, Duration::from_secs(10), None, 4096, 4096)?;
+    anyhow::ensure!(
+        matches!(
+            result.termination,
+            ExecutionTermination::Exited { code: Some(0) }
+        ) && result.stdout.trim() == expected.trim(),
+        "The installed {program} CLI does not match the pinned benchmark version"
+    );
     Ok(())
 }
 fn fixture(task: &Task, workspace: &Path) -> anyhow::Result<()> {
@@ -339,13 +535,21 @@ fn fixture(task: &Task, workspace: &Path) -> anyhow::Result<()> {
     }
     Ok(())
 }
-fn verify(task: &Task, workspace: &Path, verifier: &Path) -> anyhow::Result<bool> {
+fn verify(task: &Task, workspace: &Path, verifier: &Path, response: &str) -> anyhow::Result<bool> {
     let result = run_bounded_command(
         &{
             let mut c = command_with_gui_path("node");
             c.arg("--test")
                 .arg(verifier)
                 .env("GYRO_VERIFY_WORKSPACE", workspace)
+                .env(
+                    "GYRO_VERIFY_FINAL_RESPONSE",
+                    response
+                        .chars()
+                        .filter(|character| *character != '\0')
+                        .take(16_384)
+                        .collect::<String>(),
+                )
                 .current_dir(workspace);
             c
         },
@@ -354,28 +558,85 @@ fn verify(task: &Task, workspace: &Path, verifier: &Path) -> anyhow::Result<bool
         64 * 1024,
         64 * 1024,
     )?;
-    let changes = Command::new("git")
-        .args(["status", "--porcelain", "--untracked-files=all"])
-        .current_dir(workspace)
-        .output()?;
-    let allowed = String::from_utf8_lossy(&changes.stdout).lines().all(|l| {
-        l.get(3..)
-            .is_some_and(|p| task.allowed_changes.iter().any(|a| a == p))
-    });
     Ok(matches!(
         result.termination,
         ExecutionTermination::Exited { code: Some(0) }
-    ) && allowed)
+    ) && scope_verified(task, workspace)?)
 }
-fn turn_receipt<'a>(
-    events: &'a [SessionEvent],
+fn scope_verified(task: &Task, workspace: &Path) -> anyhow::Result<bool> {
+    let changes = Command::new("git")
+        .args([
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--no-renames",
+            "--untracked-files=all",
+        ])
+        .current_dir(workspace)
+        .output()?;
+    Ok(changes.status.success()
+        && std::str::from_utf8(&changes.stdout)?
+            .split_terminator('\0')
+            .all(|row| {
+                row.get(3..)
+                    .is_some_and(|path| task.allowed_changes.iter().any(|allowed| allowed == path))
+            }))
+}
+struct TurnEvidence {
+    receipts: Option<Vec<Value>>,
+    tool_requests: usize,
+    tokens: Option<UsageTokens>,
+}
+
+fn turn_evidence(
+    store: &SessionStore,
+    session_id: Uuid,
     turn_id: Uuid,
-    kind: &str,
-) -> Option<&'a SessionEvent> {
-    events
-        .iter()
-        .rev()
-        .find(|event| event.turn_id == Some(turn_id) && event.payload["kind"] == kind)
+) -> anyhow::Result<TurnEvidence> {
+    let mut receipts = Vec::new();
+    let mut tool_requests = 0;
+    // A long tool loop can push earlier receipts outside the normal chat tail.
+    store.visit_transcript_events(session_id, |event| {
+        if event.turn_id == Some(turn_id) {
+            match event.payload["kind"].as_str() {
+                Some("efficiency-receipt") => receipts.push(event.payload.clone()),
+                Some("capability-call") if event.payload["status"] == "requested" => {
+                    tool_requests += 1;
+                }
+                _ => {}
+            }
+        }
+        true
+    })?;
+    // The ledger can have a call even when appending its diagnostics failed.
+    let receipts =
+        (receipts.len() == store.turn_usage_call_count(session_id, turn_id)?).then_some(receipts);
+    Ok(TurnEvidence {
+        receipts,
+        tool_requests,
+        tokens: store.task_usage_tokens(session_id, turn_id)?,
+    })
+}
+
+fn receipt_count(receipts: &[Value], field: &str) -> Option<u64> {
+    if receipts.is_empty() {
+        return None;
+    }
+    receipts.iter().try_fold(0u64, |sum, receipt| {
+        sum.checked_add(receipt[field].as_u64()?)
+    })
+}
+
+fn schema_valid_tool_requests(receipts: &[Value]) -> Option<u64> {
+    if receipts.is_empty() {
+        return None;
+    }
+    receipts.iter().try_fold(0u64, |total, receipt| {
+        let classes = receipt["contextAttribution"]["toolClassCounts"].as_object()?;
+        classes
+            .values()
+            .try_fold(total, |sum, count| sum.checked_add(count.as_u64()?))
+    })
 }
 
 // Simulate the review step only for the benchmark's disposable fixture and
@@ -479,7 +740,14 @@ fn with_fixture_review<T>(
 
 fn apply_efficiency_variant(e: &mut gyro_core::efficiency::Config, variant: &str) {
     let standalone = variant.starts_with("fresh-read-")
-        || matches!(variant, "repeated-work" | "stable-api-prefix");
+        || matches!(
+            variant,
+            "repeated-work"
+                | "stable-api-prefix"
+                | "tool-recovery-feedback"
+                | "checkpoint-recovery"
+                | "harness-candidate"
+        );
     e.experimental = variant != "baseline" && !standalone;
     e.structured_evidence = variant == "combined" || variant == "structured-evidence";
     e.cache_assembly = variant == "combined" || variant == "cache-assembly";
@@ -502,6 +770,8 @@ fn apply_efficiency_variant(e: &mut gyro_core::efficiency::Config, variant: &str
     };
     e.repeated_work_detection = variant == "repeated-work";
     e.stable_api_prefix = variant == "stable-api-prefix";
+    e.tool_recovery_feedback = variant == "tool-recovery-feedback";
+    e.checkpoint_recovery = variant == "checkpoint-recovery";
     // Keep summary behavior identical: these fixtures do not invoke background summaries.
     e.full_context_internal_requests = false;
     e.profile = if variant == "routine-profile" {
@@ -519,19 +789,24 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
     let mut cost = 0u64;
     let mut calls = 0u32;
     let mut unknown = false;
-    for task in &spec.tasks {
+    let native = spec.native_cli_version.is_some();
+    for (task_index, task) in spec.tasks.iter().enumerate() {
+        let verification_contract = verification::contract(&task.required_verification_commands);
         let verifier = root.join(format!("verifier-{}.mjs", task.id));
         fs::write(&verifier, &task.verifier)?;
         for provider in &spec.providers {
-            for condition in &spec.cache_conditions {
+            for (condition_index, condition) in spec.cache_conditions.iter().enumerate() {
                 for trial in 1..=spec.trials {
                     // Alternating order reduces systematic first-run bias without claiming cold cache control.
                     let mut variants = spec.variants.clone();
-                    if trial % 2 == 0 {
+                    if (task_index + condition_index + trial) % 2 == 0 {
                         variants.reverse();
                     }
                     for variant in variants {
                         let mut record = json!({"task":task.id,"category":task.category,"repositorySnapshot":task.repository_snapshot,"provider":provider.id,"model":provider.model,"modelVersionCoverage":"requested-model-id","effort":provider.effort,"variant":variant,"trial":trial,"sessionCondition":condition,"cacheCondition":"unverified","comparison":"gyro","verified":false});
+                        if let Some(contract) = &verification_contract {
+                            record["verificationContract"] = json!(contract);
+                        }
                         if unknown
                             || spent >= spec.execution_budget.max_observed_tokens
                             || calls >= spec.execution_budget.max_calls
@@ -547,6 +822,16 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                         }
                         let applied_efficiency = GyroConfig::update(&paths, |cfg| {
                             apply_efficiency_variant(&mut cfg.efficiency, &variant);
+                            if variant == "harness-candidate" {
+                                let policies = spec
+                                    .candidate_policies
+                                    .as_ref()
+                                    .expect("validated candidate");
+                                cfg.efficiency.tool_recovery_feedback =
+                                    policies.tool_recovery_feedback;
+                                cfg.efficiency.checkpoint_recovery = policies.checkpoint_recovery;
+                                cfg.efficiency.stable_api_prefix = policies.stable_api_prefix;
+                            }
                             Ok(cfg.efficiency.clone())
                         })?;
                         record["efficiencyConfig"] = json!(applied_efficiency);
@@ -568,8 +853,11 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                         }
                         store.save_project_capability_policy(policy, None)?;
                         let session = benchmark_session(&store, &workspace, provider)?;
+                        let verification =
+                            verification::Trial::start(session.id, &workspace, task)?;
+                        let mut verification_turns = Vec::new();
                         record["sessionId"] = json!(session.id);
-                        let legacy = super::performance_benchmark::Provider {
+                        let legacy = crate::performance_benchmark::Provider {
                             id: provider.id.clone(),
                             model: provider.model.clone(),
                             effort: provider.effort.clone(),
@@ -581,6 +869,10 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                         let mut generation_requests = Some(0u64);
                         let mut requested_efforts = Some(Vec::<Value>::new());
                         let mut reviewed_proposals = FixtureReviews::default();
+                        let mut gyro_tool_requests = 0usize;
+                        let mut schema_valid_requests = (!native).then_some(0u64);
+                        let mut checkpoint_recoveries = 0u64;
+                        let mut final_response = String::new();
                         record["approvalSimulation"] =
                             json!("allowlisted-fixture-review-during-turn");
                         let prompts = if condition == "resumed-session" {
@@ -588,7 +880,14 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                         } else {
                             task.turns.clone()
                         };
-                        for prompt in prompts {
+                        let setup_turns = usize::from(condition == "resumed-session");
+                        let stress = spec.held_out && !native && task.reopen_before_turn.is_some();
+                        let _window = stress.then(|| {
+                            CONTEXT_WINDOW.store(STRESS_CONTEXT_WINDOW, Ordering::Relaxed);
+                            ContextWindowGuard
+                        });
+                        record["benchmarkContextWindow"] = json!(context_window_override());
+                        for (prompt_index, prompt) in prompts.into_iter().enumerate() {
                             if calls >= spec.execution_budget.max_calls
                                 || spent >= spec.execution_budget.max_observed_tokens
                                 || unknown
@@ -599,6 +898,13 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                             {
                                 outcome = "budget-stop";
                                 break;
+                            }
+                            if native
+                                && task
+                                    .reopen_before_turn
+                                    .is_some_and(|index| prompt_index == index + setup_turns)
+                            {
+                                store.clear_provider_session_binding(session.id, &provider.id)?;
                             }
                             let remaining = spec
                                 .execution_budget
@@ -651,6 +957,9 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                             })?;
                             calls += 1;
                             let turn_id = Uuid::new_v4();
+                            if verification.is_some() && prompt_index >= setup_turns {
+                                verification_turns.push(turn_id);
+                            }
                             let (response, reviewed_turn) = with_fixture_review(
                                 &store,
                                 root,
@@ -659,7 +968,7 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                                 turn_id,
                                 &task.allowed_changes,
                                 || {
-                                    super::performance_benchmark::turn_with_id(
+                                    crate::performance_benchmark::turn_with_id(
                                         app,
                                         &store,
                                         session.id,
@@ -674,65 +983,73 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                             if let Ok(count) = &reviewed_turn {
                                 reviewed_proposals += *count;
                             }
-                            let events = store.read_events(session.id)?;
-                            let receipt = turn_receipt(&events, turn_id, "efficiency-receipt");
-                            let requested_effort = receipt
-                                .and_then(|e| e.payload.get("requestedReasoningEffort"))
-                                .filter(|v| v.is_null() || v.is_string())
-                                .cloned();
-                            requested_efforts = requested_efforts.zip(requested_effort).map(
-                                |(mut efforts, effort)| {
-                                    efforts.push(effort);
-                                    efforts
-                                },
-                            );
+                            let evidence = turn_evidence(&store, session.id, turn_id)?;
+                            let receipts = evidence.receipts.as_deref().unwrap_or_default();
+                            let receipt = receipts.last();
+                            requested_efforts = requested_efforts.filter(|_| {
+                                !receipts.is_empty()
+                                    && receipts.iter().all(|receipt| {
+                                        receipt.get("requestedReasoningEffort").is_some_and(
+                                            |value| value.is_null() || value.is_string(),
+                                        )
+                                    })
+                            });
+                            if let Some(efforts) = &mut requested_efforts {
+                                efforts.extend(
+                                    receipts
+                                        .iter()
+                                        .map(|r| r["requestedReasoningEffort"].clone()),
+                                );
+                            }
                             let overhead = receipt
-                                .map(|e| e.payload["optimizationOverheadMicros"].clone())
+                                .map(|e| e["optimizationOverheadMicros"].clone())
                                 .unwrap_or(json!({}));
                             record["optimizationOverheadMicros"] = overhead;
                             // Task totals include setup turns, failures and all continuations.
                             if let Some(receipt) = receipt {
                                 record["efficiencyEvents"] =
-                                    receipt.payload["taskTotals"]["efficiencyEvents"].clone();
-                                record["efficiencyEventCoverage"] = receipt.payload["taskTotals"]
-                                    ["efficiencyEventCoverage"]
-                                    .clone();
+                                    receipt["taskTotals"]["efficiencyEvents"].clone();
+                                record["efficiencyEventCoverage"] =
+                                    receipt["taskTotals"]["efficiencyEventCoverage"].clone();
                             }
-                            let observed =
-                                receipt.and_then(|e| e.payload["generationRequests"].as_u64());
+                            let observed = receipt_count(receipts, "generationRequests");
                             generation_requests = generation_requests
                                 .zip(observed)
                                 .and_then(|(a, b)| a.checked_add(b));
-                            let observed_retries =
-                                receipt.and_then(|e| e.payload["retryCount"].as_u64());
+                            let observed_retries = receipt_count(receipts, "retryCount");
                             retries = retries
                                 .zip(observed_retries)
                                 .and_then(|(a, b)| a.checked_add(b));
                             // A missing receipt makes call/retry accounting unknown; stop further spending.
-                            if observed.is_none() || observed_retries.is_none() {
+                            if !native && (generation_requests.is_none() || retries.is_none()) {
                                 unknown = true;
                             }
-                            let observed_calls = observed.unwrap_or(1).max(1);
+                            let observed_calls = if native {
+                                1
+                            } else {
+                                observed.unwrap_or(1).max(1)
+                            };
                             calls = calls.saturating_add(
                                 observed_calls.saturating_sub(1).min(u64::from(u32::MAX)) as u32,
                             );
 
-                            let latest = turn_receipt(&events, turn_id, "provider-turn-tokens");
-                            let tokens = latest.and_then(|e| {
-                                serde_json::from_value::<UsageTokens>(
-                                    e.payload["turnTokens"].clone(),
-                                )
-                                .ok()
-                            });
-                            if let Some(tokens) = tokens {
+                            if let Some(tokens) = evidence.tokens {
                                 spent = spent.saturating_add(tokens.total_tokens);
                                 usage = Some(usage.map_or(tokens, |u| u.combine(tokens)));
-                                if !tokens.measured {
+                                if !tokens.measured && !native {
                                     unknown = true;
                                 }
-                            } else {
+                            } else if !native {
                                 unknown = true;
                             }
+                            gyro_tool_requests += evidence.tool_requests;
+                            schema_valid_requests = schema_valid_requests
+                                .zip(schema_valid_tool_requests(receipts))
+                                .and_then(|(total, observed)| total.checked_add(observed));
+                            checkpoint_recoveries += receipts
+                                .iter()
+                                .filter_map(|receipt| receipt["checkpointRecoveries"].as_u64())
+                                .sum::<u64>();
                             if let Some(price) = gyro_core::efficiency::pricing::snapshot(
                                 &spec.prices,
                                 &provider.id,
@@ -743,31 +1060,35 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                                 gyro_core::efficiency::controls(&provider.id).owns_requests
                                     && provider.id != "ollama"
                             }) {
-                                if let Some(c) = tokens.and_then(|t| price.price(t)) {
+                                if let Some(c) = evidence.tokens.and_then(|t| price.price(t)) {
                                     cost = cost.saturating_add(c.micros);
                                 } else if spec.execution_budget.max_cost_micros.is_some() {
                                     unknown = true;
                                 }
                             }
                             match response {
-                                Ok(_) => match reviewed_turn {
-                                    Ok(_) => {}
-                                    Err(error) => {
-                                        outcome = "failed";
-                                        record["failureClass"] = json!("fixture-review-failed");
-                                        record["failureDetail"] = json!(
-                                            gyro_core::security::redact_secrets(&error.to_string())
+                                Ok((_, reply)) => {
+                                    final_response = reply.assistant_event.message;
+                                    match reviewed_turn {
+                                        Ok(_) => {}
+                                        Err(error) => {
+                                            outcome = "failed";
+                                            record["failureClass"] = json!("fixture-review-failed");
+                                            record["failureDetail"] =
+                                                json!(gyro_core::security::redact_secrets(
+                                                    &error.to_string()
+                                                )
                                                 .chars()
                                                 .take(500)
-                                                .collect::<String>()
-                                        );
-                                        break;
+                                                .collect::<String>());
+                                            break;
+                                        }
                                     }
-                                },
+                                }
                                 Err(error) => {
                                     outcome = "failed";
                                     record["failureClass"] =
-                                        json!(super::performance_benchmark::failure_class(&error));
+                                        json!(crate::performance_benchmark::failure_class(&error));
                                     record["failureDetail"] =
                                         json!(gyro_core::security::redact_secrets(&error)
                                             .chars()
@@ -783,7 +1104,15 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                         record["elapsedMs"] = json!(started.elapsed().as_millis());
                         record["tokens"] = json!(usage);
                         record["retries"] = json!(retries);
-                        record["generationRequests"] = json!(generation_requests);
+                        record["generationRequests"] =
+                            json!(if native { None } else { generation_requests });
+                        record["gyroToolRequests"] = json!(gyro_tool_requests);
+                        record["schemaValidToolRequests"] = json!(schema_valid_requests);
+                        record["checkpointRecoveries"] = json!(checkpoint_recoveries);
+                        record["nativeCliVersion"] = json!(spec.native_cli_version);
+                        record["scopeVerified"] = json!(
+                            reviewed_proposals.failed == 0 && scope_verified(task, &workspace)?
+                        );
                         let consistent_effort = requested_efforts.as_ref().and_then(|efforts| {
                             let first = efforts.first()?;
                             efforts
@@ -792,7 +1121,13 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                                 .then_some(first)
                         });
                         record["requestedReasoningEffort"] =
-                            consistent_effort.cloned().unwrap_or(Value::Null);
+                            consistent_effort.cloned().unwrap_or_else(|| {
+                                if native && requested_efforts.is_none() {
+                                    json!(provider.effort)
+                                } else {
+                                    Value::Null
+                                }
+                            });
                         record["requestedEffortCoverage"] = json!(if consistent_effort.is_some() {
                             "observed"
                         } else if requested_efforts
@@ -800,11 +1135,28 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                             .is_some_and(|efforts| !efforts.is_empty())
                         {
                             "mixed"
+                        } else if native && requested_efforts.is_none() {
+                            "native-launch-configured"
                         } else {
                             "unavailable"
                         });
-                        record["verified"] =
-                            json!(outcome == "done" && verify(task, &workspace, &verifier)?);
+                        let required_verified = if let Some(verification) = &verification {
+                            let evidence = verification.evaluate(&store, &verification_turns)?;
+                            let passed = evidence["verified"] == true;
+                            record["requiredVerification"] = evidence;
+                            passed
+                        } else {
+                            true
+                        };
+                        let independently_verified = outcome == "done"
+                            && verify(task, &workspace, &verifier, &final_response)?;
+                        if verification.is_some() {
+                            record["independentVerifierPassed"] = json!(independently_verified);
+                            if independently_verified && !required_verified {
+                                record["failureClass"] = json!("required-verification-incomplete");
+                            }
+                        }
+                        record["verified"] = json!(independently_verified && required_verified);
                         if let Some(u) = usage {
                             record["cacheCondition"] =
                                 json!(if u.effective_accounting().known.cache_read {
@@ -874,7 +1226,7 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
                                 "failed"
                             });
                             record["elapsedMs"] = json!(started.elapsed().as_millis());
-                            record["verified"] = json!(verify(task, &workspace, &verifier)?);
+                            record["verified"] = json!(verify(task, &workspace, &verifier, "")?);
                             unknown = true;
                         }
                         records.push(record);
@@ -884,6 +1236,7 @@ fn run(app: &tauri::AppHandle, root: &Path, spec: Spec) -> anyhow::Result<()> {
             }
         }
     }
+    check_native_cli_version(&spec)?;
     Ok(())
 }
 fn persist(root: &Path, records: &[Value]) -> anyhow::Result<()> {
@@ -899,7 +1252,121 @@ fn persist(root: &Path, records: &[Value]) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use crate::ide::task_discovery::content_hash;
-    use gyro_core::SessionEventKind;
+    use gyro_core::{UsageEntry, UsageOrigin, UsageOutcome};
+
+    #[test]
+    fn turn_evidence_counts_supporting_calls_beyond_the_recent_chat_tail() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("data"))).unwrap();
+        let session = store
+            .create_session(temp.path(), SessionOrigin::Desktop, "Benchmark accounting")
+            .unwrap();
+        let turn = Uuid::new_v4();
+        let setup_turn = Uuid::new_v4();
+        let receipt = |kind: &str, requests: u64, retries: u64| {
+            json!({"kind":"efficiency-receipt", "purpose":kind,
+                "generationRequests":requests, "retryCount":retries})
+        };
+        let compact = receipt("compaction", 2, 1);
+        let mut entries = vec![(String::new(), compact.clone(), Some(turn))];
+        entries.extend((0..1_005).map(|_| {
+            (
+                "Tool request".into(),
+                json!({"kind":"capability-call", "status":"requested"}),
+                Some(turn),
+            )
+        }));
+        let answer = receipt("answer", 1, 0);
+        entries.push((String::new(), answer.clone(), Some(turn)));
+        entries.push((String::new(), receipt("other-turn", 5, 4), Some(setup_turn)));
+        store
+            .append_system_events_with_turn_id(session.id, entries)
+            .unwrap();
+        assert!(!store
+            .read_events(session.id)
+            .unwrap()
+            .iter()
+            .any(|e| e.payload == compact));
+
+        let record_call = |turn, origin, outcome, input| {
+            store.note_usage_call(session.id, turn).unwrap();
+            store
+                .record_usage(&UsageEntry {
+                    session_id: session.id,
+                    turn_id: Some(turn),
+                    seat_id: None,
+                    provider_id: "openrouter".into(),
+                    model_id: Some("fixture-model".into()),
+                    reasoning_effort: None,
+                    origin,
+                    outcome,
+                    tokens: UsageTokens::measured(Some(input), Some(0), Some(40), None, None),
+                    wall_ms: 1,
+                    retry_count: u32::from(outcome == UsageOutcome::Failed),
+                })
+                .unwrap();
+        };
+        record_call(setup_turn, UsageOrigin::Chat, UsageOutcome::Done, 4_960);
+        assert!(turn_evidence(&store, session.id, turn)
+            .unwrap()
+            .tokens
+            .is_none());
+        record_call(
+            turn,
+            UsageOrigin::ContextCompaction,
+            UsageOutcome::Failed,
+            210,
+        );
+        record_call(turn, UsageOrigin::Chat, UsageOutcome::Done, 300);
+
+        let evidence = turn_evidence(&store, session.id, turn).unwrap();
+        let receipts = evidence.receipts.unwrap();
+        assert_eq!(receipts, vec![compact, answer]);
+        assert_eq!(evidence.tool_requests, 1_005);
+        assert_eq!(receipt_count(&receipts, "generationRequests"), Some(3));
+        assert_eq!(receipt_count(&receipts, "retryCount"), Some(1));
+        assert_eq!(receipt_count(&receipts, "missing"), None);
+        assert_eq!(receipt_count(&[], "generationRequests"), None);
+        let tokens = evidence.tokens.unwrap();
+        assert_eq!(tokens.total_tokens, 590);
+        assert!(tokens.measured);
+
+        record_call(
+            turn,
+            UsageOrigin::ContextCompaction,
+            UsageOutcome::Failed,
+            100,
+        );
+        let evidence = turn_evidence(&store, session.id, turn).unwrap();
+        assert!(evidence.receipts.is_none());
+        let tokens = evidence.tokens.unwrap();
+        assert_eq!(tokens.total_tokens, 730);
+        assert!(tokens.measured);
+
+        store.note_usage_call(session.id, turn).unwrap();
+        let tokens = turn_evidence(&store, session.id, turn)
+            .unwrap()
+            .tokens
+            .unwrap();
+        assert_eq!(tokens.total_tokens, 730);
+        assert!(!tokens.measured);
+    }
+
+    #[test]
+    fn schema_valid_requests_preserve_zero_and_unknown_coverage() {
+        let counted = json!({"contextAttribution": {"toolClassCounts": {
+            "workspace-read": 4, "terminal": 1
+        }}});
+        let zero = json!({"contextAttribution": {"toolClassCounts": {}}});
+        assert_eq!(schema_valid_tool_requests(&[zero.clone()]), Some(0));
+        assert_eq!(
+            schema_valid_tool_requests(&[counted.clone(), zero]),
+            Some(5)
+        );
+        assert_eq!(schema_valid_tool_requests(&[counted, json!({})]), None);
+        assert_eq!(schema_valid_tool_requests(&[]), None);
+    }
+
     #[test]
     fn frozen_native_pair_is_valid_and_requires_its_baseline() {
         let file = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -918,6 +1385,7 @@ mod tests {
         spec.execution_budget = Budget {
             max_observed_tokens: 4_000_000,
             max_tokens_per_turn: Some(300_000),
+            max_tool_rounds_per_turn: None,
             max_calls: 40,
             max_cost_micros: None,
             currency: "USD".into(),
@@ -1156,6 +1624,45 @@ mod tests {
     }
 
     #[test]
+    fn benchmark_ollama_override_requires_an_explicit_local_endpoint() {
+        let file = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../docs/performance/efficiency-pilot.json");
+        let mut spec: Spec = serde_json::from_slice(&fs::read(file).unwrap()).unwrap();
+        spec.providers = vec![Provider {
+            id: "ollama".into(),
+            model: "local-fixture".into(),
+            effort: String::new(),
+            native_comparison: None,
+        }];
+        spec.tasks.truncate(1);
+        spec.execution_budget.max_calls = 8;
+        spec.execution_budget.max_observed_tokens = 30_000;
+        spec.execution_budget.max_tool_rounds_per_turn = Some(4);
+        spec.ollama_endpoint = Some("http://127.0.0.1:19401/api".into());
+        validate(&spec).unwrap();
+        let config = benchmark_config(&spec);
+        assert_eq!(config.usage_guard.max_tool_rounds, 4);
+        spec.execution_budget.max_tool_rounds_per_turn = Some(0);
+        assert!(validate(&spec).is_err());
+        spec.execution_budget.max_tool_rounds_per_turn = Some(4);
+        let selected = config
+            .model_providers
+            .into_iter()
+            .find(|provider| provider.enabled)
+            .unwrap();
+        assert_eq!(selected.id, "ollama");
+        assert_eq!(selected.base_url, spec.ollama_endpoint);
+
+        for endpoint in [" ", "https://127.0.0.1:19401/api", "http://example.com/api"] {
+            spec.ollama_endpoint = Some(endpoint.into());
+            assert!(validate(&spec).is_err(), "{endpoint}");
+        }
+        spec.ollama_endpoint = selected.base_url;
+        spec.providers[0].id = "openai".into();
+        assert!(validate(&spec).is_err());
+    }
+
+    #[test]
     fn fixture_reviewer_continues_after_a_failed_stale_proposal() {
         let temp = tempfile::tempdir().unwrap();
         let workspace = temp.path().join("sessions/workspaces/run");
@@ -1282,38 +1789,5 @@ mod tests {
         assert!(routine_effort_allowed(&routine, ""));
         assert!(!routine_effort_allowed(&routine, "high"));
         assert!(routine_effort_allowed(&["baseline".into()], "high"));
-    }
-
-    #[test]
-    fn missing_turn_receipt_never_reuses_setup_turn_usage() {
-        let session = Uuid::new_v4();
-        let setup = Uuid::new_v4();
-        let task = Uuid::new_v4();
-        let mut old = SessionEvent::new(
-            session,
-            SessionEventKind::SystemEvent,
-            "",
-            json!({
-                "kind": "provider-turn-tokens", "turnTokens": {"totalTokens": 5000}
-            }),
-        );
-        old.turn_id = Some(setup);
-        assert!(turn_receipt(&[old.clone()], task, "provider-turn-tokens").is_none());
-        let mut own = SessionEvent::new(
-            session,
-            SessionEventKind::SystemEvent,
-            "",
-            json!({
-                "kind": "provider-turn-tokens", "turnTokens": {"totalTokens": 300}
-            }),
-        );
-        own.turn_id = Some(task);
-        let events = [own, old];
-        assert_eq!(
-            turn_receipt(&events, task, "provider-turn-tokens")
-                .unwrap()
-                .payload["turnTokens"]["totalTokens"],
-            300
-        );
     }
 }

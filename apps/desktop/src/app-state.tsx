@@ -88,7 +88,7 @@ import {
 import { normalizeProjectPath } from "./session-listing";
 import {
   readBoundedLocalStorage,
-  readStoredAppearance,
+  readInitialAppearance,
   safeSetLocalStorage,
   saveAppearancePreferences,
 } from "./ui-storage";
@@ -502,7 +502,7 @@ export function loadInitialWorkbenchState(): WorkbenchState {
   return applyLaunchView(
     recoverDurableEditRecovery(recoverWorkspaceBuffers({
       ...stored,
-      preferences: { ...stored.preferences, ...readStoredAppearance() },
+      preferences: { ...stored.preferences, ...readInitialAppearance() },
     })),
   );
 }

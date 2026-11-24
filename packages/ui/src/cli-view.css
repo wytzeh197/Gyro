@@ -274,42 +274,9 @@
   outline: 2px solid var(--gyro-focus-ring);
   outline-offset: -2px;
 }
-:root[data-theme] .gyro-terminal-session-actions .gyro-terminal-actions-menu > button {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: var(--gyro-space-standard);
-  width: 100%;
-  min-width: 0;
-  height: var(--gyro-control-height);
-  padding: 0 var(--gyro-space-standard);
-  border: 0;
-  border-radius: var(--gyro-radius-xs);
-  background: transparent;
-  box-shadow: none;
-  color: var(--gyro-text);
-  font: inherit;
-  font-size: var(--gyro-font-micro);
-  text-align: left;
-  white-space: nowrap;
-}
-:root[data-theme] .gyro-terminal-session-actions .gyro-terminal-actions-menu > button:is(:hover, :focus-visible):not(:disabled) {
-  background: var(--gyro-control-hover);
-}
-:root[data-theme] .gyro-terminal-session-actions .gyro-terminal-actions-menu > button:disabled {
-  opacity: 0.4;
-}
-:root[data-theme] .gyro-terminal-session-actions .gyro-terminal-actions-menu > button > svg {
-  flex-shrink: 0;
-  color: var(--gyro-muted);
-}
-:root[data-theme] .gyro-terminal-session-actions .gyro-terminal-actions-menu > button.is-danger,
-:root[data-theme] .gyro-terminal-session-actions .gyro-terminal-actions-menu > button.is-danger > svg {
-  color: var(--gyro-danger);
-}
 :root[data-theme] .gyro-terminal-session-drop {
   position: absolute;
-  z-index: 20;
+  z-index: var(--gyro-z-sticky);
   inset: 0;
   display: grid;
   place-items: center;

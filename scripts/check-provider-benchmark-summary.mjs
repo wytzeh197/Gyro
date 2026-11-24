@@ -13,6 +13,26 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import {
+  benchmarkStoreDirectory,
+  createBenchmarkRoot,
+  isolatedBenchmarkLayout,
+} from "./provider-benchmark-layout.mjs";
+
+if (process.platform === "darwin") {
+  for (const layout of [null, isolatedBenchmarkLayout]) {
+    const benchmark = await createBenchmarkRoot("gyro-efficiency-benchmark-", layout);
+    try {
+      const socket = join(
+        benchmarkStoreDirectory(benchmark, layout),
+        "gyro-4294967295.sock",
+      );
+      assert.ok(Buffer.byteLength(socket) < 104, socket);
+    } finally {
+      await rm(benchmark, { recursive: true, force: true });
+    }
+  }
+}
 
 const root = await mkdtemp(join(tmpdir(), "gyro-summary-check-"));
 const output = join(root, "output");

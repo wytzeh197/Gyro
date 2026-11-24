@@ -1,4 +1,5 @@
-import { FileText, ShieldCheck } from "../../../../packages/ui/node_modules/lucide-react";
+import { Button } from "@gyro-dev/ui";
+import { FileText, ShieldCheck } from "@gyro-dev/ui/icons";
 import { SettingsStatus } from "../../../../packages/ui/src/settings-presentation";
 import type { Snapshot } from "./types";
 
@@ -52,23 +53,23 @@ export function CommandApprovalCard({
         <p>Request details aren't available here. Review it on {host}.</p>
       )}
       <div className="gyro-remote-actions is-end">
-        <button
+        <Button
           type="button"
-          className="gyro-secondary-button"
+          variant="outline"
           disabled={!canDecide}
           onClick={() => onDecide("reject")}
         >
           Reject
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className={primary ? "gyro-primary-button" : "gyro-secondary-button"}
+          variant={primary ? "default" : "outline"} leading={<ShieldCheck size={14} aria-hidden />}
           disabled={!canDecide || !payload}
           title={payload ? undefined : `Review on ${host}`}
           onClick={() => onDecide("approve")}
         >
-          <ShieldCheck size={14} aria-hidden /> Approve once
-        </button>
+           Approve once
+        </Button>
       </div>
     </section>
   );
@@ -191,26 +192,22 @@ export function MutationReviewPanel({
           </strong>
           <MutationBody mutation={mutation} />
           <div className="gyro-remote-actions is-end">
-            <button
+            <Button
               type="button"
-              className="gyro-secondary-button"
+              variant="outline"
               disabled={!canDecide}
               onClick={() => onDecide(mutation.id, "reject")}
             >
               Reject
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className={
-                primary && index === 0
-                  ? "gyro-primary-button"
-                  : "gyro-secondary-button"
-              }
+              variant={primary && index === 0 ? "default" : "outline"}
               disabled={!canDecide || mutation.patch === undefined || Boolean(mutation.previewError)}
               onClick={() => onDecide(mutation.id, "approve")}
             >
               Approve edit
-            </button>
+            </Button>
           </div>
         </section>
       ))}

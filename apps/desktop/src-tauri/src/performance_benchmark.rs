@@ -87,7 +87,7 @@ pub fn start(app: &tauri::AppHandle) -> Result<bool, Box<dyn std::error::Error>>
         if std::env::var("GYRO_LOCAL_PROVIDER_FIXTURE").as_deref() == Ok("1") {
             return Err("local provider fixture refuses alternate benchmark schemas".into());
         }
-        return super::efficiency_benchmark::start(app, root, raw).map_err(Into::into);
+        return crate::efficiency::benchmark::start(app, root, raw).map_err(Into::into);
     }
     let spec: Spec = serde_json::from_value(raw)?;
     if std::env::var("GYRO_LOCAL_PROVIDER_FIXTURE").as_deref() == Ok("1")

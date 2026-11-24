@@ -657,6 +657,8 @@ pub struct CapabilityResult {
 pub struct CapabilityError {
     pub code: String,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress_action: Option<crate::efficiency::progress::Decision>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -700,6 +702,7 @@ impl CapabilityResponse {
             error: Some(CapabilityError {
                 code: code.into(),
                 message: sanitize_capability_summary(&message.into()),
+                progress_action: None,
             }),
         }
     }
@@ -833,7 +836,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceProposeEdit,
         class: CapabilityClass::WorkspaceInspect,
-        description: "Submit a hash-guarded file edit in Gyro Workspace. Full Access (and Approve for Me on Codex and Claude) applies it immediately through the guarded transaction; otherwise it creates a proposal for review. Read existing files first and supply expectedHash. Check the returned status before claiming the edit was applied.",
+        description: "Create a file or replace its entire contents in Gyro Workspace. For an exact text replacement, use gyro_workspace_edit. Read an existing file first and supply expectedHash. Full Access (and Approve for Me on Codex and Claude) applies the edit through the guarded transaction; otherwise it creates a proposal for review. Check the returned status before claiming the edit was applied.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceEdit,
@@ -843,7 +846,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceCreatePath,
         class: CapabilityClass::WorkspaceWrite,
-        description: "Create an empty file or a directory inside the Gyro project, including missing parent directories. Give a new file its content with gyro_workspace_propose_edit; this tool only makes the path.",
+        description: "Create an empty file or a directory inside the Gyro project, including missing parent directories. To create a file with content, call gyro_workspace_propose_edit with createIfMissing: true instead; do not create an empty file first.",
     },
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceRenamePath,
@@ -893,7 +896,7 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::WorkspaceReadOutput,
         class: CapabilityClass::TerminalObserve,
-        description: "Read bounded task, test, or terminal output currently recorded by Gyro Workspace.",
+        description: "Read bounded Workspace output or a saved exit status from an earlier run.",
     },
     CapabilityDescriptor {
         id: CapabilityId::CodeDefinition,
@@ -958,17 +961,17 @@ pub const CAPABILITY_DESCRIPTORS: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
         id: CapabilityId::BrowserTargets,
         class: CapabilityClass::BrowserInspect,
-        description: "Discover Web, real macOS windows, and booted iPhone Simulator targets with prerequisite issues. Returns the selected target for this chat.",
+        description: "Discover Web, real macOS windows, and installed iPhone and iPad Simulator targets with prerequisite issues. Returns the selected target for this chat.",
     },
     CapabilityDescriptor {
         id: CapabilityId::BrowserSelectTarget,
         class: CapabilityClass::BrowserNavigate,
-        description: "Select a discovered runtime targetId for this chat's Preview. Use web to return to the web page. Selection invalidates earlier framed captures; never presents an old capture as live.",
+        description: "Select a discovered runtime targetId for this chat's Preview. Use web to return to the web page. Selection invalidates earlier captures; never presents an old capture as live.",
     },
     CapabilityDescriptor {
         id: CapabilityId::BrowserCapturePreview,
         class: CapabilityClass::BrowserInspect,
-        description: "Capture the selected runtime with a surround. PNG pixels include the frame; contentRect maps to the runtime. Returns target, owner, capture time and expiry. Native images are snapshots, not live streams. iPhone Simulator is capture-only.",
+        description: "Capture the selected runtime as a PNG. contentRect maps image pixels to the runtime. Returns target, owner, capture time and expiry. Native images are snapshots. Simulator input takes place in Device Hub.",
     },
     CapabilityDescriptor {
         id: CapabilityId::BrowserPreviewClick,

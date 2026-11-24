@@ -19,6 +19,19 @@ document.documentElement.dataset.theme = theme;
 const composerFixture = new URLSearchParams(location.search).has("composer");
 const mentionsFixture = new URLSearchParams(location.search).has("mentions");
 const imagesFixture = new URLSearchParams(location.search).has("images");
+const syntaxFixture = new URLSearchParams(location.search).has("syntax");
+const syntaxReply = [
+  "> This sample runs locally.",
+  "",
+  "```javascript",
+  'const message = "<script>plain text</script>";',
+  "console.log(message);",
+  "```",
+  "",
+  "| Action | Outcome |",
+  "| --- | --- |",
+  "| Copy | Code stays intact |",
+].join("\n");
 const captures = "/Users/me/Library/Application%20Support/Gyro/browser-captures";
 const imagesReply = [
   "Here are the redesigned pages.",
@@ -143,7 +156,9 @@ function Fixture() {
         Fixture · {imagesFixture ? "Reply images" : mentionsFixture ? "Inline file mentions" : composerFixture ? "Compact composer" : "Compact user messages"} {action ? `· ${action}` : ""}
       </output>
       <ChatSurface
-        events={imagesFixture ? events.slice(0, 2).map((event) => ({ ...event, payload: {}, message: event.kind === "user-message" ? "show me images" : imagesReply })) : mentionsFixture ? events.slice(0, 2).map((event) => ({ ...event, payload: {}, message: event.kind === "user-message" ? "Show file mentions as normal text links." : "Start with [theme foundations](/workspace/packages/ui/src/styles-foundation.css), [chat styling](/workspace/packages/ui/src/chat.css), and [existing corner treatment](/workspace/docs/corner-treatment.md).\n\nOpen the [product plan](/tmp/plan.pdf) or the [budget spreadsheet](/tmp/budget.xlsx) to review them. These filenames should match the surrounding text size." })) : composerFixture ? events.slice(0, 2).map((event) => ({ ...event, payload: {}, message: event.kind === "user-message" ? "Make the composer 5% smaller." : "Use the composer below to check typing and controls." })) : new URLSearchParams(location.search).has("compact")
+        events={syntaxFixture
+          ? events.slice(0, 2).map((event) => ({ ...event, payload: {}, message: event.kind === "user-message" ? "Show how to print text." : syntaxReply }))
+          : imagesFixture ? events.slice(0, 2).map((event) => ({ ...event, payload: {}, message: event.kind === "user-message" ? "show me images" : imagesReply })) : mentionsFixture ? events.slice(0, 2).map((event) => ({ ...event, payload: {}, message: event.kind === "user-message" ? "Show file mentions as normal text links." : "Start with [theme foundations](/workspace/packages/ui/src/styles-foundation.css), [chat styling](/workspace/packages/ui/src/chat.css), and [existing corner treatment](/workspace/docs/corner-treatment.md).\n\nOpen the [product plan](/tmp/plan.pdf) or the [budget spreadsheet](/tmp/budget.xlsx) to review them. These filenames should match the surrounding text size." })) : composerFixture ? events.slice(0, 2).map((event) => ({ ...event, payload: {}, message: event.kind === "user-message" ? "Make the composer 5% smaller." : "Use the composer below to check typing and controls." })) : new URLSearchParams(location.search).has("compact")
           ? events.map((event, index) => index === 0
             ? { ...event, message: "Is that the official place of the traffic light buttons?", payload: { attachments: [{ id: "image", kind: "image", name: "Screenshot.png", path: "/tmp/screenshot.png", size: 243_000, previewUrl: screenshot }] } }
             : index === 1

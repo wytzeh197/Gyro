@@ -53,7 +53,8 @@
   width: 100%;
   box-sizing: border-box;
 }
-.gyro-memory-panel :is(button, input, select, textarea, summary):focus-visible {
+.gyro-memory-panel
+  :is(button:not(:where(.gyro-btn)), input, select, textarea, summary):focus-visible {
   outline: 2px solid var(--gyro-focus-ring);
   outline-offset: 2px;
 }
@@ -152,7 +153,7 @@
 .gyro-memory-editor h3 {
   font-size: var(--gyro-font-body);
 }
-.gyro-memory-detail > .gyro-secondary-button {
+.gyro-memory-detail > .gyro-btn {
   justify-self: start;
 }
 .gyro-memory-panel details {

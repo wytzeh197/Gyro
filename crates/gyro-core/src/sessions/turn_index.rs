@@ -15,6 +15,10 @@ use std::{
 };
 use uuid::Uuid;
 
+// Version the derived rows together with the watermark. Older watermarks are
+// rebuilt from JSONL before the retry evidence can be used.
+const TURN_INDEX_VERSION: u8 = 2;
+
 struct Watermark {
     identity: String,
     offset: u64,
@@ -26,11 +30,11 @@ fn identity(metadata: &std::fs::Metadata) -> String {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        format!("{}:{}", metadata.dev(), metadata.ino())
+        format!("{TURN_INDEX_VERSION}:{}:{}", metadata.dev(), metadata.ino())
     }
     #[cfg(not(unix))]
     {
-        format!("{:?}", metadata.created().ok())
+        format!("{TURN_INDEX_VERSION}:{:?}", metadata.created().ok())
     }
 }
 
@@ -71,6 +75,34 @@ impl SessionStore {
         .with_context(|| format!("unknown session {session}"))
     }
 
+    /// A failed or interrupted turn with a tool receipt may continue only
+    /// through the provider's known conversation. Evidence can predate the
+    /// bounded tail that supplies chat context and display history.
+    pub fn provider_turn_has_interrupted_work(&self, session: Uuid, turn: Uuid) -> Result<bool> {
+        Ok(self
+            .with_current_turn_index(session, |file| {
+                let (interrupted, tool_work) = self
+                    .conn
+                    .query_row(
+                        "select interrupted, tool_work from session_turn_retry_evidence
+                 where session_id = ?1 and turn_id = ?2",
+                        params![session.to_string(), turn.to_string()],
+                        |row| Ok((row.get::<_, bool>(0)?, row.get::<_, bool>(1)?)),
+                    )
+                    .optional()?
+                    .unwrap_or_default();
+                if interrupted && tool_work {
+                    return Ok(true);
+                }
+                let tail = self.unterminated_turn_event(file, session, turn)?;
+                let (tail_interrupted, tail_work) = tail
+                    .as_ref()
+                    .map_or((false, false), |event| retry_evidence(&event.payload));
+                Ok((interrupted || tail_interrupted) && (tool_work || tail_work))
+            })?
+            .unwrap_or(false))
+    }
+
     fn with_current_turn_index<T>(
         &self,
         session: Uuid,
@@ -109,6 +141,17 @@ impl SessionStore {
         session: Uuid,
         turn: Uuid,
     ) -> Result<Option<String>> {
+        Ok(self
+            .unterminated_turn_event(file, session, turn)?
+            .and_then(|event| provider_status_from_payload(&event.payload)))
+    }
+
+    fn unterminated_turn_event(
+        &self,
+        file: &mut File,
+        session: Uuid,
+        turn: Uuid,
+    ) -> Result<Option<SessionEvent>> {
         let offset: Option<u64> = self
             .conn
             .query_row(
@@ -129,14 +172,14 @@ impl SessionStore {
         file.read_exact(&mut record)?;
         Ok(serde_json::from_slice::<SessionEvent>(&record)
             .ok()
-            .filter(|event| event.session_id == session && event.turn_id == Some(turn))
-            .and_then(|event| provider_status_from_payload(&event.payload)))
+            .filter(|event| event.session_id == session && event.turn_id == Some(turn)))
     }
 
     fn clear_turn_index(&self, session: Uuid) -> Result<()> {
         for table in [
             "session_turn_messages",
             "session_turn_status",
+            "session_turn_retry_evidence",
             "session_turn_index",
         ] {
             self.conn.execute(
@@ -222,6 +265,18 @@ impl SessionStore {
                     if let Some(status) = provider_status_from_payload(&event.payload) {
                         self.record_turn_provider_status(session, turn, &status)?;
                     }
+                    let (interrupted, tool_work) = retry_evidence(&event.payload);
+                    if interrupted || tool_work {
+                        self.conn.execute(
+                            "insert into session_turn_retry_evidence
+                             (session_id, turn_id, interrupted, tool_work) values (?1, ?2, ?3, ?4)
+                             on conflict(session_id, turn_id) do update set
+                               interrupted = max(interrupted, excluded.interrupted),
+                               tool_work = max(tool_work, excluded.tool_work)
+                             where excluded.interrupted > interrupted or excluded.tool_work > tool_work",
+                            params![session.to_string(), turn.to_string(), interrupted, tool_work],
+                        )?;
+                    }
                 }
             }
         }
@@ -242,6 +297,23 @@ impl SessionStore {
             .context("commit recovered turn indexes")?;
         Ok(offset - start)
     }
+}
+
+fn retry_evidence(payload: &serde_json::Value) -> (bool, bool) {
+    let kind = payload["kind"].as_str();
+    let status = payload["status"].as_str();
+    let interrupted = kind == Some("provider-status")
+        && matches!(status, Some("failed" | "cancelled" | "interrupted"));
+    let tool_work = matches!(
+        payload["schema"].as_str(),
+        Some("gyro.capability.v1" | "gyro.mutation.v1")
+    ) || (kind == Some("provider-activity")
+        && matches!(
+            payload["activityKind"].as_str(),
+            Some("command" | "file" | "tool")
+        ))
+        || (kind == Some("provider-approval") && status == Some("applied"));
+    (interrupted, tool_work)
 }
 
 /// Streaming skip of oversized complete lines, without retaining their bytes.

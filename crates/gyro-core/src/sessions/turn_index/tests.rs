@@ -17,6 +17,113 @@ fn fixture() -> (tempfile::TempDir, SessionStore, crate::Session) {
 }
 
 #[test]
+fn retry_evidence_rebuilds_from_legacy_watermarks_and_stays_bound_to_its_turn() {
+    let (_temp, store, session) = fixture();
+    let interrupted = Uuid::new_v4();
+    let successful = Uuid::new_v4();
+    let capability = json!({"schema":"gyro.capability.v1"});
+    store
+        .append_system_events_with_turn_id(
+            session.id,
+            vec![
+                ("Tool receipt".into(), capability.clone(), Some(interrupted)),
+                (
+                    "Cancelled".into(),
+                    json!({"kind":"provider-status","status":"cancelled"}),
+                    Some(interrupted),
+                ),
+                (
+                    "Next attempt started".into(),
+                    json!({"kind":"provider-status","status":"running"}),
+                    Some(interrupted),
+                ),
+                (
+                    "Tool receipt for another turn".into(),
+                    capability,
+                    Some(successful),
+                ),
+            ],
+        )
+        .unwrap();
+    store
+        .conn
+        .execute(
+            "delete from session_turn_retry_evidence where session_id = ?1",
+            [session.id.to_string()],
+        )
+        .unwrap();
+    store.conn.execute(
+        "update session_turn_index set file_identity = substr(file_identity, 3) where session_id = ?1",
+        [session.id.to_string()],
+    ).unwrap();
+
+    assert!(store
+        .provider_turn_has_interrupted_work(session.id, interrupted)
+        .unwrap());
+    assert!(!store
+        .provider_turn_has_interrupted_work(session.id, successful)
+        .unwrap());
+    assert_eq!(
+        store
+            .provider_turn_status_for_dispatch(session.id, interrupted)
+            .unwrap()
+            .0
+            .as_deref(),
+        Some("running")
+    );
+    let path = store.session_events_path(session.id).unwrap();
+    let mut file = open_session_event_log_for_read(&path).unwrap();
+    let _lock = lock_session_event_file(&file, SessionEventFileLockKind::Exclusive).unwrap();
+    assert_eq!(
+        store
+            .catch_up_turn_index_locked(session.id, &path, &mut file)
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn a_complete_unterminated_record_can_protect_work_until_log_repair() {
+    let (_temp, store, session) = fixture();
+    let turn = Uuid::new_v4();
+    store
+        .append_event_with_turn_id(
+            session.id,
+            SessionEventKind::SystemEvent,
+            "Applied edit",
+            json!({"schema":"gyro.mutation.v1"}),
+            Some(turn),
+        )
+        .unwrap();
+    let path = store.session_events_path(session.id).unwrap();
+    let mut event = SessionEvent::new(
+        session.id,
+        SessionEventKind::SystemEvent,
+        "Interrupted",
+        json!({"kind":"provider-status","status":"interrupted"}),
+    );
+    event.turn_id = Some(turn);
+    {
+        let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+        serde_json::to_writer(&mut file, &event).unwrap();
+    }
+    assert!(store
+        .provider_turn_has_interrupted_work(session.id, turn)
+        .unwrap());
+    store
+        .append_event(
+            session.id,
+            SessionEventKind::SystemEvent,
+            "Next event repairs the tail",
+            json!({}),
+        )
+        .unwrap();
+    assert!(!store
+        .provider_turn_has_interrupted_work(session.id, turn)
+        .unwrap());
+}
+
+#[test]
 fn deleted_and_unknown_sessions_do_not_create_logs_or_break_reconciliation() {
     let (_temp, store, session) = fixture();
     store.delete_session(session.id).unwrap();

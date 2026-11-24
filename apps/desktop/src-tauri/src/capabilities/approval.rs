@@ -30,9 +30,10 @@ use crate::{
     workspace_capability_read,
 };
 use gyro_core::{
-    timing, CapabilityAccess, CapabilityApprovalDecision, CapabilityCallEvent, CapabilityClass,
-    CapabilityId, CapabilityResourceRef, CapabilityRunMode, CapabilityStatus,
-    ProjectCapabilityGrant, SessionEvent, SessionEventKind, CAPABILITY_SCHEMA_V1,
+    efficiency::checkpoint::VerificationEvidence, timing, CapabilityAccess,
+    CapabilityApprovalDecision, CapabilityCallEvent, CapabilityClass, CapabilityId,
+    CapabilityResourceRef, CapabilityRunMode, CapabilityStatus, ProjectCapabilityGrant,
+    SessionEvent, SessionEventKind, CAPABILITY_SCHEMA_V1,
 };
 use std::{
     path::Path,
@@ -53,7 +54,7 @@ pub(crate) fn capability_event(
     summary: &str,
     resource: Option<CapabilityResourceRef>,
 ) -> anyhow::Result<SessionEvent> {
-    capability_event_with_target(
+    capability_event_with_evidence(
         app,
         bound,
         call_id,
@@ -62,6 +63,7 @@ pub(crate) fn capability_event(
         summary,
         resource,
         None,
+        None,
     )
 }
 
@@ -69,7 +71,7 @@ pub(crate) fn capability_event(
 /// rail can say "Clicked Save" rather than an element ref. It is page content:
 /// untrusted, sanitized, and only ever displayed.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn capability_event_with_target(
+pub(crate) fn capability_event_with_evidence(
     app: &tauri::AppHandle,
     bound: &BoundProviderCapabilityContext,
     call_id: Uuid,
@@ -78,6 +80,7 @@ pub(crate) fn capability_event_with_target(
     summary: &str,
     resource: Option<CapabilityResourceRef>,
     target: Option<&str>,
+    verification: Option<VerificationEvidence>,
 ) -> anyhow::Result<SessionEvent> {
     provider_accounting::tool_timing(call_id, status);
     let event = CapabilityCallEvent {
@@ -108,6 +111,12 @@ pub(crate) fn capability_event_with_target(
         .filter(|target| !target.is_empty())
     {
         payload["target"] = serde_json::json!(target);
+    }
+    if let Some(verification) = verification {
+        payload["workspaceTaskOutcome"] = serde_json::json!({
+            "workspaceKey": bound.workspace_key,
+            "receipt": verification,
+        });
     }
     let stored = if let Some(turn_id) = bound.turn_id.as_deref() {
         store.append_event_with_turn_id(

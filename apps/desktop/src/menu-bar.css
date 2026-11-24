@@ -107,8 +107,6 @@
   --menu-danger: #de7474;
   --menu-action-bg: #e4aa52;
   --menu-action-copy: #161617;
-  --menu-brand-anthropic: #d97757;
-  --menu-brand-gemini: #6d9bf5;
   --menu-brand-kimi: #3d7eff;
 
   background: var(--menu-bg);
@@ -138,7 +136,6 @@
   --menu-warn: #a8761f;
   --menu-ok: #2f9463;
   --menu-danger: #c5514e;
-  --menu-brand-gemini: #3267d6;
 
   box-shadow:
     0 6px 14px rgba(24, 30, 37, 0.16),
@@ -174,12 +171,7 @@
 
 .gyro-menu-bar-brand-mark {
   height: var(--menu-tile);
-  object-fit: contain;
   width: var(--menu-tile);
-}
-
-:root[data-theme="dark"] .gyro-menu-bar-brand-mark {
-  filter: brightness(0) invert(1);
 }
 
 .gyro-menu-bar-status {
@@ -288,21 +280,12 @@
 
 .gyro-menu-bar-popover .gyro-menu-bar-provider-mark .gyro-provider-logo,
 .gyro-menu-bar-provider-mark > svg {
-  color: var(--menu-copy);
   height: var(--menu-provider-mark);
   width: var(--menu-provider-mark);
 }
 
-.gyro-menu-bar-popover
-  .gyro-menu-bar-provider-mark
-  .gyro-provider-logo.is-anthropic {
-  color: var(--menu-brand-anthropic);
-}
-
-.gyro-menu-bar-popover
-  .gyro-menu-bar-provider-mark
-  .gyro-provider-logo.is-gemini {
-  color: var(--menu-brand-gemini);
+.gyro-menu-bar-provider-mark > svg {
+  color: var(--menu-copy);
 }
 
 .gyro-menu-bar-job-copy {

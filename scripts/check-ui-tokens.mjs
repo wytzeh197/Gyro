@@ -47,7 +47,7 @@ expect(
 
 expect(
   /--gyro-font-sans:\s*"Geist", -apple-system/.test(styles) &&
-    /--gyro-font-display:\s*"Geist", -apple-system/.test(styles) &&
+    /--gyro-font-display:\s*var\(--gyro-font-sans\)/.test(styles) &&
     /--gyro-font-mono:\s*"Geist Mono", ui-monospace/.test(styles) &&
     brand.includes('font-family: "Geist"') &&
     brand.includes('font-family: "Geist Mono"') &&
@@ -120,6 +120,8 @@ const allowedGradient = [
   /transparent 0%,\s*var\(--gyro-composer-scrim\)/,
   // Media captions and the transcript dock fade content rather than paint a wash.
   /transparent,\s*color-mix\(in srgb, var\(--gyro-chat-(?:media-shade|raised)\)/,
+  /radial-gradient\(circle, var\(--gyro-scene-dot\) 1px, transparent 1px\)/,
+  /linear-gradient\(var\(--gyro-elevated\), var\(--gyro-control\)\)/,
 ];
 
 // Parse declarations so continuation lines of geometry masks remain masks,
@@ -137,6 +139,8 @@ for (const { path, source } of styleFiles) {
       );
     expect(
       isEffortIndicator ||
+        declaration.prop === "--gyro-transcript-mask" ||
+        (selector === ".gyro-preview-device-shell" && /^--gyro-device-.+-finish$/.test(declaration.prop)) ||
         allowedGradient.some((pattern) => pattern.test(declaration.value)),
       `Decorative gradient at ${path}:${declaration.source.start.line} is not on the content allowlist: ${declaration.value}`,
     );
@@ -175,6 +179,20 @@ const distinct = (property) =>
   ).size;
 const count = (pattern) =>
   literalDeclarations.filter(({ value }) => pattern.test(value)).length;
+// Component families: every distinct class whose name ends in one of the
+// suffixes. One primitive per family is the target (docs/design/system.md),
+// so these counts fall as surfaces move onto packages/ui/src/primitives.
+const classNames = new Set(
+  [...allStyles.matchAll(/\.(gyro-[a-z0-9_-]+)/g)].map(([, name]) => name),
+);
+const classFamily = (pattern) =>
+  [...classNames].filter((name) => pattern.test(name)).length;
+// Row geometry belongs to --gyro-row-height; literal px heights in the
+// navigation layer are the rows that still opt out of density.
+const navigationSource = (
+  styleFiles.find(({ path }) => path.endsWith("/navigation-design.css"))
+    ?.source ?? ""
+).replace(/\/\*[\s\S]*?\*\//g, "");
 const measured = {
   important: (allStyles.match(/!important/g) ?? []).length,
   lightThemeSelectors: (allStyles.match(/\[data-theme="light"\]/g) ?? [])
@@ -192,6 +210,21 @@ const measured = {
   radiusValues: distinct("border-radius"),
   zIndexValues: distinct("z-index"),
   letterSpacingValues: distinct("letter-spacing"),
+  // Depth: Gyro is flat; elevation comes from four --gyro-shadow-* tokens.
+  boxShadowValues: distinct("box-shadow"),
+  backdropFilterDeclarations: literalDeclarations.filter(
+    ({ property, value }) =>
+      /^(?:-webkit-)?backdrop-filter$/.test(property) && value !== "none",
+  ).length,
+  keyframes: (allStyles.match(/@keyframes\s+[\w-]+/g) ?? []).length,
+  buttonClasses: classFamily(/-(?:button|btn)$/),
+  menuClasses: classFamily(/-(?:menu|popover|dropdown)$/),
+  emptyStateClasses: classFamily(/-empty(?:-state)?$/),
+  navigationRowPxHeights: (
+    navigationSource.match(
+      /(?:^|[;{\s])(?:min-|max-)?height\s*:[^;{}]*\d+px/g,
+    ) ?? []
+  ).length,
 };
 if (process.argv.includes("--update-budget")) {
   writeFileSync(budgetPath, `${JSON.stringify(measured, null, 2)}\n`);

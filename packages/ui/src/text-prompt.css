@@ -1,47 +1,17 @@
 /* In-app text prompt: the replacement for `window.prompt`, which the macOS
-   WebView suppresses outright. Tokens match .gyro-workspace-rename so the two
-   dialogs read as one surface. */
-.gyro-text-prompt {
-  background: var(--gyro-surface-raised);
-  color: var(--gyro-text);
-  border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-md);
+   WebView suppresses outright. The Dialog primitive owns the surface,
+   backdrop, focus and motion; this file only lays out the contents. */
+.gyro-dialog.gyro-text-prompt {
   padding: var(--gyro-space-card);
-  font-family: var(--gyro-font-sans);
-  width: min(420px, calc(100vw - 32px));
-  max-height: calc(100dvh - 32px);
-  overflow: auto;
-}
-.gyro-text-prompt::backdrop {
-  background: var(--gyro-scrim);
 }
 .gyro-text-prompt form {
   display: grid;
   gap: var(--gyro-space-group);
 }
-.gyro-text-prompt-title {
-  margin: 0;
-  font-size: var(--gyro-font-heading);
-}
-.gyro-text-prompt-message {
-  margin: 0;
-  color: var(--gyro-muted);
-  font-size: var(--gyro-font-support);
-}
 .gyro-text-prompt-field {
   display: grid;
   gap: var(--gyro-space-compact);
   font-size: var(--gyro-font-support);
-}
-.gyro-text-prompt-field input {
-  width: 100%;
-  min-height: var(--gyro-control-height);
-  background: var(--gyro-surface-soft);
-  color: var(--gyro-text);
-  border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-sm);
-  padding: var(--gyro-space-standard);
-  font: inherit;
 }
 .gyro-text-prompt-error {
   margin: 0;
@@ -53,20 +23,19 @@
   justify-content: flex-end;
   gap: var(--gyro-space-standard);
 }
-.gyro-text-prompt button:focus-visible,
-.gyro-text-prompt input:focus-visible {
-  outline: 2px solid var(--gyro-focus-ring);
-  outline-offset: 2px;
+/* Confirmation: the AlertDialog primitive owns the surface, backdrop, focus
+   and motion; this adds the tone icon, detail block and action row. */
+.gyro-dialog.gyro-confirm-dialog {
+  padding: var(--gyro-space-card);
 }
-
-/* Confirmation: the same card with a tone icon and verb-named buttons. */
-.gyro-confirm-dialog {
-  width: min(400px, calc(100vw - 32px));
-  box-shadow: 0 18px 48px var(--gyro-shadow);
-  animation: gyro-confirm-in 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+.gyro-confirm-dialog form {
+  display: grid;
+  gap: var(--gyro-space-group);
 }
-.gyro-confirm-dialog::backdrop {
-  backdrop-filter: blur(2px);
+.gyro-confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--gyro-space-standard);
 }
 .gyro-confirm-dialog-head {
   display: grid;
@@ -79,7 +48,7 @@
   gap: 4px;
   min-width: 0;
 }
-.gyro-confirm-dialog .gyro-text-prompt-message {
+.gyro-confirm-dialog .gyro-dialog__description {
   overflow-wrap: anywhere;
   line-height: 1.45;
 }
@@ -115,27 +84,4 @@
 .gyro-confirm-dialog.is-permission .gyro-confirm-dialog-icon {
   background: color-mix(in srgb, var(--gyro-permission-full) 12%, transparent);
   color: var(--gyro-permission-full);
-}
-.gyro-confirm-dialog.is-permission {
-  box-sizing: border-box;
-  width: min(432px, calc(100vw - 32px));
-}
-.gyro-confirm-dialog .gyro-primary-button.is-danger {
-  background: var(--gyro-danger);
-  border-color: var(--gyro-danger);
-  color: #fff;
-}
-.gyro-confirm-dialog .gyro-primary-button.is-danger:hover {
-  background: color-mix(in srgb, var(--gyro-danger) 86%, #000);
-}
-@keyframes gyro-confirm-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px) scale(0.98);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .gyro-confirm-dialog {
-    animation: none;
-  }
 }

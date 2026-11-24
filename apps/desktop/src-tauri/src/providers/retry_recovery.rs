@@ -751,6 +751,110 @@ mod tests {
     }
 
     #[test]
+    fn retry_preflight_protects_completed_work_outside_the_recent_transcript() {
+        let (_temp, store, request) = setup("deepseek");
+        let session = Uuid::parse_str(&request.session_id).unwrap();
+        let turn = Uuid::parse_str(request.turn_id.as_deref().unwrap()).unwrap();
+        store
+            .append_user_turn_message_with_turn_id(
+                session,
+                &request.message,
+                serde_json::json!({}),
+                turn,
+            )
+            .unwrap();
+        let events = vec![
+            (
+                "Applied edit".into(),
+                serde_json::json!({"schema":"gyro.mutation.v1","status":"applied"}),
+                Some(turn),
+            ),
+            (
+                "Provider failed".into(),
+                serde_json::json!({"kind":"provider-status","status":"failed"}),
+                Some(turn),
+            ),
+        ];
+        store
+            .append_system_events_with_turn_id(session, events)
+            .unwrap();
+        let newer = (0..1_010)
+            .map(|i| (format!("Later event {i}"), serde_json::json!({}), None))
+            .collect();
+        store
+            .append_system_events_with_turn_id(session, newer)
+            .unwrap();
+        assert!(!store
+            .read_events(session)
+            .unwrap()
+            .iter()
+            .any(|event| event.payload["schema"] == "gyro.mutation.v1"));
+
+        let mut calls = 0;
+        let result = run_provider_chat_with_retry_using_with_wait(
+            &store,
+            &request,
+            None,
+            |_, _| {
+                calls += 1;
+                Ok(output(Vec::new()))
+            },
+            || None,
+            |_, _, _, _| Ok(()),
+        );
+        assert_eq!(
+            calls, 0,
+            "a recorded edit is never replayed without a cursor"
+        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains(CONTINUATION_UNAVAILABLE));
+    }
+
+    #[test]
+    fn retry_preflight_preserves_all_three_retries_for_a_nonstale_error_with_a_binding() {
+        let (_temp, store, request) = setup("openai");
+        let session = Uuid::parse_str(&request.session_id).unwrap();
+        let binding = store
+            .upsert_provider_session_binding(
+                session,
+                "openai",
+                None,
+                None,
+                None,
+                serde_json::json!({"kind":"codex-session","sessionId":"saved"}),
+                "done",
+                None,
+            )
+            .unwrap();
+        let mut calls = 0;
+        let mut waits = Vec::new();
+        let result = run_provider_chat_with_retry_using_with_wait(
+            &store,
+            &request,
+            Some(binding),
+            |cursor, _| {
+                assert_eq!(cursor.unwrap().session_id, "saved");
+                calls += 1;
+                if calls < 4 {
+                    anyhow::bail!("HTTP 503 temporary provider error");
+                }
+                Ok(output(Vec::new()))
+            },
+            || None,
+            |_, retry, _, _| {
+                waits.push(retry);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(calls, 4);
+        assert_eq!(waits, [1, 2, 3]);
+        assert_eq!(result.retry_count, 3);
+    }
+
+    #[test]
     fn continuation_never_falls_back_to_a_fresh_provider_session() {
         let (_temp, store, request) = setup("openai");
         let mut calls = 0;

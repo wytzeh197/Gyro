@@ -8,6 +8,13 @@
   "fontSizeValues": 9,
   "fontWeightValues": 6,
   "radiusValues": 26,
-  "zIndexValues": 45,
-  "letterSpacingValues": 25
+  "zIndexValues": 43,
+  "letterSpacingValues": 25,
+  "boxShadowValues": 211,
+  "backdropFilterDeclarations": 21,
+  "keyframes": 56,
+  "buttonClasses": 38,
+  "menuClasses": 31,
+  "emptyStateClasses": 39,
+  "navigationRowPxHeights": 20
 }

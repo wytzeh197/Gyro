@@ -1,13 +1,10 @@
-.gyro-project-remove-card.gyro-cloud-backup-review {
-  display: flex;
-  flex-direction: column;
+/* The Dialog primitive owns the surface, backdrop, focus and motion. */
+.gyro-dialog.gyro-cloud-backup-review {
   align-items: flex-start;
   gap: var(--gyro-space-panel);
   padding: var(--gyro-space-section);
-  width: min(38rem, 100%);
-  min-width: 0;
-  max-height: 85vh;
-  color: var(--gyro-text);
+  max-inline-size: 38rem;
+  max-block-size: 85vh;
   font-size: var(--gyro-font-support);
   overflow: auto;
 }

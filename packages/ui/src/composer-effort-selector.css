@@ -35,15 +35,15 @@
   gap: 4px;
   height: calc(24px * var(--gyro-ui-scale, 1));
   padding-inline: calc(8px * var(--gyro-ui-scale, 1));
-  border: 1px solid var(--gyro-premium-hairline-strong);
+  border: 1px solid var(--gyro-border-heavy);
   border-radius: var(--gyro-radius-pill);
   color: var(--gyro-muted);
   font-size: var(--gyro-font-caption);
   font-weight: 500;
   transition:
-    background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
-    border-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
-    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+    background-color var(--gyro-motion-fast) var(--gyro-ease),
+    border-color var(--gyro-motion-fast) var(--gyro-ease),
+    color var(--gyro-motion-fast) var(--gyro-ease);
 }
 .gyro-effort-slider-header .gyro-effort-fast-button:hover {
   background: var(--gyro-control-hover);
@@ -92,7 +92,7 @@
   );
   border-radius: inherit;
   background: var(--effort-color);
-  transition: width var(--gyro-premium-motion) var(--gyro-premium-ease);
+  transition: width var(--gyro-motion) var(--gyro-ease);
 }
 .gyro-effort-slider-stops {
   position: absolute;
@@ -205,10 +205,10 @@
   border: 2px solid var(--effort-color);
   border-radius: var(--gyro-radius-pill);
   background: var(--gyro-effort-thumb-ink);
-  box-shadow: 0 1px 3px var(--gyro-premium-shadow-soft);
+  box-shadow: 0 1px 3px var(--gyro-shadow-soft);
   pointer-events: none;
-  transition: inset-inline-start var(--gyro-premium-motion)
-    var(--gyro-premium-ease);
+  transition: inset-inline-start var(--gyro-motion)
+    var(--gyro-ease);
 }
 .gyro-effort-slider-popover[data-dragging="true"]
   :is(.gyro-effort-slider-thumb, .gyro-effort-slider-fill) {

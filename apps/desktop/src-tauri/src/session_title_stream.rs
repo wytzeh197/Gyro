@@ -21,7 +21,7 @@ use crate::{
     stores::parse_uuid,
     usage::guard::{usage_guard_block, UsageContext},
 };
-use gyro_core::{CancellationToken, Session, SessionStore, UsageOrigin, UsageOutcome};
+use gyro_core::{CancellationToken, Session, SessionStore, UsageOrigin, UsageOutcome, UsageTokens};
 use std::{
     collections::HashMap,
     sync::{mpsc, Arc},
@@ -293,6 +293,7 @@ impl RepairScope {
         }
         let repair = Arc::new(ProviderRunControl::default());
         *repair.process_owner.lock().ok()? = original.process_owner.lock().ok()?.clone();
+        *repair.goal_token_budget.lock().ok()? = *original.goal_token_budget.lock().ok()?;
         let timer = RepairTimer::start(repair.cancellation.clone(), Duration::from_secs(30));
         flags.insert(session_id.to_string(), repair.clone());
         Some(Self {
@@ -335,21 +336,20 @@ pub(super) fn repair_missing(
     app: &tauri::AppHandle,
     request: &ProviderChatRequest,
     final_title: Option<&str>,
-) {
+) -> Option<UsageTokens> {
     if !request.suggest_title
         || (final_title.is_none() && provider_chat_cancelled(app, &request.session_id))
     {
-        return;
+        return None;
     }
-    let Ok(session_id) = parse_uuid(&request.session_id) else {
-        return;
-    };
+    let session_id = parse_uuid(&request.session_id).ok()?;
     let run_id = request
         .turn_id
         .as_deref()
         .and_then(|id| parse_uuid(id).ok())
         .unwrap_or_else(Uuid::new_v4);
     let mut scope = None;
+    let mut turn_usage = None;
     let result = repair_pending_with(store, request, final_title, |repair| {
         if let Some(reason) =
             usage_guard_block(store, UsageOrigin::SessionTitle, &repair.provider_id)
@@ -367,7 +367,7 @@ pub(super) fn repair_missing(
             .map_err(anyhow::Error::msg)?;
         let _mute = context_compaction::mute_summary_stream(&request.session_id);
         let _observations = gyro_core::provider_observation::Scope::start();
-        provider_spend_guard::bind(app, &repair, store);
+        provider_spend_guard::prepare_call(app, repair, store)?;
         let _ = store.note_usage_call(session_id, run_id);
         let started = Instant::now();
         let mut result =
@@ -389,6 +389,7 @@ pub(super) fn repair_missing(
             },
             started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
         );
+        turn_usage = store.task_usage_tokens(session_id, run_id).ok().flatten();
         result.map(|output| output.response)
     });
     drop(scope);
@@ -406,6 +407,7 @@ pub(super) fn repair_missing(
         }
         let _ = app.emit("gyro://session-title-updated", session);
     }
+    turn_usage
 }
 
 #[cfg(test)]
@@ -689,7 +691,7 @@ mod tests {
         .unwrap();
         let _scope = TaskScope::start(&session_id, Some(&excerpt), Some(&message));
         let (_, opening) =
-            crate::providers::prompt::provider_context_sections(&request, None, true, false);
+            crate::providers::prompt::provider_context_sections(&request, None, true, false, None);
         assert_eq!(opening.matches(&excerpt).count(), 1);
         assert_eq!(
             instruction(&request),

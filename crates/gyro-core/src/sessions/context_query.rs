@@ -8,11 +8,41 @@ pub(super) const GOAL_CONTEXT: &str = "
     where session_id = ?1 and json_extract(event_json, '$.kind') = 'goal-updated'
     order by log_offset asc";
 
+pub(super) const WORKSPACE_TEST_OUTCOMES_FOR_TURNS: &str = "
+    select event_json from session_context_events
+    where session_id = ?1 and json_extract(event_json, '$.turnId') in (select value from json_each(?2))
+        and json_extract(event_json, '$.payload.kind') = 'capability-call'
+        and json_extract(event_json, '$.payload.status') = 'completed'
+        and json_extract(event_json, '$.payload.workspaceTaskOutcome.receipt.outcome.capabilityId') in ('workspace-run-test', 'workspace-run-command')
+    order by log_offset asc";
+
+pub(super) const WORKSPACE_OUTPUT_RECEIPT: &str = "
+    select event_json from session_context_events
+    where session_id = ?1
+        and json_extract(event_json, '$.payload.kind') = 'capability-call'
+        and json_extract(event_json, '$.payload.status') = 'completed'
+        and json_extract(event_json, '$.payload.workspaceTaskOutcome.workspaceKey') = ?2
+        and json_extract(event_json, '$.payload.workspaceTaskOutcome.receipt.outputId') = ?3
+    order by log_offset desc limit 1";
+
 pub(super) const EFFICIENCY_CONTEXT: &str = "
     with latest as (
         select json_extract(event_json, '$.kind') as kind, max(log_offset) as log_offset
         from session_context_events where session_id = ?1
         group by json_extract(event_json, '$.kind')
+    ), recent_task_outcomes as (
+        select log_offset from session_context_events
+        where session_id = ?1
+          and json_type(event_json, '$.payload.workspaceTaskOutcome') = 'object'
+          and json_extract(event_json, '$.payload.workspaceTaskOutcome.receipt.outcome.capabilityId') is not 'workspace-run-command'
+        order by log_offset desc limit 16
+    ), recent_command_tests as (
+        select max(log_offset) as log_offset from session_context_events
+        where session_id = ?1
+          and json_extract(event_json, '$.payload.workspaceTaskOutcome.receipt.outcome.capabilityId') = 'workspace-run-command'
+        group by json_extract(event_json, '$.payload.workspaceTaskOutcome.workspaceKey'),
+                 json_extract(event_json, '$.payload.workspaceTaskOutcome.receipt.outcome.taskId')
+        order by max(log_offset) desc limit 4
     )
     select e.event_json from session_context_events e
     left join latest l on l.kind = json_extract(e.event_json, '$.kind')
@@ -20,6 +50,8 @@ pub(super) const EFFICIENCY_CONTEXT: &str = "
     where e.session_id = ?1 and (
         json_extract(e.event_json, '$.payload.kind') = 'efficiency-phase-route'
         or json_extract(e.event_json, '$.kind') = 'goal-updated'
+        or e.log_offset in (select log_offset from recent_task_outcomes)
+        or e.log_offset in (select log_offset from recent_command_tests)
         or l.log_offset is not null
     ) order by e.log_offset asc";
 

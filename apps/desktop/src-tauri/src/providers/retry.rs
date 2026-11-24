@@ -40,6 +40,12 @@ pub(crate) enum CompactionPoint {
     AfterReply,
 }
 
+impl CompactionPoint {
+    fn should_check(self, requested: bool) -> bool {
+        requested || matches!(self, Self::BeforePrompt)
+    }
+}
+
 pub(crate) struct AutoCompaction {
     pub(crate) binding: Option<ProviderSessionBinding>,
     pub(crate) activity_events: Vec<gyro_core::SessionEvent>,
@@ -47,7 +53,8 @@ pub(crate) struct AutoCompaction {
 }
 
 /// Compact a resumed session before the next prompt when its last measured
-/// fill is at or past the configured share.
+/// fill is at or past the configured share. At the reply boundary, only
+/// finish an explicit request queued while the provider was running.
 ///
 /// Every provider reaches the model through `run_provider_chat_with_retry`,
 /// so this is the one place a new adapter cannot skip. The rewrite is the
@@ -74,10 +81,6 @@ pub(crate) fn auto_compact_owned_session(
     {
         return Ok(result);
     }
-    let config = match load_config_blocking() {
-        Ok(config) => config,
-        Err(_) => return Ok(result),
-    };
     let Ok(session_id) = parse_uuid(&request.session_id) else {
         return Ok(result);
     };
@@ -90,7 +93,14 @@ pub(crate) fn auto_compact_owned_session(
     let requested = control
         .as_ref()
         .is_some_and(|control| control.context_compaction_requested.load(Ordering::Acquire));
+    if !point.should_check(requested) {
+        return Ok(result);
+    }
     if !requested {
+        let config = match load_config_blocking() {
+            Ok(config) => config,
+            Err(_) => return Ok(result),
+        };
         let percent = config.usage_guard.auto_compact_percent;
         if percent == 0 {
             return Ok(result);
@@ -108,9 +118,8 @@ pub(crate) fn auto_compact_owned_session(
             adapter.kind,
             ProviderAdapterKind::OpenAiCompatible | ProviderAdapterKind::Ollama
         );
-        let prefetch = matches!(point, CompactionPoint::BeforePrompt)
-            && owned_transcript
-            && !(config.efficiency.policies() && config.efficiency.task_state);
+        let prefetch =
+            owned_transcript && !(config.efficiency.policies() && config.efficiency.task_state);
         let recent = if owned_transcript {
             store.read_prompt_history_events(session_id)
         } else {
@@ -277,17 +286,14 @@ pub(crate) fn run_provider_chat_with_retry(
                 updated_at: chrono::Utc::now(),
             });
         let a = provider_turn_tokens(request, Some(&output));
-        provider_accounting::set_usage_offset(app, &request.session_id, Some(a));
-        let next_result = run_provider_chat_with_retry_inner(
+        let mut next = run_provider_chat_with_retry_inner(
             store,
             app,
             &continuation,
             binding,
             usage_context,
             None,
-        );
-        provider_accounting::set_usage_offset(app, &request.session_id, None);
-        let mut next = next_result?;
+        )?;
         let b = provider_turn_tokens(&continuation, Some(&next));
         next.accounted_usage = Some(a.combine(b).with_scope(gyro_core::usage::UsageScope::Turn));
         let mut activities = output.activities;
@@ -312,6 +318,7 @@ fn run_provider_chat_with_retry_inner(
     if let Some(reason) = usage_guard_block(store, usage_context.origin, &request.provider_id) {
         anyhow::bail!(reason);
     }
+    provider_spend_guard::prepare_call(app, request, store)?;
     if let (Ok(session), Some(turn)) = (
         Uuid::parse_str(&request.session_id),
         request
@@ -322,7 +329,6 @@ fn run_provider_chat_with_retry_inner(
         let _ = store.note_usage_call(session, turn);
     }
     let started = Instant::now();
-    provider_spend_guard::bind(app, request, store);
     let _observations = gyro_core::provider_observation::Scope::start();
     provider_accounting::bind_timing(app, &request.session_id);
     let mut result = run_provider_chat_with_retry_using_with_wait(
@@ -524,8 +530,17 @@ pub(crate) fn run_provider_chat_once(
     if expanded.project_memory.is_some() {
         memory_store.invalidate_project_memory_receipt(memory_session.id, &request.provider_id)?;
     }
+    let root_count =
+        crate::capabilities::bridge::active_provider_capability_context(app, &request.session_id)
+            .ok()
+            .filter(|bound| {
+                bound.turn_id == request.turn_id
+                    && bound.workspace_identity_revision
+                        == memory_session.workspace_identity.revision
+            })
+            .map(|_| memory_session.workspace_identity.roots.len());
     let output = runner.run(
-        &TauriRunnerHost::with_prefetched_history(app, prefetched_history),
+        &TauriRunnerHost::with_prefetched_history(app, prefetched_history, root_count),
         &expanded,
         resume_cursor,
         attempt,
@@ -615,4 +630,17 @@ fn ordinary_checkout_lease(
             anyhow::anyhow!("A workflow owns this checkout; stop it or choose another worktree")
         })?,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CompactionPoint;
+
+    #[test]
+    fn auto_compaction_waits_for_the_next_prompt_unless_requested() {
+        assert!(!CompactionPoint::AfterReply.should_check(false));
+        assert!(CompactionPoint::BeforePrompt.should_check(false));
+        assert!(CompactionPoint::AfterReply.should_check(true));
+        assert!(CompactionPoint::BeforePrompt.should_check(true));
+    }
 }

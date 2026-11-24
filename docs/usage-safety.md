@@ -179,6 +179,20 @@ nothing, from the text the session would carry into that prompt. A share of an
 unknown window is not a measurement, so a model whose window Gyro cannot resolve
 still never auto-compacts — the same rule the live context note follows.
 
+An OpenAI-compatible endpoint can reject a request with HTTP 400 and
+`context_length_exceeded` even when its window is unknown to Gyro. With Auto
+Context Compact enabled and the workspace read tool available, Gyro may retry
+that turn's request once after replacing older workspace read bodies with
+references to their exact session-scoped copies. The active prompt, latest
+tool exchange, and action receipts stay in the request.
+
+For local Ollama, a confirmed context rejection can trigger one retry with a
+larger allocation and the original messages and tools. When Ollama reports the
+prompt token count, Gyro uses it to select the next allocation with space for an
+answer, up to the model's reported maximum. If the unchanged request still
+cannot fit, the same recoverable workspace read retry is available. Gyro keeps
+the latest allocation so the retry can reuse the loaded runner.
+
 A ledger the guard cannot read is not treated as proof of safety, but blocking
 on a read failure would strand the user with no way to work, so the call runs
 and the failure is logged. A pause is the exception: it holds even when the

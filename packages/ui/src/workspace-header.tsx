@@ -1,5 +1,6 @@
+import { Button, IconButton } from "./primitives/button";
 import { Folder } from "./workspace-folder-icons";
-import { MoreHorizontal, Plus } from "lucide-react";
+import { MoreHorizontal, Plus } from "./icons";
 import type { WorkbenchMode } from "./types";
 import {
   workspaceModeShortLabel,
@@ -92,23 +93,21 @@ export function WorkspaceHeader({
               </span>
             ))}
           </div>
-          <button
-            aria-label="Open workspace"
-            className="gyro-icon-button"
+          <IconButton
+            label="Open workspace"
+            variant="chrome"
             onClick={onOpenWorkspace}
             title="Open workspace"
-            type="button"
           >
-            <Folder size={17} />
-          </button>
-          <button
-            className="gyro-primary-button"
+            <Folder size={17} aria-hidden="true" />
+          </IconButton>
+          <Button
+            size="md" leading={<Plus size={16} aria-hidden="true" />}
             onClick={onCreateSession}
             type="button"
           >
-            <Plus size={16} />
             New thread
-          </button>
+          </Button>
         </div>
       ) : null}
     </header>

@@ -8,6 +8,9 @@ pub(crate) struct UsagePoll<T> {
     failures: u32,
     /// How long a good reading answers every caller before the next request.
     hold: Duration,
+    /// A shorter hold for a good reading that still left something unmeasured,
+    /// and the test that recognises one.
+    partial: Option<(Duration, fn(&T) -> bool)>,
 }
 
 impl<T: Clone> UsagePoll<T> {
@@ -23,7 +26,22 @@ impl<T: Clone> UsagePoll<T> {
             cached: None,
             failures: 0,
             hold,
+            partial: None,
         }
+    }
+
+    /// Hold a reading `is_partial` flags for only `partial_hold`.
+    ///
+    /// A plan window that just opened is reported before the account has a
+    /// level for it. Holding that reading for the full `hold` left the row on
+    /// "Not reported" for minutes after the level existed.
+    pub(crate) fn holding_partial_for(
+        mut self,
+        partial_hold: Duration,
+        is_partial: fn(&T) -> bool,
+    ) -> Self {
+        self.partial = Some((partial_hold.min(self.hold), is_partial));
+        self
     }
 
     #[cfg(test)]
@@ -46,6 +64,18 @@ impl<T: Clone> UsagePoll<T> {
         fetch: impl FnOnce(&mut Duration) -> Result<T, String>,
     ) -> Result<T, String> {
         if let Some((fetched_at, until, result)) = &self.cached {
+            // A held reading can turn partial while cached, such as a window
+            // whose reset has since passed, so it is tested again on read.
+            let partial_age = match (result, self.partial) {
+                (Ok(value), Some((partial_hold, is_partial))) if is_partial(value) => {
+                    Some(partial_hold)
+                }
+                _ => None,
+            };
+            let max_age = match (max_age, partial_age) {
+                (Some(left), Some(right)) => Some(left.min(right)),
+                (left, right) => left.or(right),
+            };
             let young_enough = match (result, max_age) {
                 (Ok(_), Some(max_age)) => now < *fetched_at + max_age,
                 _ => true,
@@ -56,9 +86,12 @@ impl<T: Clone> UsagePoll<T> {
         }
         let mut cooldown = Duration::from_secs(45 * (1 << self.failures.min(4)));
         let result = fetch(&mut cooldown);
-        if result.is_ok() {
+        if let Ok(value) = &result {
             self.failures = 0;
-            cooldown = self.hold;
+            cooldown = match self.partial {
+                Some((partial_hold, is_partial)) if is_partial(value) => partial_hold,
+                _ => self.hold,
+            };
         } else {
             self.failures = self.failures.saturating_add(1);
         }
@@ -180,6 +213,27 @@ mod tests {
             Ok(5)
         );
         assert_eq!(poll.read(now + Duration::from_secs(361), |_| Ok(6)), Ok(6));
+    }
+
+    #[test]
+    fn a_partial_reading_is_held_only_for_the_partial_hold() {
+        let mut poll = UsagePoll::holding(Duration::from_secs(300))
+            .holding_partial_for(Duration::from_secs(60), |value: &Option<i32>| value.is_none());
+        let now = Instant::now();
+        assert_eq!(poll.read(now, |_| Ok(None)), Ok(None));
+        assert_eq!(
+            poll.read(now + Duration::from_secs(59), |_| panic!("early poll")),
+            Ok(None)
+        );
+        assert_eq!(
+            poll.read(now + Duration::from_secs(60), |_| Ok(Some(4))),
+            Ok(Some(4))
+        );
+        // A complete reading keeps the full hold.
+        assert_eq!(
+            poll.read(now + Duration::from_secs(359), |_| panic!("early poll")),
+            Ok(Some(4))
+        );
     }
 
     #[test]

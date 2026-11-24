@@ -2,12 +2,18 @@ import { completedSave } from "./cloud-v3-transfer-state";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  Button,
+  Input,
+  Textarea,
   CloudIcon,
+  Dialog,
+  SettingsChoice,
   SettingsGroup,
   SettingsRow,
   SettingsSection,
   UserRoundIcon,
   CloseIcon,
+  WorkbenchScene,
 } from "@gyro-dev/ui";
 import {
   CloudAccountPage,
@@ -73,19 +79,15 @@ export function CloudV3Settings({
   const call = useMemo(() => verifiedV3Client(rawCall), [rawCall]);
   const [tab, setTab] = useState<CloudTab>(initialTab);
   const [panel, setPanel] = useState<CloudPanel | null>(null);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [panelObject, setPanelObject] = useState<string | undefined>();
   const [profile, setProfile] = useState<CloudProfile | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
-  const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    if (panel && dialog.current && !dialog.current.open)
-      dialog.current.showModal();
-    if (!panel && dialog.current?.open) dialog.current.close();
-  }, [panel]);
   function openPanel(next: CloudPanel, objectId?: string) {
     setPanelObject(objectId);
     setRevoking(null);
     setPanel(next);
+    setPanelOpen(true);
   }
   const [view, setView] = useState<any>(null),
     [usage, setUsage] = useState<any>(null),
@@ -228,7 +230,7 @@ export function CloudV3Settings({
       }
     } else {
       setProfile(null);
-      setPanel(null);
+      setPanelOpen(false);
       setUsage(null);
       setWallet(null);
       setVersions([]);
@@ -355,13 +357,13 @@ export function CloudV3Settings({
           {error || "Loading Cloud data…"}
         </p>
         {error && (
-          <button
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             onClick={() => void action(refresh)}
           >
             Try again
-          </button>
+          </Button>
         )}
       </SettingsSection>
     );
@@ -388,7 +390,7 @@ export function CloudV3Settings({
         running={runningTransfers}
         outcomes={transferOutcomes}
         busy={busy}
-        onClose={() => setPanel(null)}
+        onClose={() => setPanelOpen(false)}
         onResume={(id) => void resumeTransfer(id)}
         onRestart={(id) =>
           action(async () => {
@@ -428,8 +430,8 @@ export function CloudV3Settings({
             detail="If your device allowance is full, revoke a lost or unused device below, then retry. A previously revoked Mac needs a fresh sign-in and a new registration identity."
           >
             <div className="gyro-cloud-actions">
-              <button
-                className="gyro-secondary-button"
+              <Button
+                variant="outline"
                 onClick={() =>
                   void action(async () => {
                     await call({
@@ -441,9 +443,9 @@ export function CloudV3Settings({
                 }
               >
                 Retry registration
-              </button>
-              <button
-                className="gyro-secondary-button"
+              </Button>
+              <Button
+                variant="outline"
                 onClick={() =>
                   void action(async () => {
                     await call({
@@ -455,7 +457,7 @@ export function CloudV3Settings({
                 }
               >
                 Register a new device identity
-              </button>
+              </Button>
             </div>
           </SettingsRow>
         )}
@@ -465,14 +467,14 @@ export function CloudV3Settings({
           value={stale ? "Signed in · status unavailable" : "Connected"}
         />
         <div className="gyro-cloud-actions">
-          <button
-            className="gyro-secondary-button"
+          <Button
+            variant="outline"
             onClick={() => void action(refresh)}
           >
             Refresh status
-          </button>
-          <button
-            className="gyro-secondary-button"
+          </Button>
+          <Button
+            variant="outline"
             onClick={() =>
               void action(async () => {
                 await disconnect();
@@ -480,7 +482,7 @@ export function CloudV3Settings({
             }
           >
             Sign out
-          </button>
+          </Button>
         </div>
       </SettingsGroup>
     ),
@@ -569,9 +571,9 @@ export function CloudV3Settings({
                 by a 30-day read and export window. The billing page shows
                 applicable tax and the final total before payment.
               </p>
-              <button
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 onClick={() =>
                   void action(() =>
                     openBilling(usage.active ? "billing" : "checkout"),
@@ -586,17 +588,17 @@ export function CloudV3Settings({
                   : capabilities.cloudPurchase
                     ? "Open Cloud checkout"
                     : "Cloud is not available for purchase yet"}
-              </button>
+              </Button>
               {!usage.active && capabilities.plusPurchase && (
-                <button
+                <Button
                   type="button"
-                  className="gyro-secondary-button"
+                  variant="outline"
                   onClick={() =>
                     void action(() => openBilling("checkout", "plus"))
                   }
                 >
                   Open Plus checkout
-                </button>
+                </Button>
               )}
             </>
           )}
@@ -612,10 +614,8 @@ export function CloudV3Settings({
           label="Manual project save"
           detail="Review files and exclusions before upload. Git history, generated files and common credential files are excluded. Encryption is server-managed."
         >
-          <button
-            className={
-              preview ? "gyro-secondary-button" : "gyro-primary-button"
-            }
+          <Button
+            variant={preview ? "outline" : "default"}
             disabled={!usage?.active || stale}
             onClick={() =>
               void action(async () => {
@@ -628,31 +628,28 @@ export function CloudV3Settings({
             }
           >
             Choose project
-          </button>
+          </Button>
         </SettingsRow>
         {preview && (
           <div className="gyro-auth-card">
             <h2>Review project save</h2>
             <label className="gyro-auth-field">
               <span>Save version of</span>
-              <select
-                className="gyro-cloud-input"
+              <SettingsChoice
+                aria-label="Save version of"
                 value={targetObject}
-                onChange={(e) => setTargetObject(e.target.value)}
-              >
-                <option value="">New Cloud project</option>
-                {versions
-                  .filter(
-                    (v, i, a) =>
-                      v.kind === "project" &&
-                      a.findIndex((x) => x.object_id === v.object_id) === i,
-                  )
-                  .map((v) => (
-                    <option key={v.object_id} value={v.object_id}>
-                      {v.label}
-                    </option>
-                  ))}
-              </select>
+                onValueChange={setTargetObject}
+                options={[
+                  { value: "", label: "New Cloud project" },
+                  ...versions
+                    .filter(
+                      (v, i, a) =>
+                        v.kind === "project" &&
+                        a.findIndex((x) => x.object_id === v.object_id) === i,
+                    )
+                    .map((v) => ({ value: v.object_id, label: v.label })),
+                ]}
+              />
             </label>
             <p>
               {preview.files.length} files · {fileSize(preview.payloadBytes)} ·
@@ -660,7 +657,7 @@ export function CloudV3Settings({
             </p>
             <label className="gyro-auth-field">
               <span>Name</span>
-              <input
+              <Input
                 className="gyro-cloud-input"
                 value={label}
                 maxLength={120}
@@ -695,8 +692,8 @@ export function CloudV3Settings({
               to upload this project.
             </label>
             <div className="gyro-cloud-actions">
-              <button
-                className="gyro-secondary-button"
+              <Button
+                variant="outline"
                 onClick={() =>
                   void action(async () => {
                     await call({
@@ -708,9 +705,9 @@ export function CloudV3Settings({
                 }
               >
                 Close preview
-              </button>
-              <button
-                className="gyro-primary-button"
+              </Button>
+              <Button
+                size="md"
                 disabled={!reviewed}
                 onClick={() =>
                   void action(async () => {
@@ -734,19 +731,19 @@ export function CloudV3Settings({
                 }
               >
                 Prepare save
-              </button>
+              </Button>
             </div>
           </div>
         )}
         {pending.length > 0 && (
-          <button
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             onClick={() => openPanel("transfers")}
           >
             Continue {pending.length} prepared{" "}
             {pending.length === 1 ? "save" : "saves"}
-          </button>
+          </Button>
         )}
       </SettingsGroup>
     ),
@@ -756,8 +753,8 @@ export function CloudV3Settings({
           label="Chat backup"
           detail="Choose and review each supported text archive separately. Provider sessions, credentials and permissions are excluded."
         >
-          <button
-            className="gyro-secondary-button"
+          <Button
+            variant="outline"
             onClick={() =>
               void action(async () =>
                 setChats((await call({ operation: "local-chats" })).items),
@@ -765,12 +762,12 @@ export function CloudV3Settings({
             }
           >
             Choose chat
-          </button>
+          </Button>
         </SettingsRow>
         {chats.map((c) => (
           <SettingsRow key={c.id} label={c.title || "Untitled chat"}>
-            <button
-              className="gyro-secondary-button"
+            <Button
+              variant="outline"
               onClick={() =>
                 void action(async () => {
                   setChatPreview(
@@ -786,7 +783,7 @@ export function CloudV3Settings({
               }
             >
               Preview
-            </button>
+            </Button>
           </SettingsRow>
         ))}
         {chatPreview && (
@@ -806,8 +803,8 @@ export function CloudV3Settings({
               />{" "}
               I want to save this selected chat to Cloud.
             </label>
-            <button
-              className="gyro-primary-button"
+            <Button
+              size="md"
               disabled={!chatConsent}
               onClick={() =>
                 void action(async () => {
@@ -824,7 +821,7 @@ export function CloudV3Settings({
               }
             >
               Prepare chat backup
-            </button>
+            </Button>
           </div>
         )}
       </SettingsGroup>
@@ -832,8 +829,8 @@ export function CloudV3Settings({
     versions: () => (
       <SettingsGroup label="Saved versions" defaultOpen>
         {versionCursor && (
-          <button
-            className="gyro-secondary-button"
+          <Button
+            variant="outline"
             onClick={() =>
               void action(async () => {
                 const page = await service("versions", {
@@ -846,7 +843,7 @@ export function CloudV3Settings({
             }
           >
             Load more versions
-          </button>
+          </Button>
         )}
         <p>
           Restores create a new local folder. Conflicting versions are
@@ -865,8 +862,8 @@ export function CloudV3Settings({
               detail={`${gb(Number(v.size_bytes))} · ${date(v.created_at)}`}
             >
               <div className="gyro-cloud-actions">
-                <button
-                  className="gyro-secondary-button"
+                <Button
+                  variant="outline"
                   onClick={() =>
                     void action(async () => {
                       if (v.kind === "project") {
@@ -901,13 +898,13 @@ export function CloudV3Settings({
                     : v.kind === "report"
                       ? "Read report"
                       : "Restore copy"}
-                </button>
-                <button
-                  className="gyro-secondary-button"
+                </Button>
+                <Button
+                  variant="outline"
                   onClick={() => setDeleting(v.id)}
                 >
                   Delete version
-                </button>
+                </Button>
               </div>
             </SettingsRow>
           ))
@@ -918,14 +915,14 @@ export function CloudV3Settings({
               Delete this Cloud version? Local files stay on this Mac. Deletion
               is permanent.
             </p>
-            <button
-              className="gyro-secondary-button"
+            <Button
+              variant="outline"
               onClick={() => setDeleting(null)}
             >
               Keep version
-            </button>
-            <button
-              className="gyro-secondary-button"
+            </Button>
+            <Button
+              variant="outline"
               onClick={() =>
                 void action(async () => {
                   await service("delete-version", {
@@ -937,7 +934,7 @@ export function CloudV3Settings({
               }
             >
               Delete this version
-            </button>
+            </Button>
           </div>
         )}
         {readChat && (
@@ -953,8 +950,8 @@ export function CloudV3Settings({
               Review this context and copy it into a fresh agent session using
               current local permissions.
             </p>
-            <button
-              className="gyro-secondary-button"
+            <Button
+              variant="outline"
               onClick={() =>
                 void action(async () => {
                   await navigator.clipboard.writeText(
@@ -969,13 +966,13 @@ export function CloudV3Settings({
               }
             >
               Copy context
-            </button>
-            <button
-              className="gyro-secondary-button"
+            </Button>
+            <Button
+              variant="outline"
               onClick={() => setReadChat(null)}
             >
               Close archive
-            </button>
+            </Button>
           </div>
         )}
       </SettingsGroup>
@@ -986,8 +983,8 @@ export function CloudV3Settings({
           label="Review a local report"
           detail="Local and user-owned checks stay free. Plus saves a reviewed text report with observed passed, failed and not-checked evidence; saved reports grant no execution permission."
         >
-          <button
-            className="gyro-secondary-button"
+          <Button
+            variant="outline"
             onClick={() =>
               void action(async () => {
                 setChats((await call({ operation: "local-chats" })).items);
@@ -995,12 +992,12 @@ export function CloudV3Settings({
             }
           >
             Choose a local chat
-          </button>
+          </Button>
         </SettingsRow>
         {chats.map((chat) => (
           <SettingsRow key={chat.id} label={chat.title}>
-            <button
-              className="gyro-secondary-button"
+            <Button
+              variant="outline"
               onClick={() =>
                 void action(async () => {
                   const r = await call({
@@ -1017,7 +1014,7 @@ export function CloudV3Settings({
               }
             >
               List saved checks
-            </button>
+            </Button>
           </SettingsRow>
         ))}
         {reports.map((report) => (
@@ -1030,8 +1027,8 @@ export function CloudV3Settings({
                 : "Freshness is checked again before sharing."
             }
           >
-            <button
-              className="gyro-secondary-button"
+            <Button
+              variant="outline"
               onClick={() =>
                 void action(async () => {
                   setReportPreview(
@@ -1046,7 +1043,7 @@ export function CloudV3Settings({
               }
             >
               Review report
-            </button>
+            </Button>
           </SettingsRow>
         ))}
         {reportPreview && (
@@ -1061,8 +1058,8 @@ export function CloudV3Settings({
               I reviewed this sanitized report and want to save it to Cloud.
             </label>
             <div className="gyro-cloud-actions">
-              <button
-                className="gyro-secondary-button"
+              <Button
+                variant="outline"
                 onClick={() =>
                   void action(async () => {
                     await call({
@@ -1074,7 +1071,7 @@ export function CloudV3Settings({
                 }
               >
                 Cancel report save
-              </button>
+              </Button>
               <button
                 className="gyro-button"
                 disabled={!reportConsent}
@@ -1104,8 +1101,8 @@ export function CloudV3Settings({
           label="Pair a phone"
           detail="Later feature under acceptance. Each phone counts as a device. Pairing expires in five minutes; no approvals, task starts or replies are available."
         >
-          <button
-            className="gyro-secondary-button"
+          <Button
+            variant="outline"
             onClick={() =>
               void action(async () => {
                 setPhonePair(await service("phone-pair"));
@@ -1113,7 +1110,7 @@ export function CloudV3Settings({
             }
           >
             Create pairing code
-          </button>
+          </Button>
         </SettingsRow>
         {phonePair && (
           <div className="gyro-auth-card">
@@ -1123,7 +1120,7 @@ export function CloudV3Settings({
             </p>
             <label className="gyro-auth-field">
               <span>Pairing ID</span>
-              <input
+              <Input
                 className="gyro-cloud-input"
                 readOnly
                 value={phonePair.pairId}
@@ -1131,15 +1128,15 @@ export function CloudV3Settings({
             </label>
             <label className="gyro-auth-field">
               <span>Pairing secret</span>
-              <input
+              <Input
                 className="gyro-cloud-input"
                 type="password"
                 readOnly
                 value={phonePair.secret}
               />
             </label>
-            <button
-              className="gyro-secondary-button"
+            <Button
+              variant="outline"
               onClick={() =>
                 void action(async () => {
                   await navigator.clipboard.writeText(phonePair.secret);
@@ -1150,21 +1147,21 @@ export function CloudV3Settings({
               }
             >
               Copy pairing secret
-            </button>
-            <button
-              className="gyro-secondary-button"
+            </Button>
+            <Button
+              variant="outline"
               onClick={() => setPhonePair(null)}
             >
               Hide pairing code
-            </button>
+            </Button>
           </div>
         )}
         <SettingsRow
           label="Selected phone content"
           detail="Review up to three recent supported text messages before publishing a manual snapshot. Execution status is marked not checked. Automatic live status remains a later integration."
         >
-          <button
-            className="gyro-secondary-button"
+          <Button
+            variant="outline"
             onClick={() =>
               void action(async () => {
                 setChats((await call({ operation: "local-chats" })).items);
@@ -1172,12 +1169,12 @@ export function CloudV3Settings({
             }
           >
             Choose content
-          </button>
+          </Button>
         </SettingsRow>
         {chats.map((chat) => (
           <SettingsRow key={chat.id} label={chat.title}>
-            <button
-              className="gyro-secondary-button"
+            <Button
+              variant="outline"
               onClick={() =>
                 void action(async () => {
                   setPhonePreview(
@@ -1191,7 +1188,7 @@ export function CloudV3Settings({
               }
             >
               Review phone snapshot
-            </button>
+            </Button>
           </SettingsRow>
         ))}
         {phonePreview && (
@@ -1206,8 +1203,8 @@ export function CloudV3Settings({
               Publish only this reviewed content to paired read-only phones.
             </label>
             <div className="gyro-cloud-actions">
-              <button
-                className="gyro-secondary-button"
+              <Button
+                variant="outline"
                 onClick={() =>
                   void action(async () => {
                     await call({
@@ -1219,7 +1216,7 @@ export function CloudV3Settings({
                 }
               >
                 Cancel publication
-              </button>
+              </Button>
               <button
                 className="gyro-button"
                 disabled={!phoneConsent}
@@ -1243,8 +1240,8 @@ export function CloudV3Settings({
           </div>
         )}
         <SettingsRow label="Paired phones">
-          <button
-            className="gyro-secondary-button"
+          <Button
+            variant="outline"
             onClick={() =>
               void action(async () =>
                 setPhoneDevices(await service("phone-devices")),
@@ -1252,7 +1249,7 @@ export function CloudV3Settings({
             }
           >
             Refresh phones
-          </button>
+          </Button>
         </SettingsRow>
         {phoneDevices.map((d) => (
           <SettingsRow
@@ -1260,8 +1257,8 @@ export function CloudV3Settings({
             label={d.label}
             detail={d.revoked_at ? "Revoked" : `Expires ${date(d.expires_at)}`}
           >
-            <button
-              className="gyro-secondary-button"
+            <Button
+              variant="outline"
               disabled={!!d.revoked_at}
               onClick={() =>
                 void action(async () => {
@@ -1271,7 +1268,7 @@ export function CloudV3Settings({
               }
             >
               Revoke phone
-            </button>
+            </Button>
           </SettingsRow>
         ))}
       </SettingsGroup>
@@ -1293,32 +1290,29 @@ export function CloudV3Settings({
         </p>
         <label className="gyro-auth-field">
           <span>Feature</span>
-          <select
-            className="gyro-cloud-input"
+          <SettingsChoice
+            aria-label="Feature"
             value={task}
-            onChange={(e) => {
-              setTask(e.target.value);
+            onValueChange={(value) => {
+              setTask(value);
               aiRequest.current = null;
               setAiConsent(false);
             }}
-          >
-            <option value="handoff-summary">Draft an agent handoff</option>
-            <option value="failure-explanation">
-              Explain a selected error
-            </option>
-            {wallet?.checkAllowed && (
-              <>
-                <option value="check-plan">Propose a check plan</option>
-                <option value="test-suggestions">Suggest tests</option>
-                <option value="change-review">Review a selected diff</option>
-                <option value="check-comparison">Compare check evidence</option>
-              </>
-            )}
-          </select>
+            options={[
+              { value: "handoff-summary", label: "Draft an agent handoff" },
+              { value: "failure-explanation", label: "Explain a selected error" },
+              ...(wallet?.checkAllowed ? [
+                { value: "check-plan", label: "Propose a check plan" },
+                { value: "test-suggestions", label: "Suggest tests" },
+                { value: "change-review", label: "Review a selected diff" },
+                { value: "check-comparison", label: "Compare check evidence" },
+              ] : []),
+            ]}
+          />
         </label>
         <label>
           <span>Selected context</span>
-          <textarea
+          <Textarea
             className="gyro-cloud-input gyro-v3-context"
             value={context}
             onChange={(e) => {
@@ -1338,8 +1332,8 @@ export function CloudV3Settings({
           allowance.
         </label>
         <div className="gyro-cloud-actions">
-          <button
-            className="gyro-secondary-button"
+          <Button
+            variant="outline"
             disabled={
               !aiConsent ||
               !context ||
@@ -1365,9 +1359,9 @@ export function CloudV3Settings({
             }
           >
             Request draft
-          </button>
-          <button
-            className="gyro-secondary-button"
+          </Button>
+          <Button
+            variant="outline"
             onClick={() =>
               void action(async () => {
                 setJob(await service("recover-last-job"));
@@ -1376,10 +1370,10 @@ export function CloudV3Settings({
             }
           >
             Recover last request
-          </button>
+          </Button>
           {job && (
-            <button
-              className="gyro-secondary-button"
+            <Button
+              variant="outline"
               onClick={() =>
                 void action(async () => {
                   setJob(await service("job", { jobId: job.id }));
@@ -1388,7 +1382,7 @@ export function CloudV3Settings({
               }
             >
               Check request
-            </button>
+            </Button>
           )}
         </div>
         {job && (
@@ -1404,8 +1398,8 @@ export function CloudV3Settings({
               <p key={n}>{i.text}</p>
             ))}
             <p>{job.result.limitations.join(" ")}</p>
-            <button
-              className="gyro-secondary-button"
+            <Button
+              variant="outline"
               onClick={() =>
                 void action(async () => {
                   await navigator.clipboard.writeText(
@@ -1422,7 +1416,7 @@ export function CloudV3Settings({
               }
             >
               Copy draft for review
-            </button>
+            </Button>
           </div>
         )}
       </SettingsGroup>
@@ -1436,8 +1430,8 @@ export function CloudV3Settings({
             value={d.revokedAt ? "Revoked" : undefined}
           >
             {!d.revokedAt && (
-              <button
-                className="gyro-secondary-button"
+              <Button
+                variant="outline"
                 onClick={() =>
                   void action(async () => {
                     if (revoking !== d.id) {
@@ -1451,7 +1445,7 @@ export function CloudV3Settings({
                 }
               >
                 {revoking === d.id ? "Confirm revoke" : "Revoke device"}
-              </button>
+              </Button>
             )}
           </SettingsRow>
         ))}
@@ -1463,8 +1457,8 @@ export function CloudV3Settings({
           label="Export your saved data"
           detail="A separate bounded, resumable path remains available when normal transfer allowances are exhausted and for 30 days after paid access ends."
         >
-          <button
-            className="gyro-secondary-button"
+          <Button
+            variant="outline"
             onClick={() =>
               void action(async () => {
                 const r = await service("begin-export");
@@ -1481,7 +1475,7 @@ export function CloudV3Settings({
             }
           >
             Prepare account export
-          </button>
+          </Button>
         </SettingsRow>
         {exportState && (
           <p role="status">
@@ -1566,7 +1560,7 @@ export function CloudV3Settings({
             ["Product and billing support", "Contact support", "https://usegyro.io/contact/"],
           ] as const).map(([label, actionLabel, url]) => (
             <SettingsRow key={url} label={label}>
-              <button type="button" className="gyro-secondary-button" onClick={() => void action(() => openExternal(url!))}>{actionLabel}</button>
+              <Button type="button" variant="outline" onClick={() => void action(() => openExternal(url!))}>{actionLabel}</Button>
             </SettingsRow>
           ))}
         </SettingsGroup>
@@ -1580,12 +1574,12 @@ export function CloudV3Settings({
         <p role="status">{error || "Checking Cloud availability…"}</p>
         {page === "billing" && contractRights}
         {error && (
-          <button
-            className="gyro-secondary-button"
+          <Button
+            variant="outline"
             onClick={() => void action(refresh)}
           >
             Try again
-          </button>
+          </Button>
         )}
       </SettingsSection>
     );
@@ -1632,7 +1626,7 @@ export function CloudV3Settings({
               >
                 <label className="gyro-auth-field">
                   <span>Email</span>
-                  <input
+                  <Input
                     className="gyro-cloud-input"
                     type="email"
                     autoComplete="email"
@@ -1652,7 +1646,7 @@ export function CloudV3Settings({
                 {codeRequested ? (
                   <label className="gyro-auth-field">
                     <span>Email code</span>
-                    <input
+                    <Input
                       className="gyro-cloud-input"
                       inputMode="numeric"
                       autoComplete="one-time-code"
@@ -1665,11 +1659,11 @@ export function CloudV3Settings({
                 <div className="gyro-cloud-actions">
                   {codeRequested ? (
                     <>
-                      <button className="gyro-primary-button" type="submit">
+                      <Button size="md" type="submit">
                         Verify code
-                      </button>
-                      <button
-                        className="gyro-secondary-button"
+                      </Button>
+                      <Button
+                        variant="outline"
                         type="button"
                         onClick={() => {
                           setCode("");
@@ -1678,13 +1672,13 @@ export function CloudV3Settings({
                         }}
                       >
                         Start sign-in again
-                      </button>
+                      </Button>
                     </>
                   ) : (
                     <>
                       {!cloudV3StagingBuild && (
-                        <button
-                          className="gyro-primary-button"
+                        <Button
+                          size="md"
                           type="button"
                           onClick={() =>
                             void action(async () => {
@@ -1699,14 +1693,10 @@ export function CloudV3Settings({
                           }
                         >
                           Subscribe to Cloud
-                        </button>
+                        </Button>
                       )}
-                      <button
-                        className={
-                          cloudV3StagingBuild
-                            ? "gyro-primary-button"
-                            : "gyro-secondary-button"
-                        }
+                      <Button
+                        variant={cloudV3StagingBuild ? "default" : "outline"}
                         type="button"
                         onClick={() =>
                           void action(async () => {
@@ -1721,11 +1711,11 @@ export function CloudV3Settings({
                         }
                       >
                         Sign in
-                      </button>
+                      </Button>
                     </>
                   )}
-                  <button
-                    className="gyro-secondary-button"
+                  <Button
+                    variant="outline"
                     type="button"
                     onClick={() =>
                       void action(async () => {
@@ -1740,7 +1730,7 @@ export function CloudV3Settings({
                     }
                   >
                     Reconnect this Mac
-                  </button>
+                  </Button>
                 </div>
               </form>
             </SettingsGroup>
@@ -1766,14 +1756,14 @@ export function CloudV3Settings({
           {workflows.billing()}
         </fieldset>
         {contractRights}
-        <button
+        <Button
           type="button"
-          className="gyro-secondary-button"
+          variant="outline"
           disabled={busy}
           onClick={() => void action(refresh)}
         >
           Refresh status
-        </button>
+        </Button>
       </SettingsSection>
     );
   return (
@@ -1849,68 +1839,73 @@ export function CloudV3Settings({
           {feedback}
         </CloudOverview>
       )}
-      <dialog
-        data-panel={panel}
-        ref={dialog}
-        className="gyro-cloud-dialog"
-        aria-labelledby="gyro-cloud-panel-title"
-        aria-describedby={
-          panel === "transfers" ? "gyro-cloud-pending-description" : undefined
-        }
-        onCancel={() => setPanel(null)}
-        onClose={() => setPanel(null)}
+      <Dialog.Root
+        open={panelOpen}
+        onOpenChange={setPanelOpen}
+        disablePointerDismissal
       >
-        <header className="gyro-cloud-dialog-header">
-          <h2 id="gyro-cloud-panel-title">
-            {panel === "transfers" && (
-              <CloudIcon size={24} aria-hidden="true" />
-            )}
-            {panel ? panelTitles[panel] : "Cloud"}
-          </h2>
-          <button
-            type="button"
-            className="gyro-cloud-icon-button"
-            aria-label="Close panel"
-            onClick={() => setPanel(null)}
-          >
-            <CloseIcon size={20} />
-          </button>
-        </header>
-        {feedback}
-        <fieldset className="gyro-cloud-fieldset gyro-settings-surface" disabled={busy}>
-          {panel === "devices" && (
-            <p>
-              Revoking a device stops its Cloud access. Local files stay on that
-              device. Confirm the device you want to revoke.
-            </p>
-          )}
-          {panel &&
-            (panel === "billing" && !usage ? (
-              <p>
-                Billing status is unavailable. Close this panel and refresh
-                Cloud status.
-              </p>
-            ) : (
-              workflows[panel]()
-            ))}
-        </fieldset>
-        {readReport && (
-          <div>
-            <h3>Saved Check report · read-only</h3>
-            <pre>{readReport.text}</pre>
-            <p>
-              This is a saved observation. Re-run checks for current evidence.
-            </p>
-            <button
-              type="button"
-              className="gyro-secondary-button"
-              onClick={() => setReadReport(null)}
+        <Dialog.Content
+          size="lg"
+          data-panel={panel}
+          className="gyro-cloud-dialog gyro-cloud-v3-dialog"
+          aria-describedby={
+            panel === "transfers" ? "gyro-cloud-pending-description" : undefined
+          }
+        >
+          <header className="gyro-cloud-dialog-header">
+            <Dialog.Title>
+              {panel === "transfers" && (
+                <CloudIcon size={24} aria-hidden="true" />
+              )}
+              {panel ? panelTitles[panel] : "Cloud"}
+            </Dialog.Title>
+            <Dialog.Close
+              className="gyro-cloud-icon-button"
+              aria-label="Close panel"
             >
-              Close report
-            </button>
-          </div>
-        )}
-      </dialog>
+              <CloseIcon size={20} />
+            </Dialog.Close>
+          </header>
+          {panel === "connection" ? <Dialog.HeroBand><WorkbenchScene kind="cloud" /></Dialog.HeroBand> : null}
+          {feedback}
+          <fieldset
+            className="gyro-cloud-fieldset gyro-settings-surface"
+            disabled={busy}
+          >
+            {panel === "devices" && (
+              <p>
+                Revoking a device stops its Cloud access. Local files stay on that
+                device. Confirm the device you want to revoke.
+              </p>
+            )}
+            {panel &&
+              (panel === "billing" && !usage ? (
+                <p>
+                  Billing status is unavailable. Close this panel and refresh
+                  Cloud status.
+                </p>
+              ) : (
+                workflows[panel]()
+              ))}
+          </fieldset>
+          {readReport && (
+            <div>
+              <h3>Saved Check report · read-only</h3>
+              <pre>{readReport.text}</pre>
+              <p>
+                This is a saved observation. Re-run checks for current evidence.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setReadReport(null)}
+              >
+                Close report
+              </Button>
+            </div>
+          )}
+        </Dialog.Content>
+      </Dialog.Root>
     </>
   );
 }

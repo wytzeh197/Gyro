@@ -714,6 +714,7 @@ export function BrowserTracePanel({
             <div className="gyro-trace-picker">
               <ComposerReviewerPicker
                 textarea={questionRef}
+                inline
                 normalChat
                 options={options.filter(
                   (model) =>

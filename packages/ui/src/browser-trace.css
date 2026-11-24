@@ -84,12 +84,10 @@
   width: 14px;
   height: 14px;
 }
-/* The picker's completion menu sits inline in the panel, not as a popover. */
-.gyro-trace-picker > [role="dialog"] {
-  position: static;
-  width: 100%;
-  max-width: 100%;
-  transform: none;
+.gyro-trace-picker .gyro-reviewer-menu {
+  inline-size: 100%;
+  max-inline-size: 100%;
+  max-block-size: min(28rem, calc(100dvh - 180px));
 }
 .gyro-trace-host {
   display: flex;

@@ -1,3 +1,4 @@
+import { Button } from "../primitives/button";
 import { WorkflowBindingFields } from "./binding-fields";
 import { useEffect, useRef, useState } from "react";
 import type {
@@ -302,13 +303,13 @@ export function WorkflowSetupPanel({
       {error ? <p role="alert">{error}</p> : null}
       <div className="gyro-workflow-actions">
         {!checked ? (
-          <button
-            className="gyro-primary-button"
+          <Button
+            size="sm"
             disabled={!setup || busy || stale}
             onClick={() => void act("preflight")}
           >
             {busy ? "Checking…" : "Check setup"}
-          </button>
+          </Button>
         ) : null}
         <button
           disabled={!setup || busy || stale}
@@ -317,9 +318,9 @@ export function WorkflowSetupPanel({
           Save setup
         </button>
         {checked ? (
-          <button
+          <Button
             ref={primaryAction}
-            className="gyro-primary-button"
+            size="sm"
             disabled={!checked || busy || stale || scheduleChanged}
             onClick={() =>
               void act(
@@ -334,7 +335,7 @@ export function WorkflowSetupPanel({
                 : schedule === "manual"
                   ? "Start workflow"
                   : "Create schedule"}
-          </button>
+          </Button>
         ) : null}
         <button disabled={busy} onClick={onClose}>
           Back

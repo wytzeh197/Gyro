@@ -1,7 +1,7 @@
 //! The local git side of a server run: snapshot, push the base, fetch the
 //! result. The user's index, working tree, branches and stash are never
 //! touched; the only local change is a fetched `gyro/cloud/{id}` branch.
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use sha2::{Digest, Sha256};
 use std::{
     path::{Path, PathBuf},
@@ -172,10 +172,20 @@ pub async fn push(
 
 /// Fetches `branch` (a full `refs/heads/gyro/cloud/…` ref) to the same name
 /// and returns the commit it now points at.
-pub async fn fetch(repo: &Path, url: &str, ssh_command: &str, branch: &str) -> Result<String> {
+pub async fn fetch(
+    repo: &Path,
+    url: &str,
+    ssh_command: &str,
+    branch: &str,
+    expected: &str,
+) -> Result<String> {
     if !branch.starts_with("refs/heads/gyro/cloud/") {
         bail!("Invalid result branch");
     }
+    ensure!(
+        matches!(expected.len(), 40 | 64) && expected.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "Invalid result commit"
+    );
     let mut command = git(repo);
     command.env("GIT_SSH_COMMAND", ssh_command).args([
         "fetch",
@@ -184,12 +194,38 @@ pub async fn fetch(repo: &Path, url: &str, ssh_command: &str, branch: &str) -> R
         "--no-write-fetch-head",
         "--",
         url,
-        &format!("+{branch}:{branch}"),
+        branch,
     ]);
     output(command, "fetch the result from the server").await?;
+
+    let mut command = git(repo);
+    command.args(["cat-file", "-t", expected]);
+    ensure!(
+        output(command, "read the recorded result commit").await? == "commit",
+        "The recorded result is not a Git commit"
+    );
+
+    // Fetching the object first lets us create the exact branch once. A retry
+    // is harmless, while a pre-existing branch with local edits stays intact.
+    let mut create = git(repo);
+    create.args([
+        "update-ref",
+        "--no-deref",
+        branch,
+        expected,
+        &"0".repeat(expected.len()),
+    ]);
+    if output(create, "create the result branch").await.is_ok() {
+        return Ok(expected.into());
+    }
     let mut command = git(repo);
     command.args(["rev-parse", "--verify", &format!("{branch}^{{commit}}")]);
-    output(command, "read the fetched result").await
+    let current = output(command, "read the existing result branch").await?;
+    ensure!(
+        current == expected,
+        "The result branch already has a different commit on this Mac"
+    );
+    Ok(current)
 }
 
 /// A stable server-side name for a local repo: its folder name plus a short

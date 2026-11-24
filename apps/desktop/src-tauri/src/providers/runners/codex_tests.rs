@@ -289,7 +289,7 @@ fn codex_app_server_policy_keeps_gated_edits_read_only() {
     let workspace = Path::new("/tmp/gyro-workspace");
     let (approval, sandbox, policy) =
         codex_app_server_policy(&ChatMode::Normal, true, true, false, workspace);
-    assert_eq!(approval, "untrusted");
+    assert_eq!(approval, "on-request");
     assert_eq!(sandbox, "read-only");
     assert_eq!(policy["type"], "readOnly");
     assert_eq!(policy["networkAccess"], false);
@@ -309,13 +309,14 @@ fn codex_app_server_policy_keeps_gated_edits_read_only() {
 
     let (approval, sandbox, policy) =
         codex_app_server_policy(&ChatMode::Normal, true, false, true, workspace);
-    assert_eq!(approval, "untrusted");
-    assert_eq!(sandbox, "workspace-write");
-    assert_eq!(policy["type"], "workspaceWrite");
+    assert_eq!(approval, "on-request");
+    assert_eq!(sandbox, "read-only");
+    assert_eq!(policy["type"], "readOnly");
+    assert_eq!(policy["networkAccess"], false);
 
     let (approval, sandbox, policy) =
         codex_app_server_policy(&ChatMode::Plan, false, false, false, workspace);
-    assert_eq!(approval, "untrusted");
+    assert_eq!(approval, "on-request");
     assert_eq!(sandbox, "read-only");
     assert_eq!(policy["type"], "readOnly");
     assert_eq!(policy["networkAccess"], false);

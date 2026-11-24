@@ -13,13 +13,16 @@
    Shared values have one authority; state and pane geometry stay with their rules. */
 :root {
   --gyro-chat-content-width: 760px;
-  --gyro-chat-gutter: calc(24px * var(--gyro-ui-scale, 1));
+  --gyro-chat-rim: 0px;
+  --gyro-chat-header-overlap: 0px;
+  --gyro-transcript-fade-midpoint-opacity: 50%;
+  --gyro-chat-gutter: calc(24px * var(--gyro-ui-scale, 1) * var(--gyro-density-scale, 1));
   --gyro-chat-text-size: calc(15px * var(--gyro-ui-scale, 1));
   --gyro-chat-text-line: 1.6;
   --gyro-chat-small-size: calc(13px * var(--gyro-ui-scale, 1));
   --gyro-chat-meta-size: calc(12px * var(--gyro-ui-scale, 1));
   --gyro-chat-radius-card: var(--gyro-radius-lg);
-  --gyro-chat-turn-gap: calc(24px * var(--gyro-ui-scale, 1));
+  --gyro-chat-turn-gap: calc(24px * var(--gyro-ui-scale, 1) * var(--gyro-density-scale, 1));
   --gyro-chat-block-gap: calc(12px * var(--gyro-ui-scale, 1));
   --gyro-chat-space-1: calc(4px * var(--gyro-ui-scale, 1));
   --gyro-chat-space-2: calc(8px * var(--gyro-ui-scale, 1));
@@ -65,13 +68,15 @@
   border: 1px solid var(--gyro-chat-hairline);
 }
 .gyro-user-message-bubble {
-  width: 100%;
-  max-width: 100%;
-  padding: var(--gyro-chat-block-gap) var(--gyro-chat-space-4);
-  background: var(--gyro-chat-raised);
+  width: fit-content;
+  max-width: 80%;
+  justify-self: end;
+  margin-inline-start: auto;
+  padding: 0.625rem 0.875rem;
+  background: var(--gyro-user-message);
   border: 0;
-  border-radius: var(--gyro-chat-radius-card);
-  font-size: var(--gyro-chat-text-size);
+  border-radius: var(--gyro-radius-xl);
+  font-size: var(--gyro-text-chat);
   line-height: var(--gyro-chat-text-line);
   box-shadow: none;
 }
@@ -168,7 +173,9 @@
 :root[data-theme]
   .gyro-chat-surface:is(.is-thread, .is-empty)
   .gyro-chat-transcript {
-  padding-top: var(--gyro-chat-turn-gap);
+  padding-top: calc(
+    var(--gyro-chat-turn-gap) + var(--gyro-chat-header-overlap)
+  );
   text-align: left;
 }
 
@@ -961,8 +968,8 @@
   flex: none;
 }
 .gyro-send-button > .gyro-send-arrow {
-  height: 100%;
-  width: 100%;
+  height: var(--gyro-icon-standard);
+  width: var(--gyro-icon-standard);
 }
 
 :root[data-theme]
@@ -1494,7 +1501,7 @@
   min-width: 0;
   max-width: none;
   padding: var(--gyro-space-card);
-  border-radius: var(--gyro-radius-xl);
+  border-radius: var(--gyro-radius-md);
   overflow: visible;
 }
 :root[data-theme]
@@ -1542,7 +1549,7 @@
   .gyro-composer-bar
   .gyro-model-chip
   .gyro-provider-logo.is-anthropic {
-  color: var(--gyro-provider-anthropic);
+  color: var(--gyro-claude-mark-ink);
 }
 :root[data-theme]
   .gyro-composer-bar
@@ -1641,22 +1648,7 @@
     var(--gyro-premium-ease);
 }
 :root
-  :is(
-    .gyro-chat-switcher-menu,
-    .gyro-account-menu,
-    .gyro-explorer-context-menu,
-    .gyro-sidebar-new-session-menu,
-    .gyro-chat-message-queue-menu,
-    .gyro-chat-companion-menu,
-    .gyro-chat-environment-popover,
-    .gyro-environment-branch-menu,
-    .gyro-terminal-diff-popover,
-    .gyro-scm-branch-menu,
-    .gyro-terminal-corner-menu,
-    .gyro-workspace-preparation-popover,
-    .gyro-composer-slash-menu,
-    .gyro-composer-command-popover
-  ) {
+  :is(.gyro-account-menu, .gyro-explorer-context-menu, .gyro-sidebar-new-session-menu, .gyro-chat-companion-menu, .gyro-chat-environment-popover, .gyro-environment-branch-menu, .gyro-terminal-diff-popover, .gyro-scm-branch-menu, .gyro-terminal-corner-menu, .gyro-workspace-preparation-popover, .gyro-composer-slash-menu, .gyro-composer-command-popover) {
   animation: gyro-anchored-surface-in var(--gyro-premium-motion)
     var(--gyro-premium-ease);
 }
@@ -1683,7 +1675,7 @@
   button
   > svg {
   flex: none;
-  stroke-width: 1.75;
+  stroke-width: 1.9;
 }
 :root[data-theme]
   :is(
@@ -1777,16 +1769,6 @@
   button:focus-visible {
   outline: 2px solid var(--gyro-focus-ring);
   outline-offset: -2px;
-}
-:root[data-theme] .gyro-chat-empty-drag-region > span {
-  align-items: center;
-  color: var(--gyro-muted);
-  display: flex;
-  font-size: var(--gyro-font-support);
-  font-weight: 500;
-  height: 48px;
-  padding-inline: var(--gyro-chat-space-4);
-  pointer-events: none;
 }
 :root[data-theme] .gyro-chat-grid.has-multiple-panes > .gyro-chat-grid-slot {
   border-color: var(--gyro-border-soft);
@@ -1925,7 +1907,7 @@
 :root[data-theme] .gyro-chat-surface,
 :root[data-theme] .gyro-chat-companion,
 :root[data-theme] .gyro-chat-companion-host {
-  --gyro-chat-header-height: calc(48px - var(--gyro-chat-rim, 0px));
+  --gyro-chat-header-height: calc(var(--gyro-window-header-height) - var(--gyro-chat-rim));
   --gyro-chat-canvas-radius: var(--gyro-chat-radius-card);
 }
 :root[data-theme]
@@ -1933,7 +1915,7 @@
   .gyro-chat-thread-topbar {
   gap: var(--gyro-chat-block-gap);
   padding-right: calc(var(--gyro-chat-space-1) * 2.5);
-  box-shadow: inset 0 -1px color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  border-bottom: var(--gyro-chat-header-hairline-width) solid var(--gyro-border-light);
 }
 :root[data-theme]
   .gyro-app-shell:is(.is-thread-layout, .is-settings-layout)
@@ -2246,26 +2228,42 @@
 }
 
 @supports (animation-timeline: scroll()) {
+  :root[data-theme]
+    .gyro-app-shell.is-thread-layout
+    .gyro-chat-surface.is-thread
+    > .gyro-chat-thread-canvas {
+    /* Let messages fade behind the session title without adding a divider. */
+    --gyro-chat-header-overlap: calc(
+      var(--gyro-chat-header-height) / 2 + var(--gyro-chat-space-1)
+    );
+    --gyro-transcript-fade-midpoint-opacity: 55%;
+    margin-top: calc(-1 * var(--gyro-chat-header-overlap));
+  }
+
   :root[data-theme] .gyro-chat-surface.is-thread .gyro-chat-transcript {
     --gyro-edge-fade-size: calc(22px * var(--gyro-ui-scale, 1));
+    --gyro-transcript-top-fade: calc(
+      var(--gyro-edge-fade-top) + var(--gyro-chat-header-overlap)
+    );
+    --gyro-transcript-mask: linear-gradient(
+      to bottom,
+      transparent,
+      color-mix(
+        in srgb,
+        black var(--gyro-transcript-fade-midpoint-opacity),
+        transparent
+      ) calc(var(--gyro-transcript-top-fade) / 2),
+      black var(--gyro-transcript-top-fade),
+      black calc(100% - var(--gyro-edge-fade-bottom)),
+      transparent
+    );
     animation:
       gyro-edge-fade-top linear both,
       gyro-edge-fade-bottom linear both;
     animation-timeline: scroll(self), scroll(self);
-    -webkit-mask-image: linear-gradient(
-      to bottom,
-      transparent,
-      black var(--gyro-edge-fade-top),
-      black calc(100% - var(--gyro-edge-fade-bottom)),
-      transparent
-    );
-    mask-image: linear-gradient(
-      to bottom,
-      transparent,
-      black var(--gyro-edge-fade-top),
-      black calc(100% - var(--gyro-edge-fade-bottom)),
-      transparent
-    );
+    scroll-padding-top: var(--gyro-chat-header-overlap);
+    -webkit-mask-image: var(--gyro-transcript-mask);
+    mask-image: var(--gyro-transcript-mask);
   }
 }
 :root[data-theme]
@@ -2448,7 +2446,6 @@
     var(--gyro-companion-control-height) + 2 * var(--gyro-space-standard)
   );
   padding: var(--gyro-space-standard) var(--gyro-companion-content-inset);
-  gap: var(--gyro-space-compact);
   grid-template-columns: auto minmax(0, 1fr) var(
       --gyro-companion-control-height
     );
@@ -2475,7 +2472,6 @@
   .gyro-url-bar {
   height: var(--gyro-companion-control-height);
   min-height: var(--gyro-companion-control-height);
-  border-radius: var(--gyro-radius-md);
   background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
   padding-left: var(--gyro-space-standard);
 }
@@ -2619,7 +2615,6 @@
 
 :root[data-theme] .gyro-chat-companion-content .gyro-side-chat-transcript {
   padding: var(--gyro-companion-content-inset);
-  gap: var(--gyro-space-section);
 }
 
 :root[data-theme]
@@ -2632,9 +2627,7 @@
 }
 
 :root[data-theme] .gyro-chat-companion-content .gyro-side-chat-empty h2 {
-  font-size: var(--gyro-font-lead);
   font-weight: 600;
-  line-height: 1.4;
 }
 :root[data-theme]
   :is(.gyro-chat-surface, .gyro-chat-companion-host-pane)
@@ -2785,7 +2778,6 @@
     var(--gyro-companion-control-height) + var(--gyro-space-standard)
   );
   gap: var(--gyro-space-standard);
-  border-radius: var(--gyro-radius-md);
   padding-inline: var(--gyro-space-standard);
 }
 
@@ -2863,7 +2855,7 @@
 :root[data-theme] .gyro-composer-popover.gyro-chat-context-picker {
   background: var(--gyro-premium-panel);
   border-color: var(--gyro-premium-hairline-strong);
-  border-radius: var(--gyro-radius-xl);
+  border-radius: var(--gyro-radius-md);
   box-sizing: border-box;
   color: var(--gyro-text);
   gap: calc(var(--gyro-space-compact) / 2);
@@ -2903,7 +2895,7 @@
 :root[data-theme] .gyro-chat-context-picker .gyro-composer-menu-primary > svg {
   color: var(--gyro-muted);
   flex: none;
-  stroke-width: 1.75;
+  stroke-width: 1.9;
 }
 
 :root[data-theme] .gyro-chat-context-picker .gyro-composer-menu-item.is-active {
@@ -5840,7 +5832,7 @@
   .gyro-chat-surface.is-thread.has-plan {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows:
-      var(--gyro-chat-header-height, 48px) minmax(0, 1fr)
+      var(--gyro-chat-header-height, var(--gyro-window-header-height)) minmax(0, 1fr)
       minmax(320px, 48vh);
   }
 
@@ -6470,6 +6462,15 @@
   max-width: 100%;
 }
 
+.gyro-response-quote {
+  display: grid;
+  gap: var(--gyro-chat-space-2);
+  margin: 0;
+  padding-inline-start: var(--gyro-chat-block-gap);
+  border-inline-start: 2px solid var(--gyro-border-heavy);
+  color: var(--gyro-text-secondary);
+}
+
 .gyro-response-streaming-text {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -6508,10 +6509,9 @@
 
 .gyro-response-inline-code,
 .gyro-response-command-list code {
-  background: var(--gyro-control-bg);
+  background: var(--gyro-user-message);
   border-radius: var(--gyro-radius-sm);
-  box-shadow: inset 0 0 0 1px var(--gyro-border-soft);
-  color: var(--gyro-text);
+  color: var(--gyro-text-primary);
   font-family: var(--gyro-font-mono);
   /* A ladder step rather than 0.92em: mono renders optically larger than the
      14px body, and a fractional size renders soft on a non-retina display. */
@@ -6519,7 +6519,7 @@
 }
 
 .gyro-response-inline-code {
-  padding: 0.08em 0.38em 0.12em;
+  padding: 0.1em 0.35em;
 }
 
 .gyro-response-command-list {
@@ -6550,6 +6550,7 @@
   text-underline-offset: 3px;
 }
 .gyro-response-link-mark {
+  color: var(--gyro-text-primary);
   height: calc(13px * var(--gyro-ui-scale, 1));
   margin-right: calc(var(--gyro-chat-space-1) * 1.25);
   vertical-align: -0.15em;
@@ -6569,11 +6570,16 @@
   font: inherit;
 }
 
+.gyro-response-code-block[data-wrap="true"] {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .gyro-response-code {
   min-width: 0;
-  border: 1px solid var(--gyro-chat-hairline);
-  border-radius: var(--gyro-chat-radius-card);
-  background: var(--gyro-chat-raised);
+  border: 1px solid var(--gyro-border-light);
+  border-radius: var(--gyro-radius-lg);
+  background: var(--gyro-code-bg);
 }
 
 .gyro-response-code-heading {
@@ -6596,12 +6602,33 @@
   white-space: nowrap;
 }
 
+.gyro-response-code-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-compact);
+}
+
+.gyro-response-code-actions button[aria-pressed="true"] { background: var(--gyro-control-active); }
+
 .gyro-response-table-wrap {
   max-width: 100%;
   min-width: 0;
   overflow-x: auto;
   border: 1px solid var(--gyro-chat-hairline);
   border-radius: var(--gyro-chat-radius-card);
+}
+
+.gyro-response-table-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--gyro-chat-space-1);
+}
+
+.gyro-response-table-copy { opacity: 0; }
+.gyro-response-table-card:is(:hover, :focus-within) .gyro-response-table-copy { opacity: 1; }
+@media (hover: none) {
+  .gyro-response-table-copy { opacity: 1; }
 }
 
 .gyro-response-table {
@@ -6622,19 +6649,15 @@
 }
 
 .gyro-response-table th {
-  background: var(--gyro-chat-raised);
-  border-bottom-color: var(--gyro-chat-hairline);
-  color: var(--gyro-text);
-  font-weight: 600;
+  background: var(--gyro-surface-soft);
+  border-bottom-color: var(--gyro-border-heavy);
+  color: var(--gyro-text-secondary);
+  font-weight: var(--gyro-weight-medium);
   white-space: nowrap;
 }
 
 .gyro-response-table tbody tr:last-child td {
   border-bottom: none;
-}
-
-.gyro-response-table tbody tr:nth-child(even) {
-  background: var(--gyro-chat-raised);
 }
 
 .gyro-response-actions {
@@ -6803,28 +6826,6 @@
 .gyro-composer-menu-remove:focus-visible {
   background: color-mix(in srgb, var(--gyro-danger) 12%, transparent);
   color: var(--gyro-danger);
-}
-
-.gyro-chat-close-card,
-.gyro-chat-delete-card {
-  width: min(380px, calc(100vw - 40px));
-}
-
-.gyro-chat-close-actions {
-  flex-wrap: wrap;
-}
-
-.gyro-chat-delete-card .gyro-terminal-terminate-heading svg {
-  color: var(--gyro-danger);
-}
-
-.gyro-chat-delete-card .gyro-terminal-terminate-actions button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
-.gyro-chat-delete-note {
-  color: var(--gyro-warn);
 }
 
 .gyro-chat-load-earlier {
@@ -7046,7 +7047,7 @@
 
 .gyro-composer-popover,
 .gyro-provider-picker .gyro-composer-popover {
-  border-radius: var(--gyro-radius-lg);
+  border-radius: var(--gyro-radius-md);
 }
 .gyro-chat-surface:not(.is-empty),
 .gyro-chat-thread-canvas,
@@ -7315,7 +7316,7 @@
      side even inside a ~460px sidebar chat, so empty margins looked huge and
      clicks beside the composer felt like a big stop target. */
   padding: calc(var(--gyro-chat-space-1) * 2.5) var(--gyro-chat-gutter)
-    var(--gyro-chat-space-4);
+    calc(var(--gyro-chat-space-1) * 2);
 }
 
 .gyro-chat-composer-dock .gyro-composer-shell.is-hero.has-provider {
@@ -7943,10 +7944,32 @@
   display: none;
 }
 
-.gyro-composer-live-changes .gyro-chat-run-change-summary-trigger {
-  background: var(--gyro-pane);
-  border-color: var(--gyro-border-soft);
+/* The live pill sits on the composer's tier, not the gray control tier: same
+   raised surface, hairline and soft lift as the input card below it, so it
+   reads as part of the composer in both themes. */
+:root[data-theme] .gyro-composer-live-changes .gyro-chat-run-change-summary-trigger {
+  background: var(--gyro-surface-raised);
+  border-color: var(--gyro-chat-hairline, var(--gyro-border));
+  box-shadow: 0 2px 6px var(--gyro-premium-shadow-soft);
   min-height: 34px;
+}
+
+:root[data-theme]
+  .gyro-composer-live-changes
+  .gyro-chat-run-change-summary-trigger:hover {
+  background: color-mix(
+    in srgb,
+    var(--gyro-surface-raised) 94%,
+    var(--gyro-text) 6%
+  );
+  border-color: var(--gyro-premium-hairline-strong);
+}
+
+:root[data-theme]
+  .gyro-composer-live-changes
+  .gyro-chat-run-change-summary-trigger
+  strong {
+  color: var(--gyro-text);
 }
 
 .gyro-chat-run-change-summary.is-complete {
@@ -8264,7 +8287,7 @@
 }
 
 :root[data-theme="light"] .gyro-chat-run-change-summary-trigger {
-  background: var(--gyro-control-bg);
+  background: var(--gyro-surface);
   border-color: var(--gyro-border);
   color: var(--gyro-muted);
 }
@@ -8480,7 +8503,7 @@ button.gyro-response-changed-files:hover {
 }
 
 .gyro-chat-surface.is-thread.has-environment:has(> .gyro-chat-companion) {
-  grid-template-rows: var(--gyro-chat-header-height, 48px) minmax(0, 1fr);
+  grid-template-rows: var(--gyro-chat-header-height, var(--gyro-window-header-height)) minmax(0, 1fr);
 }
 
 .gyro-chat-surface.is-thread.has-environment:has(> .gyro-chat-companion)
@@ -8494,6 +8517,10 @@ button.gyro-response-changed-files:hover {
   border-width: 0 0 0 1px;
   grid-column: 2;
   grid-row: 1;
+}
+
+.gyro-chat-surface.is-empty.has-companion > .gyro-chat-empty-drag-region {
+  grid-column: 1 / 2;
 }
 
 .gyro-chat-companion {
@@ -8791,18 +8818,13 @@ button.gyro-response-changed-files:hover {
   position: relative;
 }
 
-.gyro-chat-companion-menu.is-header {
-  min-width: 208px;
-  top: calc(100% + 8px);
+.gyro-chat-overflow-menu {
+  min-inline-size: min(13rem, var(--available-width, 13rem));
 }
 .gyro-chat-surface.is-tiled
   .gyro-thread-topbar-actions
   .gyro-chat-surface-menu-anchor {
   position: static;
-}
-
-.gyro-chat-surface-controls .gyro-chat-companion-menu.is-header button > span {
-  display: block;
 }
 
 .gyro-chat-companion-content {
@@ -8922,17 +8944,6 @@ button.gyro-response-changed-files:hover {
   from {
     opacity: 0;
     transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes gyro-chat-content-reveal {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
   }
   to {
     opacity: 1;
@@ -9222,7 +9233,7 @@ button.gyro-response-changed-files:hover {
   .gyro-chat-surface.is-thread.has-environment {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows:
-      var(--gyro-chat-header-height, 48px) minmax(0, 1fr)
+      var(--gyro-chat-header-height, var(--gyro-window-header-height)) minmax(0, 1fr)
       minmax(260px, 40vh);
   }
 
@@ -9303,7 +9314,7 @@ button.gyro-response-changed-files:hover {
 
 .gyro-user-message-bubble {
   box-sizing: border-box;
-  color: var(--gyro-text);
+  color: var(--gyro-text-primary);
 }
 
 .gyro-user-message-meta {
@@ -9439,11 +9450,6 @@ button.gyro-response-changed-files:hover {
   scrollbar-width: none;
 }
 
-.gyro-chat-message-queue:has(.gyro-chat-message-queue-menu) {
-  overflow: visible;
-  z-index: 3;
-}
-
 .gyro-chat-message-queue-list {
   display: grid;
   gap: 0;
@@ -9560,62 +9566,6 @@ button.gyro-response-changed-files:hover {
 
 .gyro-chat-message-queue-more:hover {
   color: var(--gyro-text);
-}
-
-.gyro-chat-message-queue-menu {
-  background: var(--gyro-surface-raised);
-  border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: var(--gyro-radius-md);
-  box-shadow:
-    0 14px 32px color-mix(in srgb, var(--gyro-shadow) 30%, transparent),
-    inset 0 1px 0 var(--gyro-premium-inset-highlight);
-  display: grid;
-  gap: calc(var(--gyro-chat-space-1) * 0.5);
-  min-width: calc(160px * var(--gyro-ui-scale, 1));
-  padding: var(--gyro-chat-space-1);
-  position: absolute;
-  right: 0;
-  z-index: 12;
-}
-
-.gyro-chat-message-queue-menu.is-down {
-  top: calc(100% + 2px);
-}
-
-.gyro-chat-message-queue-menu.is-up {
-  bottom: calc(100% + var(--gyro-chat-space-2));
-  transform-origin: bottom right;
-}
-
-.gyro-chat-message-queue article .gyro-chat-message-queue-menu > button {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-text);
-  display: grid;
-  font: inherit;
-  font-size: var(--gyro-font-support);
-  gap: var(--gyro-chat-space-2);
-  grid-template-columns: 16px minmax(0, 1fr);
-  min-height: var(--gyro-control-height);
-  justify-content: stretch;
-  padding: 0 var(--gyro-chat-space-2);
-  text-align: left;
-  width: 100%;
-}
-
-.gyro-chat-message-queue article .gyro-chat-message-queue-menu > button:is(:hover, :focus-visible) {
-  background: var(--gyro-control-hover);
-}
-
-.gyro-chat-message-queue-menu > button svg {
-  height: 14px;
-  width: 14px;
-}
-
-.gyro-chat-message-queue article .gyro-chat-message-queue-menu > button.is-danger {
-  color: var(--gyro-danger);
 }
 /* While a question or plan decision is open, the bar under the text box keeps
    only what serves the answer: model, effort, voice and send. */
@@ -9958,7 +9908,7 @@ button.gyro-response-changed-files:hover {
 
 .gyro-app-shell.is-sidebar-hidden.is-thread-layout
   .gyro-chat-surface.is-thread:not(.is-tiled) {
-  grid-template-rows: var(--gyro-chat-header-height, 48px) minmax(0, 1fr);
+  grid-template-rows: var(--gyro-chat-header-height, var(--gyro-window-header-height)) minmax(0, 1fr);
 }
 
 .gyro-app-shell.is-sidebar-hidden.is-thread-layout
@@ -10002,7 +9952,6 @@ button.gyro-response-changed-files:hover {
   align-items: center;
   display: inline-flex;
   flex: 0 0 auto;
-  position: relative;
 }
 
 .gyro-composer-context-wheel {
@@ -10033,16 +9982,20 @@ button.gyro-response-changed-files:hover {
   border: 1px solid var(--gyro-premium-hairline-strong);
   border-radius: var(--gyro-radius-sm);
   bottom: calc(100% + 12px);
+  box-sizing: border-box;
   box-shadow: 0 8px 24px
     color-mix(in srgb, var(--gyro-chat-media-shade) 22%, transparent);
   color: var(--gyro-premium-text);
   font-size: var(--gyro-chat-meta-size);
   line-height: 1.4;
+  max-width: 100%;
   opacity: 0;
+  overflow: hidden;
   padding: 0;
   pointer-events: none;
   position: absolute;
-  right: 0;
+  /* The toolbar bounds the tooltip even when the meter sits near the pane edge. */
+  inset-inline-end: 0;
   transform: translateY(3px);
   transition:
     opacity var(--gyro-context-tooltip-duration) var(--gyro-premium-ease),
@@ -10050,6 +10003,7 @@ button.gyro-response-changed-files:hover {
     visibility var(--gyro-context-tooltip-duration) var(--gyro-premium-ease);
   visibility: hidden;
   white-space: normal;
+  width: 248px;
   z-index: 124;
 }
 
@@ -10163,19 +10117,6 @@ button.gyro-response-changed-files:hover {
   );
 }
 
-.gyro-composer-context-tooltip::after {
-  background: var(--gyro-premium-panel);
-  border-bottom: 1px solid var(--gyro-premium-hairline-strong);
-  border-right: 1px solid var(--gyro-premium-hairline-strong);
-  bottom: -4px;
-  content: "";
-  height: 7px;
-  position: absolute;
-  right: 6px;
-  transform: rotate(45deg);
-  width: 7px;
-}
-
 .gyro-composer-context-meter:hover .gyro-composer-context-tooltip,
 .gyro-composer-context-meter:focus-within .gyro-composer-context-tooltip {
   --gyro-context-tooltip-duration: var(--gyro-premium-motion);
@@ -10199,7 +10140,7 @@ button.gyro-response-changed-files:hover {
 }
 
 .gyro-composer-context-track {
-  stroke: color-mix(in srgb, var(--gyro-premium-muted) 30%, transparent);
+  stroke: color-mix(in srgb, var(--gyro-premium-muted) 18%, transparent);
 }
 
 .gyro-composer-context-progress {
@@ -10208,6 +10149,92 @@ button.gyro-response-changed-files:hover {
 
 .gyro-composer-usage-progress {
   stroke: var(--gyro-ink-bg);
+}
+
+.gyro-composer-usage-progress.is-warning {
+  stroke: var(--gyro-warn);
+}
+
+.gyro-composer-usage-progress.is-critical {
+  stroke: var(--gyro-danger);
+}
+
+/* Low plan usage: the ring grows into a pill that says what is left. */
+.gyro-composer-context-meter.has-usage-alert {
+  --gyro-usage-alert-color: var(--gyro-warn);
+  border: 1px solid
+    color-mix(in srgb, var(--gyro-usage-alert-color) 45%, transparent);
+  border-radius: var(--gyro-radius-pill);
+  gap: calc(var(--gyro-chat-space-1) * 1.25);
+  padding: calc(var(--gyro-chat-space-1) * .5) calc(var(--gyro-chat-space-1) * 2) calc(var(--gyro-chat-space-1) * .5)
+    calc(var(--gyro-chat-space-1) * 1);
+}
+
+.gyro-composer-context-meter.is-usage-critical {
+  --gyro-usage-alert-color: var(--gyro-danger);
+}
+
+.gyro-composer-usage-alert {
+  color: var(--gyro-usage-alert-color);
+  font-size: var(--gyro-font-support);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  line-height: 1;
+  /* Anchors the hover X; the meter itself stays unpositioned so its tooltip
+     keeps measuring against the toolbar. */
+  position: relative;
+  white-space: nowrap;
+}
+
+/* Hover the pill to reveal an X on its top-right corner that folds it back
+   into the plain ring. */
+.gyro-composer-usage-alert-dismiss {
+  align-items: center;
+  appearance: none;
+  background: var(--gyro-premium-panel);
+  border: 1px solid
+    color-mix(in srgb, var(--gyro-usage-alert-color) 45%, transparent);
+  border-radius: var(--gyro-radius-pill);
+  box-sizing: border-box;
+  color: var(--gyro-premium-muted);
+  cursor: pointer;
+  display: inline-flex;
+  height: 14px;
+  justify-content: center;
+  opacity: 0;
+  padding: 0;
+  pointer-events: none;
+  position: absolute;
+  /* Out past the pill's padding and border onto its corner. */
+  right: calc(var(--gyro-chat-space-1) * -2 - 8px);
+  top: calc(var(--gyro-chat-space-1) * -.5 - 9px);
+  transition: opacity var(--gyro-premium-motion) var(--gyro-premium-ease);
+  width: 14px;
+}
+
+.gyro-composer-context-meter:hover .gyro-composer-usage-alert-dismiss,
+.gyro-composer-usage-alert-dismiss:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.gyro-composer-usage-alert-dismiss:hover {
+  color: var(--gyro-premium-text);
+}
+
+.gyro-composer-usage-pace {
+  color: var(--gyro-warn);
+}
+
+@media (max-width: 980px) {
+  /* The compact composer grid gives the meter one square cell. */
+  .gyro-composer-context-meter.has-usage-alert {
+    border: 0;
+    padding: 0;
+  }
+  .gyro-composer-usage-alert {
+    display: none;
+  }
 }
 .gyro-chat-run .gyro-response-body h3 {
   font-size: var(--gyro-font-body);
@@ -10693,7 +10720,7 @@ button.gyro-response-changed-files:hover {
   container-name: gyro-draft-pane;
   container-type: size;
   gap: 0;
-  grid-template-rows: var(--gyro-chat-header-height, 48px) minmax(0, 1fr);
+  grid-template-rows: var(--gyro-chat-header-height, var(--gyro-window-header-height)) minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
   padding: 0;
@@ -10838,12 +10865,6 @@ button.gyro-response-changed-files:hover {
 :root[data-theme="light"] .gyro-composer-context-bar {
   background: var(--gyro-surface-soft);
   box-shadow: inset 0 0 0 1px var(--gyro-border-soft);
-}
-
-:root[data-theme="light"] .gyro-composer-context-tooltip::after {
-  background: var(--gyro-surface);
-  border-bottom-color: var(--gyro-border);
-  border-right-color: var(--gyro-border);
 }
 
 :root[data-theme="light"] .gyro-chat-start .gyro-composer-chip,
@@ -11084,7 +11105,7 @@ button.gyro-response-changed-files:hover {
   max-width: 76px;
 }
 .gyro-chat-surface.is-thread {
-  grid-template-rows: var(--gyro-chat-header-height, 48px) minmax(0, 1fr);
+  grid-template-rows: var(--gyro-chat-header-height, var(--gyro-window-header-height)) minmax(0, 1fr);
   row-gap: 0;
 }
 
@@ -11366,6 +11387,14 @@ button.gyro-response-changed-files:hover {
   padding-bottom: calc(var(--gyro-chat-space-1) * 2.5);
 }
 
+:root[data-theme]
+  .gyro-app-shell.is-thread-layout
+  .gyro-chat-surface.is-thread
+  .gyro-chat-thread-canvas
+  > .gyro-chat-composer-dock {
+  --gyro-composer-dock-fade: 52px;
+}
+
 :root[data-theme="dark"]
   .gyro-chat-surface.is-thread
   .gyro-chat-thread-canvas
@@ -11468,10 +11497,6 @@ button.gyro-response-changed-files:hover {
   z-index: 66;
 }
 
-.gyro-chat-start-switcher .gyro-chat-switcher-menu {
-  top: calc(100% + 8px);
-}
-
 .gyro-chat-switcher-trigger {
   align-items: center;
   background: transparent;
@@ -11489,27 +11514,6 @@ button.gyro-response-changed-files:hover {
 .gyro-chat-switcher-trigger[aria-expanded="true"] {
   background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
   color: var(--gyro-text);
-}
-
-.gyro-chat-switcher-menu {
-  background: var(--gyro-surface);
-  border: 1px solid var(--gyro-border-soft);
-  /* The seam radius is the sidebar corner. The old 6px card left the first
-     and last rows looking square against the shell. */
-  border-radius: var(--gyro-seam-radius);
-  box-shadow: 0 12px 32px var(--gyro-premium-shadow-soft);
-  display: flex;
-  flex-direction: column;
-  gap: calc(var(--gyro-chat-space-1) * 0.25);
-  left: 0;
-  max-height: min(320px, 60vh);
-  min-width: 220px;
-  overflow: auto;
-  padding: var(--gyro-space-standard);
-  position: absolute;
-  top: calc(100% + var(--gyro-space-standard));
-  width: max-content;
-  z-index: 40;
 }
 .gyro-chat-mini-sidebar-layer {
   inset: 0;
@@ -11599,76 +11603,6 @@ button.gyro-response-changed-files:hover {
   color: var(--gyro-faint);
   font-size: var(--gyro-chat-meta-size);
   grid-column: 3;
-}
-
-:root[data-theme="light"] .gyro-chat-switcher-menu {
-  background: var(--gyro-control-bg);
-  border-color: color-mix(
-    in srgb,
-    var(--gyro-chat-media-shade) 10%,
-    transparent
-  );
-  box-shadow: 0 10px 28px
-    color-mix(in srgb, var(--gyro-chat-media-shade) 12%, transparent);
-}
-
-.gyro-chat-switcher-label {
-  color: var(--gyro-faint);
-  font-size: var(--gyro-chat-meta-size);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  padding: calc(var(--gyro-chat-space-1) * 1.5) var(--gyro-chat-space-2)
-    calc(var(--gyro-chat-space-1) * 0.5);
-  text-transform: uppercase;
-}
-
-.gyro-chat-switcher-item {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-text);
-  display: grid;
-  font: inherit;
-  font-size: var(--gyro-chat-meta-size);
-  gap: calc(var(--gyro-chat-space-1) * 1.75);
-  grid-template-columns: 14px minmax(0, 1fr) auto;
-  min-height: 28px;
-  padding: 0 var(--gyro-chat-space-2);
-  text-align: left;
-  width: 100%;
-}
-
-.gyro-chat-switcher-item > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gyro-chat-switcher-item > small {
-  color: var(--gyro-faint);
-  font-size: var(--gyro-chat-meta-size);
-}
-
-.gyro-chat-switcher-item:hover {
-  background: color-mix(in srgb, var(--gyro-text) 8%, transparent);
-}
-
-.gyro-chat-switcher-item.is-active {
-  background: color-mix(in srgb, var(--gyro-accent) 16%, transparent);
-}
-
-.gyro-chat-switcher-item.is-action {
-  color: var(--gyro-accent);
-  font-weight: 600;
-}
-
-.gyro-chat-switcher-empty {
-  color: var(--gyro-muted);
-  font-size: var(--gyro-chat-meta-size);
-  padding: calc(var(--gyro-chat-space-1) * 1.5) var(--gyro-chat-space-2)
-    var(--gyro-chat-space-2);
 }
 .gyro-chat-thread-identity > .gyro-chat-switcher {
   flex: 0 0 auto;
@@ -12316,7 +12250,7 @@ button.gyro-response-changed-files:hover {
 .gyro-composer-popover {
   background: var(--gyro-surface-raised);
   border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: var(--gyro-radius-xl);
+  border-radius: var(--gyro-radius-md);
   box-shadow:
     0 18px 44px var(--gyro-premium-shadow),
     inset 0 1px 0 var(--gyro-premium-inset-highlight);
@@ -12352,12 +12286,7 @@ button.gyro-response-changed-files:hover {
 }
 
 :root[data-theme="light"]
-  :is(
-    .gyro-overlay,
-    .gyro-command-palette,
-    .gyro-composer-popover,
-    .gyro-chat-switcher-menu
-  ) {
+  :is(.gyro-overlay, .gyro-command-palette, .gyro-composer-popover) {
   background: color-mix(in srgb, var(--gyro-chat-media-text) 98%, transparent);
   /* Same layered elevation as dark mode: faint alpha rim, short contact shadow, soft ambient. */
   border-color: var(--gyro-border);
@@ -12383,8 +12312,7 @@ button.gyro-response-changed-files:hover {
   border-color: var(--gyro-border);
 }
 
-:root[data-theme="dark"] .gyro-composer-popover,
-:root[data-theme="dark"] .gyro-chat-switcher-menu {
+:root[data-theme="dark"] .gyro-composer-popover {
   background: var(--gyro-surface-raised);
   border-color: var(--gyro-border);
   /* A short contact shadow plus a soft ambient one; the alpha border carries the edge. */
@@ -13805,31 +13733,17 @@ button.gyro-response-changed-files:hover {
 .gyro-chat-start-workspace-popup {
   cursor: text;
   font-family: var(--gyro-font-sans);
-  font-size: var(--gyro-chat-meta-size);
-  font-weight: 400;
+  font-size: var(--gyro-text-ui-xs);
+  font-weight: var(--gyro-weight-regular);
   letter-spacing: 0;
   line-height: 1.5;
-  padding-top: var(--gyro-chat-block-gap);
-  position: absolute;
-  right: 0;
+  padding: var(--gyro-chat-space-2) var(--gyro-chat-block-gap);
   text-align: left;
-  top: 100%;
   width: max-content;
-  max-width: min(320px, calc(100vw - 64px));
+  max-width: min(20rem, var(--available-width));
+  min-width: 0;
   white-space: normal;
   overflow-wrap: anywhere;
-  z-index: 30;
-}
-
-.gyro-chat-start-workspace-popup > span {
-  background: var(--gyro-pane);
-  border: 1px solid var(--gyro-border-soft);
-  border-radius: var(--gyro-radius-md);
-  box-shadow: 0 6px 20px
-    color-mix(in srgb, var(--gyro-chat-media-shade) 12%, transparent);
-  color: var(--gyro-text);
-  display: block;
-  padding: var(--gyro-chat-space-2) var(--gyro-chat-block-gap);
   user-select: text;
 }
 
@@ -14081,7 +13995,7 @@ button.gyro-response-changed-files:hover {
       > .gyro-chat-companion
     ) {
     grid-template-columns: minmax(320px, 1fr) auto;
-    grid-template-rows: var(--gyro-chat-header-height, 48px) minmax(0, 1fr);
+    grid-template-rows: var(--gyro-chat-header-height, var(--gyro-window-header-height)) minmax(0, 1fr);
   }
 
   .gyro-chat-surface.is-thread.has-environment.has-companion:not(.is-tiled)
@@ -14921,26 +14835,8 @@ button.gyro-response-changed-files:hover {
   font-size: var(--gyro-font-support);
   font-weight: 500;
 }
-.gyro-chat-surface:is(.is-thread, .is-tiled) .gyro-composer-context-meter {
-  position: static;
-}
-
-.gyro-chat-surface:is(.is-thread, .is-tiled) .gyro-composer-bar {
-  position: relative;
-}
-
 .gyro-chat-surface:is(.is-thread, .is-tiled) .gyro-composer-context-tooltip {
-  box-sizing: border-box;
-  left: auto;
-  right: 0;
   width: 340px;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.gyro-chat-surface:is(.is-thread, .is-tiled)
-  .gyro-composer-context-tooltip::after {
-  display: none;
 }
 .gyro-composer-chip.is-warning,
 .gyro-chat-start .gyro-composer-chip.is-warning,
@@ -15139,7 +15035,7 @@ button.gyro-response-changed-files:hover {
 .gyro-chat-surface.is-thread.has-environment.has-plan {
   position: relative;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: var(--gyro-chat-header-height, 48px) minmax(0, 1fr);
+  grid-template-rows: var(--gyro-chat-header-height, var(--gyro-window-header-height)) minmax(0, 1fr);
 }
 
 .gyro-chat-surface.is-thread.has-environment.has-plan > .gyro-plan-rail {
@@ -15165,10 +15061,6 @@ button.gyro-response-changed-files:hover {
     > .gyro-chat-thread-topbar {
     padding-left: calc(var(--gyro-chat-space-1) * 22.5);
   }
-}
-
-.gyro-chat-close-actions {
-  overflow: visible;
 }
 .gyro-run-task-row:has(.gyro-run-task-fix) {
   grid-template-columns: minmax(0, 1fr) auto auto auto;
@@ -15276,15 +15168,10 @@ button.gyro-response-changed-files:hover {
   height: min(calc(var(--gyro-space-panel) * 24), calc(100vh - 96px));
   padding: 0;
   gap: 0;
-  border-radius: var(--gyro-radius-xl);
+  border-radius: var(--gyro-radius-md);
   background: var(--gyro-surface);
   overflow: hidden;
 }
-.gyro-composer-context-tooltip {
-  min-width: 248px;
-  overflow: hidden;
-}
-
 .gyro-composer-context-section,
 .gyro-composer-limit-summary {
   display: flex;
@@ -15522,7 +15409,7 @@ button.gyro-response-changed-files:hover {
   border-radius: var(--gyro-radius-sm);
 }
 :root .gyro-composer-popover.gyro-project-picker {
-  border-radius: var(--gyro-radius-xl);
+  border-radius: var(--gyro-radius-md);
   box-sizing: border-box;
   gap: calc(var(--gyro-chat-space-1) * 0.5);
   max-width: min(292px, calc(100vw - 32px));
@@ -15709,7 +15596,7 @@ button.gyro-response-changed-files:hover {
 }
 :root
   .gyro-app-shell
-  .gyro-chat-companion-menu
+  .gyro-chat-overflow-menu
   > .gyro-chat-header-compact-action {
   display: none;
 }
@@ -15722,17 +15609,6 @@ button.gyro-response-changed-files:hover {
   > span {
   display: block;
   max-width: none;
-}
-
-:root
-  .gyro-app-shell
-  .gyro-chat-surface.is-tiled
-  .gyro-thread-topbar-actions
-  .gyro-chat-companion-menu.is-header {
-  left: auto;
-  max-width: calc(100cqi - 28px);
-  min-width: min(208px, calc(100cqi - 28px));
-  right: 0;
 }
 
 .gyro-chat-grid-slot {
@@ -15755,7 +15631,7 @@ button.gyro-response-changed-files:hover {
     .gyro-thread-project-icon,
   :root
     .gyro-app-shell
-    .gyro-chat-surface.is-tiled
+    .gyro-chat-surface.is-thread.is-tiled
     .gyro-thread-topbar-actions
     .gyro-chat-surface-controls
     > button:not([data-chat-pane-action="close"]) {
@@ -15764,7 +15640,7 @@ button.gyro-response-changed-files:hover {
   :root
     .gyro-app-shell
     .gyro-chat-surface.is-tiled
-    .gyro-chat-companion-menu
+    .gyro-chat-overflow-menu
     > .gyro-chat-header-compact-action {
     display: flex;
   }
@@ -15807,7 +15683,7 @@ button.gyro-response-changed-files:hover {
   .gyro-app-shell
   :is(.gyro-chat-surface, .gyro-chat-companion, .gyro-chat-companion-host) {
   --gyro-chat-header-height: calc(
-    var(--gyro-window-header-height) - var(--gyro-chat-rim, 0px)
+    var(--gyro-window-header-height) - var(--gyro-chat-rim)
   );
 }
 :root[data-theme]
@@ -15822,6 +15698,53 @@ button.gyro-response-changed-files:hover {
   /* Re-assert the shared alignment over later thread-topbar padding resets. */
   padding-block: var(--gyro-chat-header-hairline-width)
     var(--gyro-window-header-bottom-inset);
+}
+
+/* The transcript's scroll fade supplies the transition into the session chrome. */
+:root[data-theme]
+  .gyro-app-shell.is-thread-layout
+  .gyro-chat-surface
+  > .gyro-chat-thread-topbar {
+  background: transparent;
+  border-bottom-color: transparent;
+  box-shadow: none;
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-thread-layout
+  .gyro-chat-thread-topbar
+  .gyro-thread-project-icon > path[fill] {
+  fill: none;
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-thread-layout
+  .gyro-chat-empty-drag-region {
+  height: var(--gyro-chat-header-height);
+  justify-content: flex-end;
+}
+
+/* Keep the fallback drag region on the rim so the draft controls receive clicks. */
+:root[data-theme]
+  .gyro-app-shell.is-thread-layout
+  .gyro-main:has(.gyro-chat-workspace)
+  > .gyro-main-titlebar-drag-region {
+  height: var(--gyro-chat-rim);
+}
+
+:root[data-theme]
+  .gyro-app-shell:not(.is-thread-layout)
+  .gyro-chat-empty-drag-region {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  height: 104px;
+}
+
+.gyro-app-shell:not(.is-thread-layout)
+  .gyro-chat-empty-drag-region
+  .gyro-thread-topbar-actions {
+  display: none;
 }
 
 :root[data-theme]
@@ -15858,7 +15781,7 @@ button.gyro-response-changed-files:hover {
   > svg {
   width: calc(var(--gyro-icon-standard) * var(--gyro-ui-scale, 1));
   height: calc(var(--gyro-icon-standard) * var(--gyro-ui-scale, 1));
-  stroke-width: 1.6;
+  stroke-width: 1.75;
 }
 
 :root[data-theme]
@@ -18011,6 +17934,9 @@ button.gyro-response-changed-files:hover {
   height: 14px;
   flex: none;
   object-fit: contain;
+  padding: calc(var(--gyro-space-compact) / 4);
+  border-radius: var(--gyro-radius-xs);
+  background: var(--gyro-subagent-mark-tile);
 }
 .gyro-subagent-approval-source {
   display: inline-flex;
@@ -18993,897 +18919,4 @@ button.gyro-response-changed-files:hover {
 }
 :root[data-theme] [data-chat-pane-drag][draggable="true"]:active {
   cursor: grabbing;
-}
-
-/* Composer: workspace context, rounded input, then an independent toolbar. */
-:root[data-theme] .gyro-chat-surface .gyro-composer-shell {
-  --gyro-composer-action-size: calc(28px * var(--gyro-ui-scale, 1));
-  max-width: min(100%, 720px);
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-  border-radius: var(--gyro-radius-composer);
-  min-height: 0;
-  overflow: visible;
-  padding: 0;
-}
-.gyro-composer-input {
-  display: grid;
-  background: var(--gyro-surface-raised);
-  border: 1px solid var(--gyro-chat-hairline);
-  border-radius: var(--gyro-radius-composer);
-  box-shadow: 0 2px 6px var(--gyro-premium-shadow-soft);
-  box-sizing: border-box;
-  min-width: 0;
-  position: relative;
-}
-:root[data-theme] .gyro-chat-surface .gyro-composer-editor > :is(textarea, .gyro-composer-draft-mirror) {
-  background: transparent;
-  border: 0;
-  border-radius: inherit;
-  box-sizing: border-box;
-  font: var(--gyro-font-body)/1.5 var(--gyro-font-sans);
-  min-height: calc(44px * var(--gyro-ui-scale, 1));
-  max-height: calc(var(--gyro-space-panel) * 10);
-  padding: var(--gyro-space-comfortable);
-}
-:root[data-theme] .gyro-chat-surface .gyro-composer-shell > .gyro-composer-bar {
-  background: transparent;
-  border: 0;
-  column-gap: var(--gyro-space-standard);
-  min-height: calc(
-    var(--gyro-composer-action-size) + var(--gyro-chat-space-2)
-  );
-  padding: var(--gyro-chat-space-2) var(--gyro-chat-space-1) 0;
-}
-:root[data-theme]
-  .gyro-chat-surface
-  .gyro-composer-shell
-  > .gyro-composer-context-row {
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  flex-grow: 0;
-  justify-content: flex-start;
-  margin: 0;
-  backdrop-filter: none;
-  box-shadow: none;
-  min-height: 0;
-  padding: 0 var(--gyro-space-compact) var(--gyro-space-standard);
-  position: relative;
-  inset: auto;
-}
-:root[data-theme]
-  .gyro-chat-surface
-  .gyro-composer-context-row
-  > .gyro-composer-control {
-  justify-content: flex-start;
-}
-:root[data-theme]
-  .gyro-chat-surface.is-empty
-  > .gyro-chat-start:not(.is-mission) {
-  align-self: stretch;
-  box-sizing: border-box;
-  height: 100%;
-  justify-content: flex-end;
-  min-height: 0;
-  padding: 0 0 calc(var(--gyro-chat-space-1) * 4.5);
-}
-.gyro-chat-start-intro {
-  align-items: center;
-  display: flex;
-  flex: 1 1 0;
-  flex-direction: column;
-  justify-content: center;
-  min-height: 0;
-  width: 100%;
-}
-.gyro-chat-start-intro > .gyro-brand-logo {
-  flex: none;
-  height: calc(var(--gyro-space-panel) * 2);
-  margin: 0 auto var(--gyro-space-section);
-  width: calc(var(--gyro-space-panel) * 2);
-}
-.gyro-chat-start-intro > h1 {
-  color: var(--gyro-text);
-  font: 500 var(--gyro-chat-start-heading-size)/1.12 var(--gyro-font-display);
-  letter-spacing: var(--gyro-letter-spacing-start);
-  margin: 0;
-  text-align: center;
-}
-:root[data-theme]
-  .gyro-chat-surface
-  .gyro-composer-input
-  > .gyro-composer-blocker {
-  background: transparent;
-  border: 0;
-  border-radius: inherit;
-  font-size: var(--gyro-chat-small-size);
-  margin: 0;
-  padding: var(--gyro-space-comfortable) var(--gyro-space-panel);
-}
-.gyro-composer-input.is-setup-empty > .gyro-composer-editor {
-  grid-area: 1 / 1;
-}
-.gyro-composer-input.is-setup-empty > .gyro-composer-blocker {
-  grid-area: 1 / 1;
-  position: relative;
-  z-index: 2;
-  pointer-events: none;
-}
-.gyro-composer-input.is-setup-empty > .gyro-composer-blocker > button {
-  pointer-events: auto;
-}
-.gyro-composer-input.is-setup-empty textarea::placeholder {
-  opacity: 0;
-}
-.gyro-composer-input.is-setup-empty:has(textarea:focus)
-  > .gyro-composer-blocker {
-  display: none;
-}
-.gyro-composer-input.is-setup-empty:has(textarea:focus)
-  textarea::placeholder {
-  opacity: 1;
-}
-@container (max-width: 620px) {
-  :root[data-theme]
-    .gyro-chat-surface
-    .gyro-composer-shell
-    > .gyro-composer-bar {
-    column-gap: var(--gyro-space-compact);
-  }
-}
-
-/* Focus is a quiet border lift, not a ring: the caret already says where
-   typing goes. */
-.gyro-composer-input {
-  transition: border-color var(--gyro-premium-motion-fast)
-    var(--gyro-premium-ease);
-}
-.gyro-composer-input:has(textarea:focus-visible) {
-  border-color: color-mix(
-    in srgb,
-    var(--gyro-text) 22%,
-    var(--gyro-chat-hairline)
-  );
-}
-:root[data-theme] .gyro-chat-surface .gyro-composer-shell:focus-within {
-  filter: none;
-}
-
-/* Attachments sit inside the input, above the text: square thumbnails and
-   compact file chips in one scrolling row. */
-.gyro-composer-input > .gyro-composer-attachments {
-  align-items: stretch;
-  flex-wrap: nowrap;
-  gap: var(--gyro-chat-space-2);
-  grid-row: 1;
-  min-width: 0;
-  overflow-x: auto;
-  padding: var(--gyro-chat-space-2) var(--gyro-chat-space-2) 0;
-  scrollbar-width: none;
-}
-.gyro-composer-input > .gyro-composer-attachments::-webkit-scrollbar {
-  display: none;
-}
-.gyro-composer-input > .gyro-composer-attachments .gyro-composer-attachment {
-  --gyro-composer-attachment-size: calc(56px * var(--gyro-ui-scale, 1));
-  background: var(--gyro-surface-raised);
-  border: 1px solid var(--gyro-chat-hairline);
-  border-radius: var(--gyro-radius-md);
-  box-sizing: border-box;
-  flex: none;
-  height: var(--gyro-composer-attachment-size);
-  max-width: calc(var(--gyro-space-panel) * 14);
-  padding: 0 var(--gyro-chat-space-2) 0 calc(var(--gyro-chat-space-1) * 2.5);
-}
-.gyro-composer-input
-  > .gyro-composer-attachments
-  .gyro-composer-attachment.is-image {
-  padding: 0;
-  width: var(--gyro-composer-attachment-size);
-}
-.gyro-composer-input
-  > .gyro-composer-attachments
-  .gyro-composer-attachment.is-image::after,
-.gyro-composer-input
-  > .gyro-composer-attachments
-  .gyro-composer-attachment.is-image
-  > span {
-  display: none;
-}
-.gyro-composer-input
-  > .gyro-composer-attachments
-  .gyro-composer-attachment.is-image
-  > .gyro-composer-image-fallback {
-  top: 50%;
-}
-.gyro-composer-input
-  > .gyro-composer-attachments
-  .gyro-composer-attachment.is-image
-  button {
-  background: color-mix(in srgb, var(--gyro-chat-media-shade) 68%, transparent);
-  border: 0;
-  color: var(--gyro-chat-media-text);
-  height: calc(var(--gyro-space-panel) + var(--gyro-chat-space-1));
-  opacity: 0;
-  right: calc(var(--gyro-chat-space-1) * 0.75);
-  top: calc(var(--gyro-chat-space-1) * 0.75);
-  transform: none;
-  transition: opacity var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
-  width: calc(var(--gyro-space-panel) + var(--gyro-chat-space-1));
-}
-.gyro-composer-input
-  > .gyro-composer-attachments
-  .gyro-composer-attachment.is-image:hover
-  button,
-.gyro-composer-input
-  > .gyro-composer-attachments
-  .gyro-composer-attachment.is-image
-  button:focus-visible {
-  opacity: 1;
-}
-.gyro-composer-input
-  > .gyro-composer-attachments
-  .gyro-composer-attachment.is-image
-  button:hover {
-  background: color-mix(in srgb, var(--gyro-chat-media-shade) 86%, transparent);
-}
-@media (hover: none) {
-  .gyro-composer-input
-    > .gyro-composer-attachments
-    .gyro-composer-attachment.is-image
-    button {
-    opacity: 1;
-  }
-}
-.gyro-composer-input
-  > .gyro-composer-attachments
-  .gyro-composer-attachment:not(.is-image)
-  > svg {
-  color: var(--gyro-muted);
-  flex: none;
-}
-.gyro-composer-input
-  > .gyro-composer-attachments
-  .gyro-composer-attachment:not(.is-image)
-  strong {
-  font-size: var(--gyro-chat-small-size);
-  font-weight: 500;
-}
-.gyro-composer-input
-  > .gyro-composer-attachments
-  .gyro-composer-attachment:not(.is-image)
-  > button:last-child {
-  border-radius: var(--gyro-radius-sm);
-  padding: var(--gyro-chat-space-1);
-}
-.gyro-composer-input
-  > .gyro-composer-attachments
-  .gyro-composer-attachment:not(.is-image)
-  > button:last-child:hover {
-  background: var(--gyro-sidebar-soft);
-  color: var(--gyro-text);
-}
-.gyro-composer-input > .gyro-composer-attachment-preview {
-  grid-row: 2;
-  margin: var(--gyro-chat-space-2) var(--gyro-chat-space-2) 0;
-}
-.gyro-composer-input.is-setup-empty:has(> .gyro-composer-attachments)
-  > :is(.gyro-composer-editor, .gyro-composer-blocker) {
-  grid-area: 3 / 1;
-}
-/* The composer a dragged image will land in, so a drop never feels blind. */
-.gyro-composer-shell[data-media-drop-target] .gyro-composer-input {
-  border-color: var(--gyro-focus-ring);
-  box-shadow: 0 0 0 1px var(--gyro-focus-ring);
-}
-
-:root[data-theme]
-  .gyro-chat-surface.is-empty.is-tiled
-  > .gyro-chat-start:not(.is-mission) {
-  padding-inline: var(--gyro-chat-gutter);
-}
-.gyro-composer-bar > .gyro-dictation-button::before {
-  background: var(--gyro-border-strong);
-  content: "";
-  height: 50%;
-  left: calc(-1 * var(--gyro-space-compact));
-  pointer-events: none;
-  position: absolute;
-  top: 25%;
-  width: 1px;
-}
-
-/* Shared sizing for the composer controls and utility menus. */
-:root[data-theme]
-  .gyro-chat-surface
-  .gyro-composer-shell
-  .gyro-composer-bar
-  :is(.gyro-composer-chip, .gyro-composer-tool) {
-  min-height: var(--gyro-composer-action-size);
-  font-size: var(--gyro-chat-small-size);
-}
-:root
-  .gyro-composer-shell
-  .gyro-composer-popover:not(.gyro-model-rail):not(
-    .gyro-effort-slider-popover
-  ) {
-  background: var(--gyro-surface);
-  border-radius: var(--gyro-radius-xl);
-  padding: var(--gyro-chat-space-2);
-  gap: calc(var(--gyro-chat-space-1) / 2);
-}
-:root .gyro-composer-shell .gyro-composer-popover .gyro-composer-menu-item {
-  min-height: calc(var(--gyro-space-panel) * 2);
-  padding: var(--gyro-chat-space-2);
-  border-radius: var(--gyro-radius-sm);
-  font-size: var(--gyro-chat-small-size);
-}
-:root .gyro-composer-shell .gyro-approval-picker .gyro-composer-menu-item {
-  border-radius: var(--gyro-radius-md);
-}
-:root
-  .gyro-composer-shell
-  .gyro-composer-popover
-  .gyro-composer-menu-item
-  strong {
-  font-size: var(--gyro-chat-small-size);
-  line-height: 1.4;
-}
-:root .gyro-composer-shell .gyro-context-picker {
-  width: calc(var(--gyro-space-panel) * 16);
-  max-width: calc(100vw - var(--gyro-space-panel) * 2);
-}
-
-/* Images a reply cites sit in one row of small tiles after its text; a tile
-   opens the shared preview dialog. */
-.gyro-reply-images {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--gyro-chat-space-2);
-  margin-top: var(--gyro-chat-block-gap);
-}
-.gyro-reply-images .gyro-chat-file-card.is-tile {
-  --gyro-reply-image-height: calc(72px * var(--gyro-ui-scale, 1));
-  border-color: var(--gyro-chat-hairline);
-  border-radius: var(--gyro-radius-md);
-  flex: none;
-  height: var(--gyro-reply-image-height);
-  margin: 0;
-  position: relative;
-  width: calc(var(--gyro-reply-image-height) * 4 / 3);
-}
-.gyro-reply-images .gyro-chat-file-card.is-tile:hover {
-  border-color: var(--gyro-border-strong);
-}
-.gyro-reply-images .gyro-chat-file-card.is-tile .gyro-chat-file-thumbnail {
-  aspect-ratio: auto;
-  height: 100%;
-  padding: 0;
-}
-.gyro-reply-images
-  .gyro-chat-file-card.is-tile
-  .gyro-chat-file-thumbnail
-  > img {
-  object-fit: cover;
-}
-.gyro-reply-images
-  .gyro-chat-file-card.is-tile
-  .gyro-chat-file-placeholder-note {
-  display: none;
-}
-@media (prefers-reduced-motion: reduce) {
-  .gyro-reply-images .gyro-chat-file-card.is-tile .gyro-chat-file-caption {
-    transition: none;
-  }
-}
-
-/* Tool surfaces: shared spacing and hierarchy, independent scroll owners.
-   Loaded after the chat shell. Never style editor, xterm or web-page internals. */
-
-:root[data-theme] .gyro-chat-companion-content {
-  --gyro-tool-gutter: var(--gyro-space-panel);
-}
-/* The standalone narrow-screen fallback must cover the conversation beneath it. */
-:root[data-theme] .gyro-chat-surface > .gyro-chat-companion.is-overlay {
-  background: var(--gyro-pane);
-}
-:root[data-theme] .gyro-chat-companion .gyro-chat-companion-tab.is-active {
-  background: var(--gyro-control-hover);
-  box-shadow: none;
-}
-:root[data-theme] .gyro-chat-companion .gyro-chat-companion-tab > button[role="tab"] {
-  font-size: var(--gyro-font-support);
-}
-
-/* Keep the launcher to tool names and optional keyboard shortcuts. */
-:root[data-theme] .gyro-chat-companion-content > .gyro-companion-launcher {
-  align-self: center;
-  box-sizing: border-box;
-  width: min(460px, 100%);
-  max-height: 100%;
-  overflow: auto;
-  padding: var(--gyro-space-section) var(--gyro-space-panel);
-  gap: var(--gyro-space-compact);
-}
-.gyro-companion-launcher-heading {
-  padding: 0 var(--gyro-space-standard) var(--gyro-space-panel);
-}
-.gyro-companion-launcher-heading h2 {
-  margin: 0 0 var(--gyro-space-standard);
-  color: var(--gyro-text);
-  font-size: var(--gyro-font-heading);
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  line-height: 1.3;
-}
-:root[data-theme] .gyro-chat-companion-content > .gyro-companion-launcher > button {
-  min-height: 42px;
-  padding: var(--gyro-space-standard);
-  grid-template-columns: 24px minmax(0, 1fr) auto;
-  gap: var(--gyro-space-comfortable);
-  border-radius: var(--gyro-radius-md);
-}
-.gyro-companion-launcher-label {
-  display: grid;
-  gap: calc(var(--gyro-chat-space-1) * 0.75);
-  min-width: 0;
-}
-.gyro-companion-launcher-label strong {
-  font-size: var(--gyro-font-chrome);
-  font-weight: 500;
-}
-.gyro-companion-launcher kbd:empty {
-  display: none;
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-companion-empty {
-  box-sizing: border-box;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  align-content: center;
-  gap: var(--gyro-space-standard);
-  padding: var(--gyro-space-section);
-  overflow: auto;
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-companion-empty > strong {
-  font-size: var(--gyro-font-lead);
-  font-weight: 600;
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-companion-empty > span {
-  margin: 0;
-  max-width: 36ch;
-  font-size: var(--gyro-font-support);
-  line-height: 1.6;
-}
-.gyro-companion-tool-heading {
-  display: grid;
-  gap: var(--gyro-space-compact);
-  padding: var(--gyro-space-panel);
-  border-bottom: 1px solid var(--gyro-border-soft);
-}
-.gyro-companion-tool-heading strong {
-  font-size: var(--gyro-font-chrome);
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.gyro-companion-tool-heading span {
-  color: var(--gyro-muted);
-  font-size: var(--gyro-font-support);
-  line-height: 1.5;
-}
-
-/* Files: a project heading and a tree with comfortable, continuous rows. */
-:root[data-theme] .gyro-chat-companion-content .gyro-companion-files {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-:root[data-theme] .gyro-companion-files > .gyro-file-tree {
-  min-height: 0;
-  flex: 1;
-  padding: var(--gyro-space-standard);
-}
-:root[data-theme] .gyro-companion-files .gyro-file-tree button {
-  min-height: 30px;
-  border-radius: var(--gyro-radius-sm);
-}
-
-/* Canvas: small controls above a full-height document; request stays below. */
-:root[data-theme] .gyro-chat-companion-content .gyro-canvas :is(
-  .gyro-canvas-toolbar, .gyro-canvas-request, .gyro-canvas-draft-status,
-  .gyro-canvas-preview-tools
-) {
-  padding: var(--gyro-space-comfortable) var(--gyro-tool-gutter);
-  gap: var(--gyro-space-standard);
-  background: transparent;
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-canvas :is(button, select, input) {
-  min-height: 32px;
-  font-size: var(--gyro-font-support);
-  border-radius: var(--gyro-radius-sm);
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-canvas-view-switch {
-  gap: calc(var(--gyro-chat-space-1) * 0.5);
-  padding: calc(var(--gyro-chat-space-1) * 0.5);
-  border-radius: var(--gyro-radius-sm);
-  background: var(--gyro-control-bg);
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-canvas-view-switch button {
-  border: 0;
-  background: transparent;
-  min-height: 28px;
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-canvas-view-switch button[aria-pressed="true"] {
-  background: var(--gyro-segment-active);
-  color: var(--gyro-text);
-  box-shadow: inset 0 -2px var(--gyro-accent);
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-canvas-body:not(.is-preview) {
-  padding: var(--gyro-space-panel);
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-canvas-draft-status {
-  color: var(--gyro-muted);
-  border-bottom: 1px solid var(--gyro-border-soft);
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-canvas-request > button:not(:disabled) {
-  background: var(--gyro-primary-bg);
-  color: var(--gyro-primary-text);
-}
-
-/* Keep the location field flexible as the companion narrows. */
-:root[data-theme] .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-browser-preview-toolbar {
-  gap: var(--gyro-space-compact);
-  padding-inline: var(--gyro-space-standard);
-}
-:root[data-theme] .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-url-bar {
-  border: 1px solid var(--gyro-border-soft);
-  border-radius: var(--gyro-radius-md);
-  background: var(--gyro-control-bg);
-}
-:root[data-theme] .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-url-bar:focus-within {
-  border-color: var(--gyro-accent);
-  box-shadow: 0 0 0 1px var(--gyro-accent);
-}
-:root[data-theme] .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-url-bar input {
-  font-size: var(--gyro-font-support);
-}
-.gyro-chat-companion .gyro-browser-preview.is-chat .gyro-browser-actions > .gyro-browser-external-button {
-  display: none;
-}
-@container gyro-browser (max-width: 380px) {
-  :root[data-theme] .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-browser-preview-toolbar {
-    column-gap: var(--gyro-space-compact);
-    padding-inline: calc(var(--gyro-space-compact) * 1.5);
-  }
-  :root[data-theme] .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-url-bar {
-    padding-inline: calc(var(--gyro-space-compact) * 1.5) calc(var(--gyro-space-compact) / 2);
-  }
-  .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-url-bar > .gyro-browser-address-external {
-    display: none;
-  }
-  .gyro-chat-companion .gyro-browser-preview.is-chat .gyro-browser-actions > .gyro-browser-external-button {
-    display: inline-flex;
-  }
-}
-:root[data-theme] .gyro-chat-companion .gyro-browser-new-tab {
-  gap: var(--gyro-space-standard);
-  padding: var(--gyro-space-section);
-  text-align: center;
-}
-:root[data-theme] .gyro-chat-companion :is(.gyro-browser-new-tab, .gyro-browser-placeholder-body) > strong {
-  font-size: var(--gyro-font-lead);
-  font-weight: 600;
-}
-:root[data-theme] .gyro-chat-companion :is(.gyro-browser-new-tab > span, .gyro-browser-placeholder-body > p) {
-  font-size: var(--gyro-font-support);
-  line-height: 1.6;
-  color: var(--gyro-muted);
-}
-:root[data-theme] .gyro-chat-companion .gyro-browser-placeholder-actions {
-  flex-wrap: wrap;
-  gap: var(--gyro-space-standard);
-}
-
-/* Review: underline navigation; setup, results and history share one rhythm. */
-:root[data-theme] .gyro-second-opinion > nav {
-  padding: 0 var(--gyro-space-panel);
-  gap: var(--gyro-space-panel);
-}
-.gyro-second-opinion > nav > button {
-  min-height: 42px;
-  padding: var(--gyro-space-standard) 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--gyro-muted);
-}
-.gyro-second-opinion > nav > button[aria-pressed="true"] {
-  background: transparent;
-  color: var(--gyro-text);
-  box-shadow: inset 0 -2px var(--gyro-accent);
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-review-scope,
-:root[data-theme] .gyro-chat-companion-content .gyro-diff-review-toolbar {
-  padding-inline: var(--gyro-tool-gutter);
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-diff-empty-state {
-  padding: var(--gyro-space-section);
-  font-size: var(--gyro-font-support);
-  line-height: 1.6;
-}
-
-/* Project memory includes list, suggestions, editor, detail and history. */
-.gyro-memory-panel.is-companion {
-  padding: var(--gyro-space-panel);
-  gap: var(--gyro-space-panel);
-}
-.gyro-memory-panel.is-companion > header:has(h3) {
-  display: grid;
-  gap: var(--gyro-space-standard);
-  padding-block: var(--gyro-space-standard);
-}
-.gyro-memory-panel.is-companion h3 {
-  font-size: var(--gyro-font-lead);
-  font-weight: 600;
-  letter-spacing: -0.015em;
-}
-.gyro-memory-panel.is-companion :is(.gyro-memory-hint, .gyro-memory-empty, label > span) {
-  font-size: var(--gyro-font-support);
-  line-height: 1.6;
-}
-.gyro-memory-panel.is-companion .gyro-memory-tabs {
-  gap: var(--gyro-space-panel);
-}
-.gyro-memory-panel.is-companion .gyro-memory-tabs button {
-  min-height: 38px;
-  padding-inline: 0;
-}
-.gyro-memory-panel.is-companion .gyro-memory-tabs button[aria-pressed="true"] {
-  border-bottom-color: var(--gyro-accent);
-}
-.gyro-memory-panel.is-companion .gyro-memory-toolbar label {
-  border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-sm);
-  padding-left: var(--gyro-space-standard);
-  background: var(--gyro-control-bg);
-}
-.gyro-memory-panel.is-companion .gyro-memory-toolbar input {
-  background: transparent;
-  border: 0;
-}
-.gyro-memory-panel.is-companion .gyro-memory-list li > button {
-  padding: var(--gyro-space-panel) var(--gyro-space-standard);
-  border-radius: var(--gyro-radius-sm);
-  font-size: var(--gyro-font-chrome);
-  line-height: 1.55;
-}
-.gyro-memory-panel.is-companion :is(.gyro-memory-editor, .gyro-memory-detail, .gyro-memory-suggestion) {
-  gap: var(--gyro-space-panel);
-}
-.gyro-memory-panel.is-companion .gyro-memory-editor textarea {
-  min-height: 140px;
-  line-height: 1.6;
-}
-.gyro-memory-panel.is-companion .gyro-memory-entry-text {
-  font-size: var(--gyro-font-chrome);
-  line-height: 1.7;
-}
-.gyro-memory-panel.is-companion .gyro-memory-actions {
-  gap: var(--gyro-space-standard);
-}
-.gyro-memory-panel.is-companion .gyro-memory-settings {
-  padding-top: var(--gyro-space-standard);
-}
-.gyro-memory-panel.is-companion .gyro-memory-empty {
-  padding-block: var(--gyro-space-section);
-}
-
-/* Terminal chrome, never the terminal's font, wrapping or viewport. */
-:root[data-theme] .gyro-chat-companion-content .gyro-terminal-toolbar {
-  padding: var(--gyro-space-standard) var(--gyro-space-comfortable);
-  border-bottom: 1px solid var(--gyro-border-soft);
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-terminal-empty-intro {
-  padding: var(--gyro-space-panel);
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-terminal-empty-intro h2 {
-  font-size: var(--gyro-font-lead);
-  font-weight: 600;
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-terminal-empty-intro p {
-  font-size: var(--gyro-font-support);
-  line-height: 1.6;
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-terminal-launcher {
-  width: min(380px, calc(100% - 32px));
-}
-
-/* Side chat and agents retain the main chat's content rendering. */
-:root[data-theme] .gyro-chat-companion-content .gyro-side-chat .gyro-side-chat-context {
-  padding: var(--gyro-space-comfortable) var(--gyro-tool-gutter);
-  border-bottom: 1px solid var(--gyro-border-soft);
-  color: var(--gyro-muted);
-  font-size: var(--gyro-font-support);
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-side-chat-transcript {
-  padding: var(--gyro-space-panel);
-  gap: var(--gyro-space-section);
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-side-chat-empty {
-  padding: var(--gyro-space-section) 0;
-  max-width: 420px;
-  width: 100%;
-  margin-inline: auto;
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-side-chat-empty h2 {
-  font-size: var(--gyro-font-lead);
-  line-height: 1.4;
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-side-chat-empty p {
-  font-size: var(--gyro-font-support);
-  line-height: 1.6;
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-side-chat-starters {
-  display: grid;
-  width: 100%;
-  gap: var(--gyro-space-standard);
-  margin-top: var(--gyro-space-panel);
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-side-chat-starters button {
-  padding: var(--gyro-space-comfortable);
-  text-align: left;
-  min-height: 38px;
-  border: 1px solid var(--gyro-border-soft);
-  border-radius: var(--gyro-radius-sm);
-  font-size: var(--gyro-font-support);
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-subagent-panel {
-  padding: var(--gyro-space-panel);
-}
-
-/* Plan keeps document/steps navigation and distinct completion states. */
-:root[data-theme] .gyro-chat-companion-host-pane > .gyro-plan-rail .gyro-plan-panel-head {
-  padding-inline: var(--gyro-space-panel);
-  background: transparent;
-}
-:root[data-theme] .gyro-chat-companion-host-pane > .gyro-plan-rail .gyro-plan-item {
-  padding-block: var(--gyro-space-comfortable);
-  border-bottom: 1px solid var(--gyro-border-soft);
-}
-:root[data-theme] .gyro-chat-companion-host-pane > .gyro-plan-rail .gyro-plan-panel-icon {
-  background: transparent;
-  box-shadow: none;
-}
-
-/* Empty CLI navigation should not advertise actions that aren't available. */
-.gyro-terminal-launcher:not(:has(> button)) {
-  display: none;
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-second-opinion > .gyro-environment-rail.is-tool.is-chromeless,
-:root[data-theme] .gyro-chat-companion-content .gyro-diff-review {
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-}
-:root[data-theme] .gyro-chat-companion-content .gyro-second-opinion > .gyro-environment-rail.is-tool.is-chromeless {
-  display: grid;
-  padding: 0;
-}
-:root[data-theme] .gyro-chat-environment-popover .gyro-environment-overline {
-  font-size: var(--gyro-font-chrome);
-  font-weight: 600;
-  letter-spacing: 0;
-  text-transform: none;
-}
-:root[data-theme] .gyro-chat-environment-popover .gyro-environment-section {
-  padding-block: var(--gyro-space-comfortable);
-}
-:root[data-theme] .gyro-chat-environment-popover .gyro-environment-section > header {
-  font-size: var(--gyro-font-support);
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-/* Preserve a visible focus indicator on every newly styled tool control. */
-:root[data-theme] .gyro-chat-companion-content :is(
-  .gyro-companion-launcher > button,
-  .gyro-companion-files button,
-  .gyro-canvas button,
-  .gyro-side-chat-starters button
-):focus-visible {
-  outline: 2px solid var(--gyro-focus-ring);
-  outline-offset: -2px;
-}
-
-.gyro-composer-editor {
-  position: relative;
-  min-width: 0;
-  border-radius: inherit;
-}
-.gyro-composer-draft-mirror {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-  pointer-events: none;
-  color: var(--gyro-text);
-}
-.gyro-composer-editor:has(.gyro-composer-draft-mirror) textarea {
-  position: relative;
-  -webkit-text-fill-color: transparent;
-  caret-color: var(--gyro-text);
-}
-.gyro-inline-command {
-  position: relative;
-  display: inline-block;
-  color: transparent;
-}
-.gyro-inline-command svg {
-  position: absolute;
-  inset: 0;
-  fill: var(--gyro-muted);
-  font-family: var(--gyro-font-mono);
-}
-@media (forced-colors: active) {
-  .gyro-composer-draft-mirror { display: none; }
-  .gyro-composer-editor:has(.gyro-composer-draft-mirror) textarea {
-    -webkit-text-fill-color: CanvasText;
-  }
-}
-
-.gyro-composer-slash-menu.gyro-reviewer-menu {
-  width: min(calc(372px * var(--gyro-ui-scale, 1)), calc(100% - 12px));
-  gap: 0;
-  overflow: hidden;
-  padding: 0;
-}
-
-.gyro-composer-draft-mirror:has(.gyro-inline-reviewer) { z-index: 3; }
-@media (forced-colors: active) {
-  .gyro-composer-draft-mirror:has(.gyro-inline-reviewer) { display: block; color: transparent; }
-}
-@media (prefers-reduced-motion: no-preference) {
-  .gyro-reviewer-working .gyro-run-row-icon svg {
-    animation: gyro-chat-activity-spin var(--gyro-chat-motion-spin) linear infinite;
-  }
-}
-
-@container gyro-chat-pane (max-width: 280px) {
-  .gyro-chat-run-change-summary.is-complete > header {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.gyro-composer-stop-status {
-  align-self: center;
-  color: var(--gyro-muted);
-  white-space: nowrap;
-}
-
-:root[data-theme] .gyro-chat-companion.is-review:has(.gyro-review-reader) { background-color: var(--gyro-pane); }
-
-.gyro-review-document .gyro-response-body { min-width: 0; font: inherit; width: 100%; }
-
-.gyro-council-chip-group .gyro-composer-chip.is-council {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-  padding-right: calc(var(--gyro-chat-space-1) * 1.5);
-}
-
-.gyro-response-actions.gyro-council-actions button:not([aria-label]) {
-  width: auto;
-  height: auto;
-  white-space: nowrap;
-  color: var(--gyro-text);
-}
-
-.gyro-council-scope-dock .gyro-question-dock-head > svg {
-  flex: none;
-  color: var(--gyro-muted);
 }

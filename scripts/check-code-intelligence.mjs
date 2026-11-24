@@ -92,7 +92,7 @@ const handler = execute.slice(
 const permissionLoop = handler.indexOf("for class in permission_classes.iter().copied()");
 const finalGuard = handler.indexOf("// Approval can wait for minutes.");
 const permissionRecheck = handler.indexOf("if capability_denied_permission(");
-const dispatch = handler.indexOf("match execute_provider_capability(app, &bound, &request)");
+const dispatch = handler.indexOf("match execute_provider_capability(");
 assert.ok(permissionLoop > 0 && finalGuard > permissionLoop);
 assert.ok(permissionRecheck > finalGuard && dispatch > permissionRecheck);
 const gates = handler.slice(permissionLoop, finalGuard);

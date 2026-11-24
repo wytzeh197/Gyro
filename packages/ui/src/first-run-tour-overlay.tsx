@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { popoverViewportRect } from "./composer-popover-bounds";
 import { useDialogDismiss } from "./use-dialog-dismiss";
+import { Button } from "./primitives";
+import { WorkbenchScene } from "./workbench-scenes";
 import type { AppDestination } from "./types";
 import {
   TOUR_VERSION,
@@ -340,6 +342,7 @@ function TourCoachmark({
             ))}
           </div>
         </div>
+        <WorkbenchScene kind={step.id === "model" ? "providers" : step.id} />
         <h2 className="gyro-tour-title" id="gyro-tour-title">
           {step.title(copyContext)}
         </h2>
@@ -347,30 +350,35 @@ function TourCoachmark({
           {step.body(copyContext)}
         </p>
         <div className="gyro-tour-actions">
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             className="gyro-tour-skip"
             onClick={finalAction ? onNotNow : dismiss}
             type="button"
           >
             {finalAction ? "Not now" : "Skip tour"}
-          </button>
+          </Button>
           <div className="gyro-tour-nav">
             {index > 0 ? (
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 className="gyro-tour-secondary"
                 onClick={() => onMove(index - 1)}
                 type="button"
               >
                 Back
-              </button>
+              </Button>
             ) : null}
-            <button
+            <Button
+              size="sm"
               className="gyro-tour-primary"
               onClick={() => (finalAction ? onAction() : onMove(index + 1))}
               type="button"
             >
               {primaryLabel}
-            </button>
+            </Button>
           </div>
         </div>
       </section>

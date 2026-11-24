@@ -27,7 +27,13 @@ export {
   SettingsStatus,
   UsageCard,
 } from "./settings-presentation";
-export { SettingsEmptyState, SettingsGroup, SettingsMore, SettingsRow } from "./settings-controls";
+export {
+  SettingsChoice,
+  SettingsEmptyState,
+  SettingsGroup,
+  SettingsMore,
+  SettingsRow,
+} from "./settings-controls";
 export {
   Check as CheckIcon,
   ArrowRight as ArrowRightIcon,
@@ -48,7 +54,7 @@ export {
   Trash2 as TrashIcon,
   UserRound as UserRoundIcon,
   X as CloseIcon,
-} from "lucide-react";
+} from "./icons";
 export { useDialogDismiss } from "./use-dialog-dismiss";
 export {
   browserConfirm,
@@ -934,3 +940,6 @@ export type { ComposerReviewer } from "./composer-inline-draft";
 export { parseCouncilSynthesizerAction } from "./council-composer";
 
 export type { BrowserTraceRuntime } from "./browser-trace";
+
+export * from "./primitives";
+export { WorkbenchScene } from "./workbench-scenes";

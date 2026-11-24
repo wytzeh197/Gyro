@@ -946,6 +946,85 @@ pub fn run_openai_codex_app_server_chat(
     result
 }
 
+#[derive(Default)]
+struct CodexCompactionUsage {
+    turn_id: Option<String>,
+    billed: Option<accounting::CodexTurnUsage>,
+    occupancy: Option<ProviderContextUsage>,
+}
+
+impl CodexCompactionUsage {
+    fn observe(
+        &mut self,
+        thread_id: &str,
+        params: &serde_json::Value,
+    ) -> Option<crate::UsageTokens> {
+        if !accounting::codex_usage_matches(params, thread_id, self.turn_id.as_deref()) {
+            return None;
+        }
+        if let Some(occupancy) = accounting::provider_context_usage_from_app_server(params) {
+            self.occupancy = Some(occupancy);
+        }
+        // The last bucket can be a fresh estimate of the compacted context.
+        // With a pre-operation baseline, only the cumulative delta is spend.
+        params
+            .pointer("/tokenUsage/total")
+            .and_then(accounting::parse_counts)?;
+        self.billed
+            .as_mut()?
+            .observe(params)
+            .filter(|usage| usage.total_tokens > 0)
+    }
+}
+
+#[test]
+fn native_compaction_bills_the_matching_cumulative_delta_not_the_recomputed_context() {
+    use serde_json::json;
+    let counts = |input, output, total| {
+        json!({
+            "inputTokens":input, "outputTokens":output, "totalTokens":total,
+            "cachedInputTokens":0, "reasoningOutputTokens":0,
+        })
+    };
+    let baseline = counts(100, 20, 120);
+    let mut billed = accounting::CodexTurnUsage::new(true);
+    billed.set_baseline(accounting::parse_counts(&baseline));
+    let mut usage = CodexCompactionUsage {
+        turn_id: Some("compact".into()),
+        billed: Some(billed),
+        ..Default::default()
+    };
+    let mut event = json!({"threadId":"thread","turnId":"seed", "tokenUsage": {
+        "total":baseline, "last":baseline, "modelContextWindow":258_400,
+    }});
+    assert!(usage.observe("thread", &event).is_none());
+    assert!(usage.occupancy.is_none());
+    event["turnId"] = "compact".into();
+    assert!(usage.observe("other-thread", &event).is_none());
+    assert!(usage.observe("thread", &event).is_none());
+
+    event["tokenUsage"]["total"] = counts(270, 50, 320);
+    event["tokenUsage"]["last"] = counts(170, 30, 200);
+    let reported = usage.observe("thread", &event).unwrap();
+    assert_eq!(
+        (
+            reported.input_tokens,
+            reported.output_tokens,
+            reported.total_tokens
+        ),
+        (170, 30, 200)
+    );
+    assert!(reported.measured);
+
+    event["tokenUsage"]["last"] = counts(0, 0, 5_665);
+    assert_eq!(usage.observe("thread", &event).unwrap().total_tokens, 200);
+    assert_eq!(usage.occupancy.as_ref().unwrap().total_tokens, Some(5_665));
+
+    usage.billed = None;
+    assert!(usage.observe("thread", &event).is_none());
+    assert_eq!(usage.occupancy.unwrap().total_tokens, Some(5_665));
+}
+
 /// Execute Codex's explicit `thread/compact/start` request against a persisted
 /// thread. A new app-server process is intentional: normal chat turns use the
 /// same short-lived connection and resume the durable Codex thread each time.
@@ -965,6 +1044,7 @@ pub fn run_openai_codex_context_compaction(
     process.current_dir(&cwd);
     let mut child = CodexClient::spawn(process, host.codex_client_options())
         .map_err(|error| anyhow::anyhow!("could not start Codex app server: {error}"))?;
+    let mut usage = CodexCompactionUsage::default();
     let result = (|| -> anyhow::Result<Option<ProviderContextUsage>> {
         let (mut stdin, messages) = child.take_io().map_err(anyhow::Error::msg)?;
         let deadline = Instant::now() + Duration::from_secs(PROVIDER_CHAT_MAX_RUNTIME_SECS);
@@ -1031,6 +1111,18 @@ pub fn run_openai_codex_context_compaction(
             .pointer("/thread/id")
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| anyhow::anyhow!("Codex did not return a thread id"))?;
+        anyhow::ensure!(
+            thread_id == resume_cursor.session_id,
+            "Codex resumed a different thread for compaction"
+        );
+        let baseline = thread_result
+            .get("thread")
+            .and_then(accounting::codex_usage_baseline);
+        usage.billed = baseline.map(|baseline| {
+            let mut billed = accounting::CodexTurnUsage::new(true);
+            billed.set_baseline(Some(baseline));
+            billed
+        });
 
         write_codex_turn_message(
             host,
@@ -1042,13 +1134,25 @@ pub fn run_openai_codex_context_compaction(
             }),
         )
         .map_err(anyhow::Error::msg)?;
+        host.note_provider_call(request);
+        crate::provider_observation::attempt();
+        crate::provider_observation::native_usage(crate::UsageTokens::unavailable(
+            if baseline.is_some() {
+                crate::usage::UsageReason::MissingUsage
+            } else {
+                crate::usage::UsageReason::MissingBaseline
+            },
+        ));
+
+        let observe_usage = |usage: &mut CodexCompactionUsage, params: &serde_json::Value| {
+            if let Some(billed) = usage.observe(thread_id, params) {
+                crate::provider_observation::native_usage(billed);
+                host_services::emit_turn_tokens(host, request, billed);
+            }
+        };
 
         let mut request_confirmed = false;
         let mut compaction_completed = false;
-        // Codex re-measures the thread after replacing its history. Keeping
-        // that reading lets the composer meter drop instead of showing the
-        // pre-compaction fill until the next turn reports.
-        let mut context_usage = None;
         let mut protocol_messages = 0usize;
         let mut protocol_bytes = 0usize;
         loop {
@@ -1083,56 +1187,67 @@ pub fn run_openai_codex_context_compaction(
             }
             let method = message.get("method").and_then(serde_json::Value::as_str);
             let params = message.get("params").cloned().unwrap_or_default();
+            if params.get("threadId").and_then(serde_json::Value::as_str) != Some(thread_id) {
+                continue;
+            }
+            let event_turn = if matches!(method, Some("turn/started" | "turn/completed")) {
+                params.pointer("/turn/id")
+            } else {
+                params.get("turnId")
+            }
+            .and_then(serde_json::Value::as_str);
+            let compaction_item = params
+                .pointer("/item/type")
+                .and_then(serde_json::Value::as_str)
+                == Some("contextCompaction");
+            if usage.turn_id.is_none()
+                && (matches!(method, Some("turn/started" | "thread/compacted"))
+                    || (matches!(method, Some("item/started" | "item/completed"))
+                        && compaction_item))
+            {
+                usage.turn_id = event_turn.map(str::to_owned);
+            }
+            let same_turn = event_turn.is_some() && event_turn == usage.turn_id.as_deref();
             match method {
-                Some("thread/tokenUsage/updated") => {
-                    if let Some(usage) = accounting::provider_context_usage_from_app_server(&params)
-                    {
-                        emit_provider_context_usage(host, request, &usage);
-                        context_usage = Some(usage);
-                    }
-                }
-                Some("thread/compacted") => {
+                Some("thread/tokenUsage/updated") => observe_usage(&mut usage, &params),
+                Some("thread/compacted") if same_turn || event_turn.is_none() => {
                     compaction_completed = true;
-                    if request_confirmed {
-                        break;
-                    }
                 }
-                Some("item/completed") => {
-                    if params
-                        .pointer("/item/type")
-                        .and_then(serde_json::Value::as_str)
-                        == Some("contextCompaction")
-                    {
-                        compaction_completed = true;
-                        if request_confirmed {
-                            break;
-                        }
-                    }
+                Some("item/completed")
+                    if compaction_item && (same_turn || event_turn.is_none()) =>
+                {
+                    compaction_completed = true;
                 }
-                // Older host-server versions complete the compact operation as
-                // a turn. The response confirms it is this request, so accept
-                // a successful terminal turn only after that acknowledgement.
-                Some("turn/completed") if request_confirmed => {
+                // Older servers may send only the terminal turn. After the
+                // acknowledgement, accept it on this exact resumed thread.
+                Some("turn/completed")
+                    if same_turn || (request_confirmed && usage.turn_id.is_none()) =>
+                {
+                    usage.turn_id = event_turn.map(str::to_owned);
                     let status = params
                         .pointer("/turn/status")
                         .and_then(serde_json::Value::as_str)
                         .unwrap_or("failed");
                     if status == "completed" {
-                        break;
+                        compaction_completed = true;
+                    } else {
+                        let detail = params
+                            .pointer("/turn/error/message")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("Codex context compaction did not complete");
+                        anyhow::bail!("{detail}");
                     }
-                    let detail = params
-                        .pointer("/turn/error/message")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("Codex context compaction did not complete");
-                    anyhow::bail!("{detail}");
                 }
                 _ => {}
+            }
+            if request_confirmed && compaction_completed {
+                break;
             }
         }
         // The fresh reading can trail the completion notice; wait briefly for
         // it rather than persisting a result the meter cannot use.
         let usage_deadline = Instant::now() + Duration::from_millis(750);
-        while context_usage.is_none() {
+        while usage.occupancy.is_none() {
             let remaining = usage_deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 break;
@@ -1144,14 +1259,24 @@ pub fn run_openai_codex_context_compaction(
                 == Some("thread/tokenUsage/updated")
             {
                 let params = message.get("params").cloned().unwrap_or_default();
-                if let Some(usage) = accounting::provider_context_usage_from_app_server(&params) {
-                    emit_provider_context_usage(host, request, &usage);
-                    context_usage = Some(usage);
-                }
+                observe_usage(&mut usage, &params);
             }
         }
-        Ok(context_usage)
+        if let Some(occupancy) = usage.occupancy.as_ref() {
+            emit_provider_context_usage(host, request, occupancy);
+        }
+        Ok(usage.occupancy.take())
     })();
+    if result.is_err() {
+        if let Some(tokens) = usage
+            .billed
+            .as_mut()
+            .and_then(accounting::CodexTurnUsage::interrupt)
+            .filter(|tokens| tokens.total_tokens > 0)
+        {
+            crate::provider_observation::native_usage(tokens);
+        }
+    }
     drop(child);
     result
 }

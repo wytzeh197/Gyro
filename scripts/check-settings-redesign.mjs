@@ -7,7 +7,7 @@ import { join } from "node:path";
 // Production settings components with fixture-only data. No provider calls,
 // native permission requests, real imports, account changes or payments.
 const origin = process.env.GYRO_TEST_ORIGIN || "http://127.0.0.1:1420";
-const output = "artifacts/settings-implementation-2026-11-12";
+const output = process.env.GYRO_CAPTURE_OUTPUT || "artifacts/settings-implementation-2026-11-12";
 const browserPath =
   process.env.GYRO_CAPTURE_BROWSER ||
   "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser";
@@ -125,7 +125,7 @@ try {
     return {title:content.querySelector("h1").textContent, headings, overflow,
       pageOverflow:surface.scrollWidth > surface.clientWidth+2,
       titleSize:getComputedStyle(content.querySelector("h1")).fontSize,
-      primaryButtons:[...content.querySelectorAll("button.gyro-primary-button")].filter(visible).filter(x=>!x.disabled).length};
+      primaryButtons:[...content.querySelectorAll("button:is(.gyro-primary-button, .gyro-btn--default, .gyro-btn--prominent)")].filter(visible).filter(x=>!x.disabled).length};
   })()`);
   const pages = [
     "general",
@@ -207,7 +207,7 @@ try {
       const metrics = await inspect();
       if (section === "general") {
         const highlights = await evaluate(`(() => {
-          const toggle = document.querySelector(".gyro-settings-switch.is-on");
+          const toggle = document.querySelector('.gyro-settings-switch[aria-checked="true"]');
           return {
             accent: getComputedStyle(document.documentElement).getPropertyValue("--gyro-accent").trim(),
             track: getComputedStyle(toggle).backgroundColor,
@@ -301,6 +301,20 @@ try {
       );
       await capture("appearance-save-error");
     });
+    await test("appearance keeps theme modes and spacing without the preset palette", async () => {
+      await navigate("appearance");
+      assert.equal(await evaluate(`Boolean(document.querySelector('[data-settings-group="theme-palette"]'))`), false);
+      assert.deepEqual(
+        await evaluate(`[...document.querySelectorAll('.gyro-theme-picker > button')].map(button => button.getAttribute('aria-label'))`),
+        ["Light theme", "Dark theme", "System theme"],
+      );
+      await evaluate(`[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Spacious').click()`);
+      await until(() => evaluate(`document.documentElement.dataset.density === 'spacious' &&
+        document.querySelector('.gyro-appearance-save-status').textContent.trim() === 'Saved'`));
+      await navigate("appearance");
+      assert.equal(await evaluate(`document.documentElement.dataset.density`), "spacious");
+      assert.equal(await evaluate(`Boolean(document.querySelector('[data-settings-group="theme-palette"]'))`), false);
+    });
     await test("shortcut search filters app and editable workspace shortcuts", async () => {
       await navigate("keyboard");
       await evaluate(
@@ -333,6 +347,41 @@ try {
         "gyro-provider-accounts",
       );
       await capture("providers-add");
+    });
+    await test("new-chat provider choice supports keyboard selection and restores focus", async () => {
+      await navigate("efficiency", "dark", "connected=openai,anthropic");
+      const provider = `document.querySelector('[role="combobox"][aria-label="Default chat provider"]')`;
+      const key = async (key, code) => {
+        for (const type of ["keyDown", "keyUp"]) {
+          await call("Input.dispatchKeyEvent", {
+            type, key, code: key, windowsVirtualKeyCode: code,
+            ...(type === "keyDown" && key === "Enter"
+              ? { text: "\r", unmodifiedText: "\r" }
+              : {}),
+          });
+        }
+      };
+      const original = await evaluate(`${provider}.textContent.trim()`);
+      await evaluate(`${provider}.focus()`);
+      await until(() => evaluate(`document.activeElement === ${provider}`));
+      await key("Enter", 13);
+      await until(() => evaluate(
+        `${provider}.getAttribute("aria-expanded") === "true" &&
+          document.querySelectorAll('[role="listbox"] [role="option"]').length >= 2`,
+      ));
+      await key("End", 35);
+      await key("Enter", 13);
+      await until(() => evaluate(
+        `${provider}.getAttribute("aria-expanded") === "false" &&
+          ${provider}.textContent.trim() !== ${JSON.stringify(original)} &&
+          document.activeElement === ${provider}`,
+      ));
+      const selected = await evaluate(`${provider}.textContent.trim()`);
+      await key("Enter", 13);
+      await until(() => evaluate(`${provider}.getAttribute("aria-expanded") === "true"`));
+      await key("Escape", 27);
+      await until(() => evaluate(`${provider}.getAttribute("aria-expanded") === "false"`));
+      assert.equal(await evaluate(`${provider}.textContent.trim()`), selected);
     });
     await test("advanced settings reveal on search and keep their controls mounted", async () => {
       await navigate("efficiency");

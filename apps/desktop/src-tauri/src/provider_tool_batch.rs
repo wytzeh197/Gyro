@@ -336,6 +336,36 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
+    fn edit_validation_reports_missing_and_unknown_arguments_together() {
+        let name = CapabilityId::WorkspaceEdit.provider_tool_name();
+        let mut messages = Vec::new();
+        let invalid = serde_json::json!({"path":"src/main.rs", "content":"replacement"});
+        assert!(prepare_routed_tool_call(
+            &mut messages,
+            name,
+            &invalid,
+            Some("edit-attempt"),
+            CapabilityRunMode::Normal,
+            false,
+            false,
+        )
+        .is_none());
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0]["tool_call_id"], "edit-attempt");
+        let reply = messages[0]["content"].as_str().unwrap();
+        assert!(reply.contains("missing required arguments: oldString, newString"));
+        assert!(reply.contains("unknown tool argument: \"content\""));
+        assert!(reply.contains("No action was executed."));
+        assert!(!reply.contains("replacement"));
+
+        let valid = serde_json::json!({"path":"src/main.rs", "oldString":"old", "newString":"new"});
+        assert_eq!(
+            resolve_tool_call(name, &valid, CapabilityRunMode::Normal, false, false).unwrap(),
+            (CapabilityId::WorkspaceEdit, valid)
+        );
+    }
+
+    #[test]
     fn cli_catalog_needs_both_switches_and_a_reviewed_cli() {
         let on = gyro_core::efficiency::Config {
             experimental: true,
@@ -1208,6 +1238,7 @@ mod tests {
             assert!(!independent_read(id));
         }
     }
+
     #[test]
     fn only_tests_after_unapplied_edits_in_the_same_root_are_deferred() {
         use gyro_core::CapabilityId::{WorkspaceEdit, WorkspaceRunCommand, WorkspaceRunTest};
@@ -1541,6 +1572,15 @@ mod tests {
             &CapabilityResponse::failed("test", Uuid::new_v4(), "missing", "private sentinel"),
             true,
         );
+        let mut paused = CapabilityResponse::failed(
+            "test",
+            Uuid::new_v4(),
+            "execution-failed",
+            "private sentinel",
+        );
+        paused.error.as_mut().unwrap().progress_action =
+            Some(gyro_core::efficiency::progress::Decision::Pause);
+        observe_response(&paused, false);
         let events = gyro_core::provider_observation::snapshot()
             .unwrap()
             .context_attribution
@@ -1551,6 +1591,7 @@ mod tests {
         assert_eq!(events.spill_recoveries, 1);
         assert_eq!(events.spill_failures, 1);
         assert_eq!(events.repeated_call_notices, 1);
+        assert_eq!(events.repeated_call_pauses, 1);
         assert!(!serde_json::to_string(&events)
             .unwrap()
             .contains("private sentinel"));

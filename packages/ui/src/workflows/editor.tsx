@@ -1,3 +1,4 @@
+import { Button } from "../primitives/button";
 import type { WorkflowDefinition, WorkflowStep } from "./types";
 import { useRef, useState } from "react";
 import { WorkflowInputEditor, WorkflowStepEditor } from "./editor-fields";
@@ -300,13 +301,13 @@ export function WorkflowEditor({
       {error ? <p role="alert">{error}</p> : null}
       <div className="gyro-workflow-actions gyro-workflow-editor-footer">
         <span className="gyro-workflow-muted">Saving does not start a run.</span>
-        <button
-          className="gyro-primary-button"
+        <Button
+          size="sm"
           disabled={busy}
           onClick={save}
         >
           {busy ? "Saving…" : "Save workflow"}
-        </button>
+        </Button>
         <button disabled={busy} onClick={onCancel}>
           Discard changes
         </button>

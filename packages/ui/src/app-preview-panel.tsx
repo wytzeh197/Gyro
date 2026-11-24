@@ -8,6 +8,11 @@ import {
   type ReactNode,
 } from "react";
 import "./app-preview-panel.css";
+import { NativeAppPreview } from "./app-preview-device";
+import {
+  ApplePreviewSetup,
+  type XcodeSetupActions,
+} from "./app-preview-xcode-setup";
 
 export type AppPreviewTarget = {
   id: string;
@@ -15,7 +20,17 @@ export type AppPreviewTarget = {
   title: string;
   width: number;
   height: number;
+  deviceFamily?: "iPhone" | "iPad";
+  deviceType?: string;
+  booted?: boolean;
 };
+export type PixelRegion = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+export type PreviewScheme = { project: string; name: string };
 export type AppPreviewObservation = {
   target: AppPreviewTarget;
   screenshot: {
@@ -41,6 +56,18 @@ export type AppPreviewRuntime = {
   capture(): Promise<AppPreviewObservation>;
   click(captureId: string, x: number, y: number): Promise<unknown>;
   subscribe(listener: (capture?: AppPreviewObservation) => void): () => void;
+  schemes?(): Promise<PreviewScheme[]>;
+  run?(scheme: PreviewScheme): Promise<AppPreviewObservation>;
+  openDevice?(): Promise<void>;
+  xcodeSetup?: XcodeSetupActions;
+  simulatorFrame?(): Promise<AppPreviewObservation>;
+  crop?(
+    captureId: string,
+    region: PixelRegion,
+  ): Promise<AppPreviewObservation["screenshot"]>;
+  subscribeBuild?(
+    listener: (event: { targetId: string; phase: string }) => void,
+  ): () => void;
 };
 const WEB: AppPreviewTarget = {
   id: "web",
@@ -53,7 +80,7 @@ const runtimeLabel = (target: AppPreviewTarget) =>
   target.kind === "macos"
     ? "macOS window"
     : target.kind === "simulator"
-      ? "iPhone Simulator"
+      ? `${target.deviceFamily ?? "iPhone"} Simulator`
       : "Web preview";
 
 /**
@@ -62,6 +89,13 @@ const runtimeLabel = (target: AppPreviewTarget) =>
  * availability row and the address bar.
  */
 const AppPreviewMenuContext = createContext<ReactNode>(null);
+const ApplePreviewSetupContext = createContext<(() => void) | undefined>(
+  undefined,
+);
+const XCODE_SETUP_TARGET = "setup-apple-previews";
+export function useApplePreviewSetup() {
+  return useContext(ApplePreviewSetupContext);
+}
 export function useAppPreviewMenu() {
   return useContext(AppPreviewMenuContext);
 }
@@ -71,12 +105,21 @@ export function AppPreviewPanel({
   runtime,
   children,
   onHideWeb,
+  onSendAnnotation,
 }: {
   runtime: AppPreviewRuntime;
   children: ReactNode;
   onHideWeb?: () => void;
+  onSendAnnotation?: (
+    capture: AppPreviewObservation,
+    region: PixelRegion,
+    comment: string,
+  ) => Promise<{ error?: string }>;
 }) {
   const [target, setTarget] = useState(WEB);
+  const [showSetup, setShowSetup] = useState(false);
+  const panel = useRef<HTMLElement>(null);
+  const setupEntry = useRef<"blank" | "picker" | undefined>(undefined);
   const [loaded, setLoaded] = useState(false);
   const [targets, setTargets] = useState<AppPreviewTarget[]>([WEB]);
   const [issues, setIssues] = useState<string[]>([]);
@@ -121,9 +164,14 @@ export function AppPreviewPanel({
         void refresh();
         return;
       }
+      if (selectedId.current !== observation.target.id) return;
       generation.current++;
-      selectedId.current = observation.target.id;
       setTarget(observation.target);
+      setTargets((previous) =>
+        previous.map((item) =>
+          item.id === observation.target.id ? observation.target : item,
+        ),
+      );
       setCapture(observation);
       setLoaded(true);
       setBusy(false);
@@ -139,6 +187,21 @@ export function AppPreviewPanel({
       window.clearInterval(timer);
     };
   }, [runtime, refresh]);
+  const openSetup = (entry: "blank" | "picker") => {
+    setupEntry.current = entry;
+    hideWeb.current?.();
+    setShowSetup(true);
+  };
+  useEffect(() => {
+    if (showSetup || !setupEntry.current) return;
+    const entry = setupEntry.current;
+    setupEntry.current = undefined;
+    const selector =
+      entry === "blank"
+        ? "[data-apple-preview-entry]"
+        : 'button[aria-label="Browser options"], select[aria-label="Preview target"]';
+    panel.current?.querySelector<HTMLElement>(selector)?.focus();
+  }, [showSetup]);
   const select = async (id: string) => {
     const revision = ++generation.current;
     setBusy(true);
@@ -147,12 +210,20 @@ export function AppPreviewPanel({
     setError("");
     try {
       const next = await runtime.select(id);
-      if (generation.current !== revision) return;
-      selectedId.current = next.id;
-      setTarget(next);
-      if (next.kind !== "web") hideWeb.current?.();
+      if (generation.current === revision) {
+        selectedId.current = next.id;
+        setTarget(next);
+        setTargets((previous) =>
+          previous.some((item) => item.id === next.id)
+            ? previous
+            : [...previous, next],
+        );
+        if (next.kind !== "web") hideWeb.current?.();
+      }
+      return true;
     } catch (e) {
       if (generation.current === revision) setError(String(e));
+      return false;
     } finally {
       if (generation.current === revision) setBusy(false);
     }
@@ -190,7 +261,8 @@ export function AppPreviewPanel({
       value={target.id}
       disabled={busy}
       onChange={(event) => {
-        void select(event.target.value);
+        if (event.target.value === XCODE_SETUP_TARGET) openSetup("picker");
+        else void select(event.target.value);
       }}
     >
       {!targets.some((item) => item.id === target.id) && (
@@ -198,10 +270,14 @@ export function AppPreviewPanel({
       )}
       {targets.map((item) => (
         <option key={item.id} value={item.id}>
-          {runtimeLabel(item)}
-          {item.kind === "web" ? "" : ` · ${item.title}`}
+          {item.kind === "simulator"
+            ? `${item.title} · Simulator`
+            : `${runtimeLabel(item)}${item.kind === "web" ? "" : ` · ${item.title}`}`}
         </option>
       ))}
+      {runtime.xcodeSetup && (
+        <option value={XCODE_SETUP_TARGET}>Set up Apple previews…</option>
+      )}
     </select>
   );
   const availability =
@@ -241,11 +317,56 @@ export function AppPreviewPanel({
   );
   // The web page keeps its own address bar; runtime controls ride in its menu.
   const showsWeb = !capture && loaded && target.kind === "web";
-  return (
-    <section
-      className="gyro-app-preview"
-      aria-label="App preview and inspection"
-    >
+  const setup =
+    showSetup && runtime.xcodeSetup ? (
+      <ApplePreviewSetup
+        actions={runtime.xcodeSetup}
+        onBack={() => setShowSetup(false)}
+        onSelect={async (device) => {
+          if (!(await select(device.id))) return false;
+          setupEntry.current = "picker";
+          setShowSetup(false);
+          return true;
+        }}
+      />
+    ) : null;
+  const renderPreview = (content: ReactNode) => (
+    <>
+      <section
+        className="gyro-app-preview"
+        ref={panel}
+        hidden={showSetup}
+        aria-label="App preview and inspection"
+      >
+        {content}
+      </section>
+      {setup}
+    </>
+  );
+  if (target.kind !== "web") {
+    return renderPreview(
+      <NativeAppPreview
+        key={target.id}
+        runtime={runtime}
+        target={target}
+        targetPicker={targetPicker}
+        capture={capture}
+        busy={busy}
+        stale={stale}
+        issue={error}
+        onRefresh={() => void takeCapture()}
+        onCapture={(next) => {
+          if (selectedId.current !== next.target.id) return;
+          setTarget(next.target);
+          setCapture(next);
+          setNow(Date.now());
+        }}
+        onSend={onSendAnnotation}
+      />,
+    );
+  }
+  return renderPreview(
+    <>
       {showsWeb ? null : (
         <div className="gyro-app-preview-toolbar">{controls}</div>
       )}
@@ -264,12 +385,6 @@ export function AppPreviewPanel({
               {Math.floor(age / 1000)}s ago
             </span>
             <span>{capture.target.title}</span>
-            {capture.target.kind === "simulator" && (
-              <span>
-                Native device screenshot · interact in Simulator, then capture
-                again
-              </span>
-            )}
             <div>
               {capture.target.kind !== "simulator" && (
                 <button
@@ -356,30 +471,22 @@ export function AppPreviewPanel({
         </div>
       ) : !loaded ? (
         <div className="gyro-app-preview-empty">Loading runtime targets…</div>
-      ) : target.kind === "web" ? (
+      ) : (
         <AppPreviewMenuContext.Provider
           value={<div className="gyro-app-preview-menu">{controls}</div>}
         >
-          {children}
-        </AppPreviewMenuContext.Provider>
-      ) : (
-        <div className="gyro-app-preview-empty">
-          <strong>{target.title}</strong>
-          <span>{runtimeLabel(target)} connected · no current capture</span>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void takeCapture()}
+          <ApplePreviewSetupContext.Provider
+            value={runtime.xcodeSetup ? () => openSetup("blank") : undefined}
           >
-            Capture selected runtime
-          </button>
-        </div>
+            {children}
+          </ApplePreviewSetupContext.Provider>
+        </AppPreviewMenuContext.Provider>
       )}
       {busy && (
         <span className="gyro-app-preview-busy" role="status">
           Updating preview…
         </span>
       )}
-    </section>
+    </>,
   );
 }

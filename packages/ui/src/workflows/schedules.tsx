@@ -1,3 +1,5 @@
+import { Button } from "../primitives/button";
+import { Empty } from "../primitives/feedback";
 import { useState } from "react";
 import {
   CalendarClock,
@@ -7,7 +9,7 @@ import {
   Plus,
   Search,
   Workflow,
-} from "lucide-react";
+} from "../icons";
 import {
   automationDateLabel,
   automationScheduleLabel,
@@ -92,15 +94,16 @@ export function WorkflowSchedules({
           <p>Scheduled runs start on this Mac while Gyro is open.</p>
         </div>
         {onChooseWorkflow || promptIndex ? (
-          <button
-            className="gyro-primary-button"
+          <Button
+            size="sm"
+            leading={<Plus size={14} aria-hidden="true" />}
             disabled={promptIndex?.busy}
             aria-expanded={creating}
             aria-controls="gyro-new-schedule"
             onClick={() => setCreating(!creating)}
           >
-            <Plus size={14} aria-hidden="true" /> New schedule
-          </button>
+            New schedule
+          </Button>
         ) : null}
       </header>
       <div id="gyro-new-schedule" hidden={!creating}>
@@ -344,13 +347,12 @@ export function WorkflowSchedules({
           )}
         </>
       ) : !loading && !loadError ? (
-        <div className="gyro-workflow-empty">
-          <span className="gyro-workflow-icon-tile is-large">
-            <CalendarClock size={20} aria-hidden="true" />
-          </span>
-          <h2>No schedules yet</h2>
-          <p>Set a time for a workflow or prompt to run.</p>
-        </div>
+        <Empty
+          className="gyro-workflow-empty"
+          icon={<CalendarClock size={20} />}
+          title={<h2>No schedules yet</h2>}
+          description="Set a time for a workflow or prompt to run."
+        />
       ) : null}
     </section>
   );

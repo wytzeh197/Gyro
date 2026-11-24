@@ -1,4 +1,4 @@
-import { AlertTriangle, FolderSearch, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, FolderSearch, RefreshCw, X } from "./icons";
 import type { WorkspaceRootIssue } from "./workspace-roots";
 import { workspaceRootIssueIsTransient } from "./workspace-roots";
 import "./workspace-root-issues.css";

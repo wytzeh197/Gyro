@@ -16,7 +16,6 @@
 }
 .gyro-check-strip[data-running="true"] .gyro-check-strip-icon {
   color: var(--gyro-accent);
-  animation: gyro-check-spin 1.2s linear infinite;
 }
 .gyro-check-strip-copy {
   flex: 1;
@@ -41,36 +40,4 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-.gyro-check-strip > button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: none;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  padding: 6px;
-  color: var(--gyro-muted);
-  font: inherit;
-  font-size: var(--gyro-font-micro);
-  cursor: pointer;
-}
-.gyro-check-strip > button:hover {
-  color: var(--gyro-text);
-  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
-}
-.gyro-check-strip > button:focus-visible {
-  outline: 2px solid var(--gyro-accent);
-  outline-offset: 1px;
-}
-@keyframes gyro-check-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .gyro-check-strip[data-running="true"] .gyro-check-strip-icon {
-    animation: none;
-  }
 }

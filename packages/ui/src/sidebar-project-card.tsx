@@ -1,8 +1,7 @@
-import { SurfacePresence } from "./surface-presence";
 import { Folder, FolderPlus } from "./workspace-folder-icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
-import { MessageCircle, Pin, Settings, X } from "lucide-react";
+import { MessageCircle, Pin, Settings, X } from "./icons";
+import { Dialog, Popover } from "./primitives";
 import { ProjectMemoryPanel } from "./project-memory/panel";
 import type { ProjectMemoryRuntime } from "./project-memory/types";
 import { MAX_WORKSPACE_FOLDERS } from "./workspace-project";
@@ -69,57 +68,37 @@ export function SidebarProjectCard({
   const anchor = useRef<HTMLDivElement>(null);
   const card = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>();
-  const [position, setPosition] = useState<{ left: number; top: number }>();
+  // Focus to restore when a keyboard-opened card closes; null for hover.
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const pinned = settings?.details[path]?.pinned ?? false;
   const clear = () => {
     clearTimeout(timer.current);
   };
+  const restoringFocus = useRef(false);
   const close = () => {
     clear();
-    setPosition(undefined);
+    if (open && returnFocus.current) restoringFocus.current = true;
+    setOpen(false);
   };
-  const show = () => {
+  const show = (fromKeyboard = false) => {
     clear();
-    const rect = anchor.current?.getBoundingClientRect();
-    if (rect)
-      setPosition({
-        left: Math.max(8, Math.min(rect.right - 16, window.innerWidth - 278)),
-        top: Math.max(8, Math.min(rect.top, window.innerHeight - 144)),
-      });
+    returnFocus.current = fromKeyboard
+      ? (document.activeElement as HTMLElement | null)
+      : null;
+    setOpen(true);
   };
   const enter = () => {
     clear();
-    if (!position && !editing) timer.current = setTimeout(show, 1500);
+    restoringFocus.current = false;
+    if (!open && !editing) timer.current = setTimeout(() => show(), 1500);
   };
   const leave = () => {
     clear();
     timer.current = setTimeout(close, 180);
   };
   useEffect(() => () => clearTimeout(timer.current), []);
-  useEffect(() => {
-    if (!position) return;
-    const dismiss = (event: PointerEvent) => {
-      if (
-        !anchor.current?.contains(event.target as Node) &&
-        !card.current?.contains(event.target as Node)
-      )
-        close();
-    };
-    const key = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
-    };
-    window.addEventListener("pointerdown", dismiss);
-    window.addEventListener("keydown", key);
-    window.addEventListener("resize", close);
-    window.addEventListener("scroll", close, true);
-    return () => {
-      window.removeEventListener("pointerdown", dismiss);
-      window.removeEventListener("keydown", key);
-      window.removeEventListener("resize", close);
-      window.removeEventListener("scroll", close, true);
-    };
-  }, [position]);
   const edit = () => {
     close();
     setEditing(true);
@@ -130,7 +109,11 @@ export function SidebarProjectCard({
         ref={anchor}
         onMouseEnter={enter}
         onMouseLeave={leave}
-        onFocus={enter}
+        onFocus={() => {
+          // Focus coming back from the card is not a fresh hover.
+          if (restoringFocus.current) restoringFocus.current = false;
+          else enter();
+        }}
         onBlur={(event) => {
           if (
             !event.currentTarget.contains(event.relatedTarget as Node) &&
@@ -142,7 +125,7 @@ export function SidebarProjectCard({
         onKeyDown={(event) => {
           if (event.key === "ArrowRight" && !event.altKey) {
             event.preventDefault();
-            show();
+            show(true);
           }
         }}
         className="gyro-project-card-anchor"
@@ -152,68 +135,76 @@ export function SidebarProjectCard({
       {expandedContent ? (
         <div className="gyro-sidebar-project-children">{expandedContent}</div>
       ) : null}
-      <SurfacePresence portal="body">
-        {position ? (
-          <div
-            ref={card}
-            role="dialog"
-            aria-label={`${name} project details`}
-            className="gyro-project-hover-card"
-            style={position}
-            onMouseEnter={clear}
-            onMouseLeave={leave}
-            onFocus={clear}
-            onBlur={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node))
-                leave();
-            }}
-          >
-            <div className="gyro-project-card-heading">
-              <Folder size={18} />
-              <strong>{name}</strong>
-              <button
-                type="button"
-                aria-label={`${pinned ? "Unpin" : "Pin"} ${name}`}
-                aria-pressed={pinned}
-                disabled={!settings}
-                onClick={() =>
-                  settings?.save(
-                    path,
-                    name,
-                    !pinned,
-                    settings.folders[path] ?? [],
-                    settings.details[path]?.primaryFolder,
-                    settings.details[path]?.allowNestedFolders,
-                  )
-                }
-              >
-                <Pin size={17} fill={pinned ? "currentColor" : "none"} />
-              </button>
-            </div>
-            <div className="gyro-project-card-count">
-              <MessageCircle size={17} />
-              <span>
-                {taskCount} {taskCount === 1 ? "chat" : "chats"}
-                <span className="gyro-project-count-dot"> · </span>
-                {activeCount} active
-              </span>
-            </div>
-            <div className="gyro-project-card-path" title={path}>
-              <Folder size={17} />
-              <span>{path.replace(/^\/(Users|home)\/[^/]+(?=\/)/, "~")}</span>
-            </div>
+      <Popover.Root
+        open={open}
+        onOpenChange={(next) => {
+          if (!next) close();
+        }}
+      >
+        <Popover.Content
+          ref={card}
+          anchor={anchor}
+          side="right"
+          align="start"
+          sideOffset={-16}
+          collisionPadding={8}
+          aria-label={`${name} project details`}
+          className="gyro-project-hover-card"
+          initialFocus={() => returnFocus.current !== null}
+          finalFocus={() => returnFocus.current ?? false}
+          onMouseEnter={clear}
+          onMouseLeave={leave}
+          onFocus={clear}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node))
+              leave();
+          }}
+        >
+          <div className="gyro-project-card-heading">
+            <Folder size={18} />
+            <strong>{name}</strong>
             <button
-              className="gyro-project-card-edit"
               type="button"
-              onClick={edit}
+              aria-label={`${pinned ? "Unpin" : "Pin"} ${name}`}
+              aria-pressed={pinned}
               disabled={!settings}
+              onClick={() =>
+                settings?.save(
+                  path,
+                  name,
+                  !pinned,
+                  settings.folders[path] ?? [],
+                  settings.details[path]?.primaryFolder,
+                  settings.details[path]?.allowNestedFolders,
+                )
+              }
             >
-              <Settings size={18} />
-              Edit project
+              <Pin size={17} fill={pinned ? "currentColor" : "none"} />
             </button>
           </div>
-        ) : null}
-      </SurfacePresence>
+          <div className="gyro-project-card-count">
+            <MessageCircle size={17} />
+            <span>
+              {taskCount} {taskCount === 1 ? "chat" : "chats"}
+              <span className="gyro-project-count-dot"> · </span>
+              {activeCount} active
+            </span>
+          </div>
+          <div className="gyro-project-card-path" title={path}>
+            <Folder size={17} />
+            <span>{path.replace(/^\/(Users|home)\/[^/]+(?=\/)/, "~")}</span>
+          </div>
+          <button
+            className="gyro-project-card-edit"
+            type="button"
+            onClick={edit}
+            disabled={!settings}
+          >
+            <Settings size={18} />
+            Edit project
+          </button>
+        </Popover.Content>
+      </Popover.Root>
       {editing && settings && (
         <ProjectEditDialog
           path={path}
@@ -287,7 +278,6 @@ function ProjectEditDialog({
 }) {
   const [view, setView] = useState<"general" | "memory">("general");
   const [memoryVisited, setMemoryVisited] = useState(false);
-  const dialog = useRef<HTMLDialogElement>(null);
   const [draftName, setDraftName] = useState(name);
   const [draftFolders, setDraftFolders] = useState(folders);
   const [draftPrimary, setDraftPrimary] = useState(
@@ -297,9 +287,6 @@ function ProjectEditDialog({
   const [picking, setPicking] = useState(false);
   const [error, setError] = useState("");
   const atFolderCap = draftFolders.length >= MAX_EXTRA_PROJECT_FOLDERS;
-  useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
   const addFolder = async () => {
     setPicking(true);
     setError("");
@@ -330,27 +317,20 @@ function ProjectEditDialog({
       setPicking(false);
     }
   };
-  return createPortal(
-    <dialog
-      ref={dialog}
-      className={`gyro-project-edit-dialog${view === "memory" ? " is-memory" : ""}`}
-      aria-labelledby="gyro-project-edit-title"
-      onCancel={onClose}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          const r = event.currentTarget.getBoundingClientRect();
-          if (
-            event.clientX < r.left ||
-            event.clientX > r.right ||
-            event.clientY < r.top ||
-            event.clientY > r.bottom
-          )
-            onClose();
-        }
+  return (
+    <Dialog.Root
+      open
+      onOpenChange={(next, details) => {
+        // The memory editor holds Escape while a draft is unsaved.
+        if (!next && !details.event?.defaultPrevented) onClose();
       }}
     >
+      <Dialog.Content
+        className={`gyro-project-edit-dialog${view === "memory" ? " is-memory" : ""}`}
+        aria-labelledby="gyro-project-edit-title"
+      >
       <header>
-        <h2 id="gyro-project-edit-title">Edit project</h2>
+        <Dialog.Title id="gyro-project-edit-title">Edit project</Dialog.Title>
         <button type="button" aria-label="Close edit project" onClick={onClose}>
           <X size={17} />
         </button>
@@ -546,7 +526,7 @@ function ProjectEditDialog({
           <ProjectMemoryPanel runtime={memory} embedded />
         </div>
       ) : null}
-    </dialog>,
-    document.body,
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

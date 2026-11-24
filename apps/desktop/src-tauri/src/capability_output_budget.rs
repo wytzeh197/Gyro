@@ -76,16 +76,18 @@ pub(super) fn text_result(
             continue;
         };
         let total = text.chars().count();
-        let requested_start = offset(arguments, field.offset)?.map(|start| start.min(total));
+        let requested_start = offset(arguments, field.offset)?;
         // Every candidate in the byte-budget search uses at most max_bytes
         // characters. Retain only the range those candidates can address.
-        let first_char = requested_start.unwrap_or_else(|| {
-            if field.tail {
-                total.saturating_sub(max_bytes)
-            } else {
-                0
-            }
-        });
+        let first_char = requested_start
+            .map(|start| start.min(total))
+            .unwrap_or_else(|| {
+                if field.tail {
+                    total.saturating_sub(max_bytes)
+                } else {
+                    0
+                }
+            });
         let count = (total - first_char).min(max_bytes);
         let (text, boundaries) = if total == text.len() {
             (&text[first_char..first_char + count], None)
@@ -112,13 +114,16 @@ pub(super) fn text_result(
     let update = |data: &mut Value, count: usize| {
         for source in &sources {
             let total = source.total;
-            let start = source.requested_start.unwrap_or_else(|| {
-                if source.field.tail {
-                    total.saturating_sub(count)
-                } else {
-                    0
-                }
-            });
+            let start = source
+                .requested_start
+                .map(|start| start.min(total))
+                .unwrap_or_else(|| {
+                    if source.field.tail {
+                        total.saturating_sub(count)
+                    } else {
+                        0
+                    }
+                });
             let end = start.saturating_add(count).min(total);
             if let Some(value) = data.pointer_mut(source.field.pointer) {
                 *value = json!(&source.text[source.byte_offset(start)..source.byte_offset(end)]);
@@ -129,6 +134,12 @@ pub(super) fn text_result(
                 "nextOffset": (end < total).then_some(end),
                 "previousOffset": (start > 0).then_some(start.saturating_sub(count.max(1))),
             });
+            // A follow-up requests an exact page, including an explicit zero.
+            // Keep this within the measured result so both serializers can
+            // distinguish paging from an automatic preview of the same size.
+            if let Some(requested) = source.requested_start {
+                data[source.field.window]["requestedOffset"] = json!(requested);
+            }
         }
     };
     let (mut low, mut high) = (0, max_bytes);
@@ -316,9 +327,9 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
             }
         }),
         CapabilityId::WorkspaceRunCommand => json!({
-            "program": {"type":"string","description":"Executable name or path"},
-            "args": {"type":"array","items":{"type":"string"}},
-            "cwd": {"type":"string","description":"Directory relative to the Workspace root"},
+            "program": {"type":"string","description":"One executable name or path, such as node. Put options and file names in args."},
+            "args": {"type":"array","items":{"type":"string"},"description":"One argument per element, such as [\"--test\", \"example.test.mjs\"]."},
+            "cwd": {"type":"string","description":"Directory relative to the Workspace root. Omit to run from the root."},
             "networkDestinations": {"type":"array","items":{"type":"string"},"maxItems":16,"description":"Exact public HTTPS hostnames this invocation needs"},
             "maxBytes": workspace_result_bytes_schema()
         }),
@@ -356,7 +367,7 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
             "maxBytes": workspace_result_bytes_schema()
         }),
         CapabilityId::WorkspaceReadOutput => json!({
-            "outputId":{"type":"string","description":"Optional resource.id from a task this chat ran. Full task outputs are retained for up to 16 outputs and 16 MiB; omit for the active output channel."},
+            "outputId":{"type":"string","description":"Optional resource.id from a command or task this chat ran. Full outputs are retained for up to 16 outputs and 16 MiB. An expired output can return its saved exit status. Omit for the active channel."},
             "offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":1000,"default":20},
             "stdoutOffset": offset_schema(),
             "stderrOffset": offset_schema(),
@@ -385,7 +396,7 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
     let required = match id {
         CapabilityId::GithubWorkflowLogs => vec!["runId"],
         CapabilityId::WorkspaceRunTask | CapabilityId::WorkspaceRunTest => vec!["taskId"],
-        CapabilityId::TerminalOpen => vec!["program"],
+        CapabilityId::TerminalOpen | CapabilityId::WorkspaceRunCommand => vec!["program"],
         CapabilityId::TerminalWait => vec!["resourceId"],
         _ => vec![],
     };
@@ -649,6 +660,7 @@ mod tests {
             let expected: String = source.chars().skip(start).take(count).collect();
             assert_eq!(result["output"], expected);
             assert_eq!(window["offset"], start);
+            assert_eq!(window["requestedOffset"], requested);
             assert_eq!(window["totalChars"], total);
             assert_eq!(
                 window["nextOffset"],
@@ -683,6 +695,65 @@ mod tests {
         assert_eq!(data["stderr"], "ERROR: final failure");
         assert_eq!(data["stdoutWindow"]["truncated"], true);
         assert!(serde_json::to_vec(&data).unwrap().len() <= DEFAULT_WORKSPACE_RESULT_BYTES);
+    }
+
+    #[test]
+    fn terminal_output_pages_reconstruct_exact_text_through_api_and_mcp() {
+        use gyro_core::{CapabilityResponse, CapabilityResult, GyroPaths};
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("gyro"));
+        let _scope =
+            gyro_core::efficiency::spill::SessionScope::start(&paths, uuid::Uuid::new_v4());
+        let source: String = (0..600)
+            .map(|line| format!("check {line} 🦀 é\tFailed assertion\n"))
+            .collect();
+        let mut cursor = 0;
+        let mut restored = String::new();
+        let mut pages = 0;
+        loop {
+            let data = terminal_capability::bound_terminal_result(
+                json!({"pane":{"output":source,"status":"failed"},"completed":true,"exitCode":1}),
+                &json!({"outputOffset":cursor,"maxBytes":4800}),
+            )
+            .unwrap();
+            assert!(serde_json::to_vec(&data).unwrap().len() <= 4800);
+            let response = CapabilityResponse::completed(
+                "test",
+                CapabilityResult {
+                    call_id: uuid::Uuid::new_v4(),
+                    capability_id: CapabilityId::TerminalRead,
+                    summary: "Read model terminal output".into(),
+                    data: data.clone(),
+                    resource: None,
+                },
+            );
+            let api: Value = serde_json::from_str(
+                &gyro_core::provider_runtime::tool_batch::model_response_text(&response).unwrap(),
+            )
+            .unwrap();
+            let native =
+                crate::capabilities::mcp_server::capability_mcp_response(&paths, response, false)
+                    .unwrap();
+            let native: Value =
+                serde_json::from_str(native["content"][0]["text"].as_str().unwrap()).unwrap();
+            assert_eq!(api["result"]["data"], data);
+            assert_eq!(native["data"], data);
+            assert_eq!(data["outputWindow"]["requestedOffset"], cursor);
+            let text = api["result"]["data"]["pane"]["output"].as_str().unwrap();
+            assert_eq!(
+                text.chars().count(),
+                data["outputWindow"]["returnedChars"].as_u64().unwrap() as usize
+            );
+            restored.push_str(text);
+            pages += 1;
+            let Some(next) = data["outputWindow"]["nextOffset"].as_u64() else {
+                break;
+            };
+            assert!(next > cursor);
+            cursor = next;
+        }
+        assert!(pages > 1);
+        assert_eq!(restored, source);
     }
 
     #[test]

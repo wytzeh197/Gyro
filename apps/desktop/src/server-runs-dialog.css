@@ -1,0 +1,98 @@
+.gyro-server-runs-body,
+.gyro-server-runs-form,
+.gyro-server-runs-history,
+.gyro-server-runs-review {
+  display: grid;
+  gap: var(--gyro-space-standard);
+  min-width: 0;
+}
+
+.gyro-server-runs-body {
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.gyro-server-runs-body p {
+  color: var(--gyro-text-secondary);
+  font-size: var(--gyro-text-ui-sm);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.gyro-server-runs-body label,
+.gyro-server-runs-body strong {
+  font-size: var(--gyro-text-ui-sm);
+  font-weight: var(--gyro-weight-medium);
+}
+
+.gyro-server-runs-form-footer,
+.gyro-server-runs-history-header,
+.gyro-server-runs-status,
+.gyro-server-runs-result,
+.gyro-server-runs-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+}
+
+.gyro-server-runs-form-footer p,
+.gyro-server-runs-feedback span {
+  flex: 1;
+  min-width: 12rem;
+}
+
+.gyro-server-runs-history {
+  border-top: 1px solid var(--gyro-border);
+  padding-top: var(--gyro-space-card);
+}
+
+.gyro-server-runs-history-header,
+.gyro-server-runs-status,
+.gyro-server-runs-result,
+.gyro-server-runs-feedback {
+  font-size: var(--gyro-text-ui-sm);
+  color: var(--gyro-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.gyro-server-runs-status .gyro-server-runs-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gyro-space-standard);
+  margin-inline-start: auto;
+}
+
+.gyro-server-runs-log {
+  max-height: 12rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+  padding: var(--gyro-space-card);
+  font: var(--gyro-text-ui-xs)/1.5 var(--gyro-font-mono);
+  background: var(--gyro-control);
+  border: 1px solid var(--gyro-border);
+  border-radius: var(--gyro-radius-md);
+}
+
+.gyro-server-runs-review {
+  overflow: hidden;
+}
+
+.gyro-server-runs-review .gyro-plain-diff > .gyro-plain-diff-hunks {
+  flex: 0 1 auto;
+  max-height: 18rem;
+}
+
+.gyro-server-runs-history-header > button:last-child {
+  margin-inline-start: auto;
+}
+
+.gyro-server-runs-result code {
+  font-size: var(--gyro-text-ui-xs);
+}
+
+.gyro-server-runs-body [role="alert"] {
+  color: var(--gyro-text-primary);
+}

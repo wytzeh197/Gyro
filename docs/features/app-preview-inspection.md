@@ -1,19 +1,24 @@
 # App Preview and Inspection Panel
 
-Status: source implementation with partial acceptance, 2026-10-31. No install, release, commit, or dependency installation was performed.
+Status — the snapshot workflow is implemented in source. A real Simulator run and installed-app acceptance still require an Xcode-equipped Mac.
 
-## Implemented
+## Set up iPhone and iPad previews
 
-- The Browser panel offers Web, discovered macOS windows, and booted iPhone Simulator targets. Selection belongs to the chat and workspace. An existing Web page remains separate from a native runtime.
-- Four broker capabilities expose discovery, selection, framed PNG capture, and capture-bound clicks: `gyro_browser_targets`, `gyro_browser_select_target`, `gyro_browser_capture_preview`, `gyro_browser_preview_click`.
-- Captures include the selected target, owner, timestamp, content rectangle, image dimensions, and a 15-second interaction expiry. PNG bytes use the existing validated private capture transport. Model captures also update the owning panel.
-- Pointer coordinates use full framed-image pixels. The content rectangle maps them to CSS pixels for Web and logical window points for macOS; surrounds reject input. Selection, later captures, and dispatched clicks invalidate earlier references. Native clicks also recheck window identity/geometry, the current pixels, the front window, and the Accessibility hit target.
-- macOS capture uses public CoreGraphics/AppKit APIs and requires Screen Recording. Native clicks require Accessibility and an unobscured verified window; text/protected controls require user interaction.
-- Simulator discovery and PNG capture use installed `xcrun simctl` with a booted iPhone UDID. Device screenshots receive a phone surround. Simulator touch injection is **not implemented**; interact in Simulator and refresh the capture.
-- Hidden Web input now uses the existing page-event path. It does not provide trusted OS events, native menus, HTML drag-and-drop, or CSS hover.
-- Stale captures remain visibly labeled after expiry or disconnect. Changing targets removes the old image. This is snapshot inspection, not a live native video stream.
+- Open **Set up Apple previews** from the Browser’s empty view or **Browser options → Preview target**. Gyro checks for full Xcode, its first-launch setup, an iOS runtime, and usable Simulator devices.
+- Follow the Apple download link for your Mac or use **Choose Xcode…** to select an installed copy. Gyro saves the choice locally and uses it for its own Xcode commands.
+- Open Xcode to finish its first-launch setup. Install **iOS** in **Xcode → Settings → Components**. The iOS runtime supports iPhone and iPad. Gyro checks again when you return, and **Check again** is available at any time.
+- Pick a Simulator and select **Open preview**. Use **Run** in its preview to build the active project.
 
-## Verified
+## Native preview workflow
+
+- In the right-hand Browser panel, open **Preview target** and choose an installed iPhone or iPad Simulator, or a running Mac window. Switching back to **Web preview** restores that chat’s web page.
+- Select **Run** to find Xcode schemes in the active workspace. Choose the scheme if there are several. Gyro builds locally, boots the selected Simulator when needed, and installs and launches the app. **Rebuild** uses the same scheme and destination. Build failures include an expandable log.
+- The panel draws the device bezel around the app pixels. iPhone and iPad follow the captured orientation, and Mac windows sit inside a MacBook-style display. The hardware frame and cutouts stay in the preview layer. Portrait cutouts follow the selected Simulator model. The iPhone 12 and 13 mini have separate notch measurements. The iPhone 14 Pro, 14 Pro Max, 17 Pro, and 17 Pro Max use their own Dynamic Island proportions. For other models the preview uses the original Simulator pixels and a generic surround. Captures and annotation crops keep the original pixels.
+- **Capture** saves the Simulator PNG at its original pixel dimensions. **Auto-refresh** fetches updated snapshots while the panel is visible. Use **Open in Device Hub** to interact with the simulated app, and refresh when returning to Gyro. Native Mac window inspection can dispatch an explicitly requested click with Accessibility permission.
+- **Annotate** freezes a capture. Drag a region or choose **Select whole screen**, then send a comment and screenshot crop to the current chat. Image-capable models receive the crop. After rebuilding and returning to the same screen, refresh and use **Compare**. A narrow pane uses a Before / After switch.
+- Simulator interaction and Xcode acceptance require a Mac with full Xcode and an installed runtime. The component fixture uses a 1206 × 2622 PNG and can verify geometry, selection, and comparison independently of Xcode.
+
+## Earlier acceptance evidence
 
 - UI and desktop TypeScript checks passed.
 - Desktop Rust check passed.

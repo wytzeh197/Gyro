@@ -1,4 +1,5 @@
-import { LoaderCircle, Mic, Square, X } from "lucide-react";
+import { Mic, Square, X } from "./icons";
+import { Spinner } from "./primitives/feedback";
 import { useEffect, useId, useRef } from "react";
 
 export function DictationControl({
@@ -68,11 +69,7 @@ export function DictationControl({
         type="button"
       >
         {busy ? (
-          <LoaderCircle
-            aria-hidden="true"
-            className="gyro-dictation-progress"
-            size={17}
-          />
+          <Spinner decorative size="md" />
         ) : listening ? (
           <Square aria-hidden="true" fill="currentColor" size={13} />
         ) : (

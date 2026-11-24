@@ -1,6 +1,6 @@
 use crate::provider_context;
 use gyro_core::provider_runtime::types::ProviderAdapterKind;
-use gyro_core::{GyroConfig, GyroPaths, SessionEvent, SessionStore, UsageOrigin};
+use gyro_core::{GyroConfig, GyroPaths, SessionEvent, SessionEventKind, SessionStore, UsageOrigin};
 use uuid::Uuid;
 /// Which action a provider call belongs to, for the usage ledger.
 ///
@@ -237,11 +237,19 @@ fn session_context_signal(
 /// Text characters one stored event adds to the prompt that resumes from it.
 ///
 /// The auto-compact decision needs a size for the sessions whose provider never
-/// reports one, and the stored events are the only source every adapter feeds.
-/// Counting the strings a payload carries is adapter-agnostic; image bytes are
-/// provider-owned, so encoded fields are skipped the way a message's image
-/// payload is skipped when the note measures text.
+/// reports one. For messages, use the saved text and attachment metadata.
+/// Other events can carry tool results or compaction summaries in their payload.
 pub(crate) fn event_text_characters(event: &SessionEvent) -> u64 {
+    if matches!(
+        event.kind,
+        SessionEventKind::UserMessage | SessionEventKind::AssistantMessage
+    ) {
+        let mut characters = event.message.chars().count() as u64;
+        if let Some(attachments) = event.payload.get("attachments") {
+            collect_text_characters(attachments, None, &mut characters);
+        }
+        return characters;
+    }
     let mut characters = 0u64;
     collect_text_characters(&event.payload, None, &mut characters);
     characters
@@ -284,7 +292,6 @@ pub(crate) fn is_encoded_text(field: Option<&str>, text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gyro_core::SessionEventKind;
     use serde_json::json;
 
     #[test]
@@ -337,6 +344,16 @@ mod tests {
             assert!(needs_compaction(adapter, &events));
         }
 
+        events[2].message = "pass".repeat(400);
+        events[2].payload["contextUsage"] =
+            json!({"inputTokens": 200, "outputTokens": 100, "modelContextWindow": 512});
+        for adapter in [
+            ProviderAdapterKind::OpenAiCompatible,
+            ProviderAdapterKind::Ollama,
+        ] {
+            assert!(!needs_compaction(adapter, &events));
+        }
+
         events[2].payload = json!({});
         events[2].message = "🦀".repeat(1_800);
         for adapter in [
@@ -356,6 +373,52 @@ mod tests {
         ] {
             assert!(!needs_compaction(adapter, &events));
         }
+    }
+
+    #[test]
+    fn native_auto_compaction_counts_saved_messages_without_usage_or_payload_text() {
+        let session = Uuid::new_v4();
+        let events = [
+            SessionEvent::new(
+                session,
+                SessionEventKind::UserMessage,
+                "x".repeat(1_400),
+                json!({}),
+            ),
+            SessionEvent::new(
+                session,
+                SessionEventKind::AssistantMessage,
+                "y".repeat(400),
+                json!({}),
+            ),
+        ];
+        assert!(should_compact_before_turn(
+            85,
+            ProviderAdapterKind::KimiAcp,
+            "fixture",
+            Some("model"),
+            Some(512),
+            &events,
+        ));
+        // The persisted timeline can repeat the answer for rendering. That
+        // duplicate is not additional context carried by the native thread.
+        let answer = SessionEvent::new(
+            session,
+            SessionEventKind::AssistantMessage,
+            "Short reply",
+            json!({
+                "segments": [{"type":"text","text":"Short reply".repeat(500)}],
+                "userMessagePreview": "Previously quoted".repeat(500),
+            }),
+        );
+        assert!(!should_compact_before_turn(
+            85,
+            ProviderAdapterKind::KimiAcp,
+            "fixture",
+            Some("model"),
+            Some(512),
+            &[answer],
+        ));
     }
 
     #[test]

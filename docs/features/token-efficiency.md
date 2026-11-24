@@ -5,6 +5,61 @@ history and internal loops remain provider-owned. API runners own their messages
 and Gyro tools. Subscription allowance is not represented as a monetary token
 bucket.
 
+## Harness upgrade qualification
+
+The opt-in upgrade gives Gyro tool users precise recovery instructions for
+stale edits, running commands, and failed checks. It can also put bounded,
+exact checkpoint references into an owned API compaction note or a fresh
+Codex or Claude launch when a native thread cannot reopen. Successful native
+resumes use the provider thread. Older file and check references require
+revalidation.
+
+The existing `stableApiPrefix` switch and the new `toolRecoveryFeedback` and
+`checkpointRecovery` switches are independent. All three default to off.
+An entry in `efficiency.harnessRoutes`, keyed by provider ID, overrides the
+three switches for that route. Removing the entry restores the global
+settings. Set each switch to false in the entry to roll back that route.
+
+Run the offline checks and prepare separate specifications for each route.
+The preparation command prints the output directory.
+
+```sh
+node scripts/check-efficiency-harness.mjs
+node scripts/prepare-efficiency-harness.mjs
+```
+
+The frozen cohort contains 24 scenarios drawn from six historical Gyro changes
+across four source revisions. It includes small edits, paired multi-file
+repairs, read-only diagnoses, and interrupted sessions. Offline tests check historical failures,
+reference repairs, and incorrect answers. The native interruption cases reopen
+the local transcript on purpose. The owned API long-session cases use a
+6,144-token harness window to exercise compaction. Both variants receive the
+same stress conditions.
+
+Prepared specs have zero execution budgets. After approval, make bounded live
+copies with a DeepSeek API key configured, an immutable applicable API tariff,
+and pinned Codex and Claude CLI versions and logins for the native runs. Start
+with the smoke specs, run the prefix and independent development comparisons,
+then set `candidatePolicies` to the options being evaluated on each route.
+
+```sh
+node scripts/benchmark-efficiency.mjs --spec /path/to/approved-spec.json
+node scripts/prepare-efficiency-harness.mjs --result /path/to/deepseek-run --result /path/to/codex-run --result /path/to/claude-run
+```
+
+Native reports count submitted turns and observed Gyro tool requests.
+Provider-internal generation totals and subscription dollar costs stay
+unknown. The coordinated gate requires complete 48-pair cohorts, at least a
+five-point gain in verified completion on each route, positive fresh and
+resumed results, and positive paired task-resampling intervals. The gain must
+also stay positive when removing every scenario that uses any one source
+revision. This checks whether the result depends on related cases from a single
+revision. The gate also requires no critical or scope regression and at most
+10% p95 slowdown.
+DeepSeek additionally needs complete priced usage and at least 20% lower API
+spend per verified task. Selected checkpoint and prefix behavior must be
+observed. The coordinated report records eligibility without changing defaults.
+
 ## Focused Ollama tool catalog
 
 Set `efficiency.enabled`, `efficiency.experimental`, and
@@ -26,6 +81,26 @@ schemas. The model submits a new edit under the current approvals.
 
 Use the `focused-workspace-catalog` benchmark variant alongside `baseline`.
 The `compactToolCatalog` option takes precedence if both controls are enabled.
+
+## Require a test receipt in a benchmark
+
+For a task that asks the agent to run a specific test, add
+`requiredVerificationCommands` to its task entry. Each command supplies
+`program`, `args`, and an optional workspace-relative `cwd` that defaults to `.`.
+
+```json
+"requiredVerificationCommands": [
+  { "program": "node", "args": ["--test", "sum.test.mjs"] }
+]
+```
+
+The task passes only when its independent verifier succeeds and Gyro has a
+successful foreground receipt for each declared command. The fixture files and
+allowed change paths must have matching contents before and after the command
+and at the end of the trial. The report records the independent verdict and the
+required command outcomes, including missing or stale evidence. Setup turns and
+standalone native comparisons cannot supply these receipts.
+Paired comparisons require the same declared verification commands in both trials.
 
 ## Provider-path audit and upgrades (2026-11-11)
 
@@ -108,7 +183,9 @@ exposes the remaining tools through the catalog and its dispatcher. The
 dispatcher validates the selected tool and its full argument schema and uses
 the same capability broker and approval policy. This switch does not change
 native CLI tool catalogs; `compactCliCatalog` below is the separate switch for
-them. Compare discovery, retries and cache behavior before enabling it.
+them. On Ollama, a compact reply containing only a printed tool call can trigger
+one retry with the full catalog. Native tool calls still drive execution.
+Compare discovery, retries and cache behavior before enabling it.
 
 - Structured evidence parses Cargo tests/compiler JSON, Node TAP, TypeScript
   diagnostics, and ESLint JSON. Exact failures and exit codes are preserved;
@@ -201,11 +278,14 @@ The following controls keep the selected model and reasoning effort:
   required before text is omitted.
 - `repeatedWorkDetection`: runs repeated-work detection without enabling the
   other experimental policies. Existing wait/poll exemptions still apply.
-- `stableApiPrefix`: direct native-tool OpenAI-compatible requests retire older
+- `stableApiPrefix`: native-tool OpenAI-compatible and Ollama requests retire older
   evidence at bounded checkpoints rather than every generation. Checkpoints
-  occur after eight preparations or 64 KiB of request growth. Existing window
-  compaction and recovery may shorten a request sooner. This switch does not
-  change native CLI sessions, Ollama, tool catalogs, or cache API parameters.
+  occur after eight preparations, 64 KiB of request growth, or a change to the
+  previous request's prefix. Sustained context pressure keeps one stable model
+  advisory while the live meter continues to report exact counts. Qualification
+  uses `confirmedPrefixReuses`, which requires two completed requests with the
+  same preceding messages and tool settings. Provider-reported cache reads are
+  measured separately. The switch applies to the owned API loop.
 
 These controls require `enabled`. Repeated-work detection and stable API prefixes
 remain opt-in and have not qualified for default promotion. The fresh-read

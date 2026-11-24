@@ -4,7 +4,7 @@ import {
   CircleDashed,
   Layers,
   AlertCircle,
-} from "lucide-react";
+} from "./icons";
 import type { SessionEvent } from "./types";
 import { workflowDetails, workflowChildren, workflowState } from "./code-mode";
 

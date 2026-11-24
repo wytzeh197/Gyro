@@ -55,8 +55,6 @@ mod desktop_notifications;
 mod desktop_shortcuts;
 mod dictation_access;
 mod efficiency;
-#[cfg(debug_assertions)]
-mod efficiency_benchmark;
 mod features;
 mod file_patch_counts;
 mod goal_runner;

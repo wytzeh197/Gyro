@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import "./branch-name-dialog.css";
-import { useDialogDismiss } from "@gyro-dev/ui";
+import { Button, Dialog, Input } from "@gyro-dev/ui";
 
-/** Native HTML dialog provides focus containment and Escape in the desktop webview. */
+/** The parent mounts this while it is open; Dialog owns focus, Escape and focus return. */
 export function BranchNameDialog({
   startPoint,
   initialValue,
@@ -14,84 +14,71 @@ export function BranchNameDialog({
   mode?: "create" | "rename";
   onFinish: (name?: string) => void;
 }) {
-  const { ref: dialogRef, dismiss } = useDialogDismiss<HTMLDialogElement>(() => onFinish());
   const inputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(initialValue);
-  useEffect(() => {
-    const previousFocus = document.activeElement;
-    const dialog = dialogRef.current;
-    dialog?.showModal();
-    inputRef.current?.focus();
-    inputRef.current?.select();
-    return () => {
-      dialog?.close();
-      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
-        previousFocus.focus();
-      }
-    };
-  }, []);
   return (
-    <dialog
-      ref={dialogRef}
-      className="gyro-branch-name-dialog"
-      aria-labelledby="gyro-branch-name-title"
-      aria-describedby="gyro-branch-name-description"
-      onCancel={(event) => {
-        event.preventDefault();
-        dismiss();
+    <Dialog.Root
+      open
+      onOpenChange={(next) => {
+        if (!next) onFinish();
       }}
-      onKeyDown={(event) => event.stopPropagation()}
+      onOpenChangeComplete={(next) => {
+        if (next) inputRef.current?.select();
+      }}
     >
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (name.trim()) onFinish(name.trim());
+      <Dialog.Content
+        className="gyro-branch-name-dialog"
+        aria-labelledby="gyro-branch-name-title"
+        aria-describedby="gyro-branch-name-description"
+        initialFocus={inputRef}
+        size="sm"
+        onKeyDown={(event) => {
+          if (event.key !== "Escape") event.stopPropagation();
         }}
       >
-        <h2 id="gyro-branch-name-title">
-          {mode === "rename" ? "Rename current branch" : "New branch"}
-        </h2>
-        <p id="gyro-branch-name-description">
-          {mode === "rename" ? (
-            "Rename the branch checked out in this workspace."
-          ) : startPoint ? (
-            <>
-              Create and switch to a branch from <code>{startPoint}</code>.
-            </>
-          ) : (
-            "Create and switch to a branch from the current commit."
-          )}
-        </p>
-        <div className="gyro-branch-name-dialog-field">
-          <label htmlFor="gyro-branch-name">Branch name</label>
-          <input
-            ref={inputRef}
-            id="gyro-branch-name"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="feature/my-change"
-            autoComplete="off"
-            spellCheck={false}
-            required
-          />
-        </div>
-        <footer>
-          <button
-            className="gyro-secondary-button"
-            type="button"
-            onClick={dismiss}
-          >
-            Cancel
-          </button>
-          <button
-            className="gyro-primary-button"
-            type="submit"
-            disabled={!name.trim()}
-          >
-            {mode === "rename" ? "Rename branch" : "Create branch"}
-          </button>
-        </footer>
-      </form>
-    </dialog>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (name.trim()) onFinish(name.trim());
+          }}
+        >
+          <Dialog.Title id="gyro-branch-name-title">
+            {mode === "rename" ? "Rename current branch" : "New branch"}
+          </Dialog.Title>
+          <Dialog.Description id="gyro-branch-name-description">
+            {mode === "rename" ? (
+              "Rename the branch checked out in this workspace."
+            ) : startPoint ? (
+              <>
+                Create and switch to a branch from <code>{startPoint}</code>.
+              </>
+            ) : (
+              "Create and switch to a branch from the current commit."
+            )}
+          </Dialog.Description>
+          <div className="gyro-branch-name-dialog-field">
+            <label htmlFor="gyro-branch-name">Branch name</label>
+            <Input
+              ref={inputRef}
+              id="gyro-branch-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="feature/my-change"
+              autoComplete="off"
+              spellCheck={false}
+              required
+            />
+          </div>
+          <footer className="gyro-branch-name-dialog-actions">
+            <Button variant="outline" size="sm" type="button" onClick={() => onFinish()}>
+              Cancel
+            </Button>
+            <Button size="sm" type="submit" disabled={!name.trim()}>
+              {mode === "rename" ? "Rename branch" : "Create branch"}
+            </Button>
+          </footer>
+        </form>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

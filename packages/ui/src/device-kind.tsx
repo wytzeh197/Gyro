@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { Laptop, Monitor, Smartphone, type LucideProps } from "lucide-react";
+import { Laptop, Monitor, Smartphone, type LucideProps } from "./icons";
 
 export type DeviceKind = "laptop" | "desktop" | "phone";
 

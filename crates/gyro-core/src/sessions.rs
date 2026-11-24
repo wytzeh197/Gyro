@@ -14,6 +14,7 @@ mod workflow_storage;
 pub use project_import_storage::{ProjectImportCommit, SessionImportSource};
 
 use crate::capabilities::ProjectCapabilityPolicy;
+use crate::efficiency::checkpoint::VerificationEvidence;
 use crate::paths::{reject_unsafe_private_file, secure_private_file, GyroPaths};
 use crate::worktrees::validate_branch_name;
 use anyhow::{anyhow, Context, Result};
@@ -1147,6 +1148,30 @@ impl SessionStore {
             .map_err(Into::into)
     }
 
+    pub fn has_unresolved_mutations(&self, session_id: Uuid, turn_ids: &[Uuid]) -> Result<bool> {
+        Ok(self.conn.query_row(
+            "select exists(select 1 from mutation_proposals
+             where session_id = ?1 and status in ('pending', 'applying')
+               and turn_id in (select value from json_each(?2)))",
+            params![session_id.to_string(), serde_json::to_string(turn_ids)?],
+            |row| row.get(0),
+        )?)
+    }
+
+    pub fn has_applied_workspace_edit_after(
+        &self,
+        session_id: Uuid,
+        workspace: &str,
+        observed_at: DateTime<Utc>,
+    ) -> Result<bool> {
+        Ok(self.conn.query_row(
+            "select exists(select 1 from mutation_proposals
+             where session_id = ?1 and status = 'applied' and workspace_path = ?2 and updated_at > ?3)",
+            params![session_id.to_string(), workspace, observed_at.to_rfc3339()],
+            |row| row.get(0),
+        )?)
+    }
+
     /// Pending proposals that have not yet been written into the session event
     /// log as approval cards. Used so long-session recovery cannot re-append.
     pub fn list_unsurfaced_pending_mutation_proposals(
@@ -2013,20 +2038,67 @@ impl SessionStore {
     /// Read durable chat context independently of the bounded transcript tail.
     /// The SQLite rows are a rebuildable index over JSONL, never its source of truth.
     pub fn read_context_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
-        self.read_context_events_filtered(session_id, context_query::ALL_CONTEXT)
+        self.read_context_events_filtered(
+            session_id,
+            context_query::ALL_CONTEXT,
+            [session_id.to_string()],
+        )
     }
     /// Read the ordered goal changes, including earlier revisions and clears.
     pub fn read_goal_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
-        self.read_context_events_filtered(session_id, context_query::GOAL_CONTEXT)
+        self.read_context_events_filtered(
+            session_id,
+            context_query::GOAL_CONTEXT,
+            [session_id.to_string()],
+        )
     }
     /// Latest structured records plus durable routing evidence, without loading every old checkpoint.
     pub fn read_efficiency_context_events(&self, session_id: Uuid) -> Result<Vec<SessionEvent>> {
-        self.read_context_events_filtered(session_id, context_query::EFFICIENCY_CONTEXT)
+        self.read_context_events_filtered(
+            session_id,
+            context_query::EFFICIENCY_CONTEXT,
+            [session_id.to_string()],
+        )
     }
+
+    pub fn read_workspace_test_outcomes_for_turns(
+        &self,
+        session_id: Uuid,
+        turn_ids: &[Uuid],
+    ) -> Result<Vec<SessionEvent>> {
+        self.read_context_events_filtered(
+            session_id,
+            context_query::WORKSPACE_TEST_OUTCOMES_FOR_TURNS,
+            params![session_id.to_string(), serde_json::to_string(turn_ids)?],
+        )
+    }
+
+    /// Retrieve the durable exit evidence for an exact session and workspace output.
+    pub fn read_workspace_output_receipt(
+        &self,
+        session_id: Uuid,
+        workspace: &str,
+        output_id: &str,
+    ) -> Result<Option<(VerificationEvidence, DateTime<Utc>)>> {
+        Ok(self
+            .read_context_events_filtered(
+                session_id,
+                context_query::WORKSPACE_OUTPUT_RECEIPT,
+                params![session_id.to_string(), workspace, output_id],
+            )?
+            .into_iter()
+            .next()
+            .and_then(|event| {
+                VerificationEvidence::from_task_event(&event, workspace)
+                    .map(|receipt| (receipt, event.created_at))
+            }))
+    }
+
     fn read_context_events_filtered(
         &self,
         session_id: Uuid,
         sql: &str,
+        query_params: impl rusqlite::Params,
     ) -> Result<Vec<SessionEvent>> {
         self.ensure_turn_index(session_id)?;
         let session = self
@@ -2112,7 +2184,8 @@ impl SessionStore {
                         | SessionEventKind::ChatModeChanged
                         | SessionEventKind::TaskCheckpoint
                 ) || (event.kind == SessionEventKind::SystemEvent
-                    && event.payload["kind"] == "efficiency-phase-route")
+                    && (event.payload["kind"] == "efficiency-phase-route"
+                        || event.payload["workspaceTaskOutcome"].is_object()))
                 {
                     context_events.push((offset, event));
                 }
@@ -2184,9 +2257,7 @@ impl SessionStore {
         }
 
         let mut statement = self.conn.prepare(sql)?;
-        let rows = statement.query_map(params![session_id.to_string()], |row| {
-            row.get::<_, String>(0)
-        })?;
+        let rows = statement.query_map(query_params, |row| row.get::<_, String>(0))?;
         rows.map(|row| {
             let encoded = row?;
             serde_json::from_str(&encoded).map_err(Into::into)
@@ -2498,6 +2569,14 @@ impl SessionStore {
                foreign key (session_id) references sessions(id) on delete cascade
              );
 
+             create table if not exists session_turn_retry_evidence (
+               session_id text not null references sessions(id) on delete cascade,
+               turn_id text not null,
+               interrupted integer not null,
+               tool_work integer not null,
+               primary key (session_id, turn_id)
+             );
+
              create table if not exists session_turn_index (
                session_id text primary key not null references sessions(id) on delete cascade,
                file_identity text not null,
@@ -2681,6 +2760,19 @@ impl SessionStore {
         turn_id: Uuid,
     ) -> Result<Option<crate::usage::UsageTokens>> {
         crate::usage_receipts::task_tokens(&self.conn, session_id, turn_id)
+    }
+
+    /// Count direct ledger entries for one turn, including supporting calls.
+    pub fn turn_usage_call_count(&self, session_id: Uuid, turn_id: Uuid) -> Result<usize> {
+        crate::usage_receipts::turn_call_count(&self.conn, session_id, turn_id)
+    }
+
+    pub fn direct_turn_usage_tokens(
+        &self,
+        session_id: Uuid,
+        turn_id: Uuid,
+    ) -> Result<Option<crate::usage::UsageTokens>> {
+        crate::usage_receipts::direct_turn_tokens(&self.conn, session_id, turn_id)
     }
 
     pub fn provider_usage_outside_turn_since(
@@ -5873,6 +5965,7 @@ mod tests {
         let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
         let session_id;
         let proposal_id;
+        let turn_id = Some(Uuid::new_v4());
         {
             let store = SessionStore::open(paths.clone()).unwrap();
             let session = store
@@ -5882,7 +5975,7 @@ mod tests {
             let proposal = store
                 .create_mutation_proposal(
                     session.id,
-                    Some(Uuid::new_v4()),
+                    turn_id,
                     "src/main.rs",
                     "fn main() {}\n",
                     None,
@@ -5898,10 +5991,34 @@ mod tests {
         let pending = store.list_pending_mutation_proposals(session_id).unwrap();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].id, proposal_id);
+        assert_eq!(
+            store
+                .mutation_proposal_status_for_turn(proposal_id, session_id, turn_id)
+                .unwrap(),
+            Some(MutationProposalStatus::Pending),
+        );
+        for (owner, turn) in [
+            (Uuid::new_v4(), turn_id),
+            (session_id, Some(Uuid::new_v4())),
+            (session_id, None),
+        ] {
+            assert_eq!(
+                store
+                    .mutation_proposal_status_for_turn(proposal_id, owner, turn)
+                    .unwrap(),
+                None,
+            );
+        }
         let rejected = store
             .resolve_mutation_proposal_status(proposal_id, MutationProposalStatus::Rejected, None)
             .unwrap();
         assert_eq!(rejected.status, MutationProposalStatus::Rejected);
+        assert_eq!(
+            store
+                .mutation_proposal_status_for_turn(proposal_id, session_id, turn_id)
+                .unwrap(),
+            Some(MutationProposalStatus::Rejected),
+        );
         assert!(store
             .list_pending_mutation_proposals(session_id)
             .unwrap()

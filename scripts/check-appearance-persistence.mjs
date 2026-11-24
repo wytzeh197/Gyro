@@ -7,6 +7,7 @@ import { applyLaunchView } from "../packages/ui/src/workbench-state.ts";
 import { createAppearanceSaveTracker } from "../apps/desktop/src/use-appearance-save-feedback.ts";
 import {
   APPEARANCE_STORAGE_KEY,
+  readInitialAppearance,
   readStoredAppearance,
   safeSetLocalStorage,
   saveAppearancePreferences,
@@ -196,7 +197,7 @@ const restartContext = {
     preferences: { ...initial, modelFollow: "peek" },
   }),
   recoverWorkspaceBuffers: (state) => state,
-  readStoredAppearance,
+  readInitialAppearance,
 };
 vm.runInNewContext(
   ts.transpileModule(loader.getText(ast), {
@@ -263,6 +264,11 @@ for (const invalid of [
   );
 }
 writes.delete(APPEARANCE_STORAGE_KEY);
+assert.deepEqual(readInitialAppearance(), { themePreset: "gyro" }, "New workbenches use the Gyro palette");
+writes.set("gyro.appearance.v1", JSON.stringify(initial));
+assert.deepEqual(readInitialAppearance(), initial, "Existing workbenches keep their legacy appearance");
+writes.delete("gyro.appearance.v1");
+writes.set("gyro.workbench-state", "{}");
 assert.deepEqual(
   { ...restartContext.loadInitialWorkbenchState().preferences },
   { ...initial, modelFollow: "peek" },

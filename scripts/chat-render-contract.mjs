@@ -98,9 +98,27 @@ export function measureChatContract() {
       paneHeader: (() => {
         const header = find(".gyro-chat-thread-topbar");
         if (!header) return null;
+        const style = getComputedStyle(header);
+        const launcher = header.querySelector(
+          'button[aria-label="Show companion"]',
+        );
+        const launcherBox = box(launcher);
         return {
           bounds: box(header),
           title: box(header.querySelector("strong[data-chat-pane-drag]")),
+          sessions: Boolean(surface.closest(".gyro-app-shell.is-thread-layout")),
+          transparent:
+            style.backgroundColor === "rgba(0, 0, 0, 0)" &&
+            style.borderBottomColor === "rgba(0, 0, 0, 0)" &&
+            style.boxShadow === "none",
+          launcherHit:
+            Boolean(launcherBox?.width && launcherBox.height) &&
+            launcher.contains(
+              document.elementFromPoint(
+                launcherBox.left + launcherBox.width / 2,
+                launcherBox.top + launcherBox.height / 2,
+              ),
+            ),
           menuCount: [
             ...header.querySelectorAll(
               'button[aria-label="More chat surfaces"]',
@@ -292,8 +310,14 @@ export function checkChatContract(state, panes) {
   panes.forEach((pane, index) => {
     const label = `${state} pane ${index + 1}`;
     const composer = pane.column.composer;
+    if (state.startsWith("start-") && !pane.paneHeader?.launcherHit)
+      failures.push(`${label}: the draft companion button must receive clicks`);
     if (pane.paneHeader) {
       const header = pane.paneHeader;
+      if (header.sessions && !header.transparent)
+        failures.push(
+          `${label}: the Sessions header must blend into the transcript`,
+        );
       if (header.menuCount > 1)
         failures.push(`${label}: duplicate pane overflow menus`);
       if (

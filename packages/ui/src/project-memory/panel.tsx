@@ -1,9 +1,11 @@
+import { Button, IconButton } from "../primitives/button";
+import { Empty, Spinner } from "../primitives/feedback";
 import { MemoryEditor, type MemoryEditorState } from "./editor";
 import { MemoryEntryDetail } from "./entry";
 import { MemoryContextReceipts } from "./receipts";
 import { ProjectMemorySettings } from "./settings";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRight, Folder, Plus, Search, RefreshCw } from "lucide-react";
+import { ChevronRight, Folder, Plus, Search, RefreshCw } from "../icons";
 import type {
   MemoryDraft,
   MemoryEntry,
@@ -230,14 +232,15 @@ export function ProjectMemoryPanel({
             </select>
           </label>
         )}
-        <button
-          className="gyro-icon-button"
-          aria-label="Refresh project memory"
-          disabled={loading || saving}
+        <IconButton
+          label="Refresh project memory"
+          size="sm"
+          loading={loading}
+          disabled={saving}
           onClick={() => void refresh()}
         >
-          <RefreshCw size={14} />
-        </button>
+          <RefreshCw size={14} aria-hidden="true" />
+        </IconButton>
       </header>
       {!editor && !selected ? (
         <header>
@@ -335,28 +338,29 @@ export function ProjectMemoryPanel({
                     onChange={(event) => setQuery(event.target.value)}
                   />
                 </label>
-                <button
-                  className="gyro-primary-button"
+                <Button
+                  leading={<Plus size={14} aria-hidden="true" />}
                   disabled={!snapshot || loading}
                   onClick={() => edit()}
                 >
-                  <Plus size={14} />
                   Add note
-                </button>
+                </Button>
               </div>
               <div className="gyro-memory-list" aria-busy={loading}>
                 {!snapshot && loading ? (
-                  <p className="gyro-memory-empty">Loading project memory…</p>
+                  <p className="gyro-memory-empty" role="status">
+                    <Spinner decorative size="xs" /> Loading project memory…
+                  </p>
                 ) : !snapshot && error ? (
                   <p className="gyro-memory-empty">
                     Project memory couldn’t be loaded.
                   </p>
                 ) : !snapshot?.entries.length ? (
-                  <p className="gyro-memory-empty">
-                    {query
-                      ? "No memory matches this search."
-                      : "No project memory yet. Save a decision or convention for future chats."}
-                  </p>
+                  <Empty
+                    size="compact"
+                    title={query ? "No memory matches this search." : "No project memory yet"}
+                    description={query ? undefined : "Save a decision or convention for future chats."}
+                  />
                 ) : (
                   <ul>
                     {snapshot.entries.map((entry) => (
@@ -394,13 +398,13 @@ export function ProjectMemoryPanel({
                 )}
                 {snapshot?.nextOffset !== null &&
                 snapshot?.nextOffset !== undefined ? (
-                  <button
-                    className="gyro-secondary-button"
+                  <Button
+                    variant="outline"
                     disabled={loading}
                     onClick={() => void refresh(snapshot.nextOffset!)}
                   >
                     Load more entries
-                  </button>
+                  </Button>
                 ) : null}
               </div>
             </>
@@ -431,8 +435,8 @@ export function ProjectMemoryPanel({
                           </p>
                         </details>
                         <div className="gyro-memory-actions">
-                          <button
-                            className="gyro-secondary-button"
+                          <Button
+                            variant="outline"
                             disabled={saving}
                             onClick={(event) => {
                               opener.current = event.currentTarget;
@@ -444,9 +448,9 @@ export function ProjectMemoryPanel({
                             }}
                           >
                             Review suggestion
-                          </button>
-                          <button
-                            className="gyro-secondary-button"
+                          </Button>
+                          <Button
+                            variant="outline"
                             disabled={saving}
                             onClick={() =>
                               void run(
@@ -457,17 +461,18 @@ export function ProjectMemoryPanel({
                             }
                           >
                             Dismiss
-                          </button>
+                          </Button>
                         </div>
                       </>
                     ) : null}
                   </div>
                 ))
               ) : (
-                <p className="gyro-memory-empty">
-                  No suggestions yet. Supported turns can suggest a durable
-                  decision you explicitly stated, without another model call.
-                </p>
+                <Empty
+                  size="compact"
+                  title="No suggestions yet"
+                  description="Supported turns can suggest a durable decision you explicitly stated, without another model call."
+                />
               )}
             </div>
           )}
@@ -504,12 +509,12 @@ export function ProjectMemoryPanel({
       {error ? (
         <div className="gyro-memory-error" role="alert">
           <p>{error}</p>
-          <button
-            className="gyro-secondary-button"
+          <Button
+            variant="outline"
             onClick={() => void refresh()}
           >
             Reload memory
-          </button>
+          </Button>
           {editor ? (
             <p>
               Your draft is preserved. Review the current entry before saving

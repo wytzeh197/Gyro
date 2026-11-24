@@ -151,7 +151,8 @@ export type DiffHunk = {
  */
 export function diffHunks(diff: string): DiffHunk[] {
   const raw = diff.replace(/\r\n?/g, "\n").split("\n");
-  while (raw.length && !raw[raw.length - 1]?.trim()) raw.pop();
+  // A space denotes a blank context line and still counts toward the hunk.
+  while (raw.at(-1) === "") raw.pop();
   const hunks: DiffHunk[] = [];
   let current: DiffHunk | undefined;
   for (const text of raw) {

@@ -486,22 +486,30 @@ pub fn validate_tool_call(
     }
     validate_compatibility_schema_value(&normalized, &schema, "arguments")
         .map_err(|error| {
-            if id == CapabilityId::WorkspaceEdit && !arguments["path"].is_string() {
-                return format!(
-                    "Invalid Gyro tool arguments: {error}. {} No action was executed.",
-                    "Send path in the edit call itself, even after reading the file. Use the workspace-relative path of the intended file, oldString copied exactly from the read, and newString set to the replacement."
-                );
-            }
-            let catalog = if provider_tool_batch::inline_tool_schema(id) {
-                String::new()
-            } else {
-                format!(
-                    " Call gyro_tool_catalog with prefix {} for the full schema.",
+            let correction = match id {
+                CapabilityId::WorkspaceEdit if !arguments["path"].is_string() => {
+                    "Send path in the edit call itself, even after reading the file. Use the workspace-relative path of the intended file, oldString copied exactly from the read, and newString set to the replacement.".into()
+                }
+                CapabilityId::WorkspaceEdit
+                    if arguments.get("content").is_some()
+                        || !arguments["oldString"].is_string()
+                        || !arguments["newString"].is_string() =>
+                {
+                    "Retry with path, oldString copied exactly from the latest file read, and newString set to the new text. Use the existing read result if available.".into()
+                }
+                CapabilityId::WorkspaceRunCommand | CapabilityId::TerminalOpen
+                    if !arguments["program"].is_string() =>
+                {
+                    "Set program to the executable name or path. Put each option and filename in a separate args entry. Omit cwd to run from the workspace root.".into()
+                }
+                _ if !provider_tool_batch::inline_tool_schema(id) => format!(
+                    "Call gyro_tool_catalog with prefix {} for the full schema. Correct the arguments and try again.",
                     provider_tool_batch::catalog_prefix(id)
-                )
+                ),
+                _ => "Correct the arguments and try again.".into(),
             };
             format!(
-                "Invalid Gyro tool arguments: {error}.{catalog} Correct the arguments and try again. No action was executed."
+                "Invalid Gyro tool arguments: {error}. {correction} No action was executed."
             )
         })?;
     Ok(id)

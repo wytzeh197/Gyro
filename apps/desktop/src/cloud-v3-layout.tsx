@@ -1,5 +1,7 @@
 import { useState, type ReactNode } from "react";
 import {
+  Button,
+  Empty,
   FolderIcon,
   LaptopIcon,
   SmartphoneIcon,
@@ -233,9 +235,9 @@ export function CloudAccountPage({
         </div>
         <span className="gyro-cloud-signed-in">Signed in</span>
         {!editing && (
-          <button
+          <Button
             type="button"
-            className="gyro-primary-button"
+            variant="prominent"
             disabled={busy || !profile}
             onClick={() => {
               setName(profile?.displayName || "");
@@ -243,7 +245,7 @@ export function CloudAccountPage({
             }}
           >
             Edit profile
-          </button>
+          </Button>
         )}
       </div>
       <section
@@ -278,17 +280,17 @@ export function CloudAccountPage({
               />
             </label>
             <div className="gyro-cloud-actions">
-              <button
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 disabled={busy}
                 onClick={() => setEditing(false)}
               >
                 Cancel
-              </button>
-              <button className="gyro-primary-button" disabled={busy}>
+              </Button>
+              <Button variant="prominent" type="submit" disabled={busy}>
                 {busy ? "Saving…" : "Save profile"}
-              </button>
+              </Button>
             </div>
           </form>
         ) : (
@@ -317,14 +319,14 @@ export function CloudAccountPage({
               devices
             </span>
           </div>
-          <button
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             disabled={busy}
             onClick={() => onPanel("devices")}
           >
             Manage devices
-          </button>
+          </Button>
         </div>
         <CloudDeviceList
           hideCount
@@ -456,14 +458,14 @@ export function CloudOverview({
       {children}
       {tab === "projects" && (
         <div className="gyro-cloud-page-action">
-          <button
+          <Button
             type="button"
-            className="gyro-primary-button"
+            variant="prominent"
             disabled={busy || stale || !usage?.active}
             onClick={onSave}
           >
             Save a project
-          </button>
+          </Button>
           {preparedCount > 0 && (
             <button
               type="button"
@@ -552,15 +554,15 @@ export function CloudOverview({
                         </button>
                       </div>
                       <div role="cell" className="gyro-cloud-project-controls">
-                        <button
+                        <Button
                           type="button"
-                          className="gyro-secondary-button"
+                          variant="outline"
                           disabled={busy}
                           aria-label={`Restore copy of ${v.label}`}
                           onClick={() => onRestore(v)}
                         >
                           Restore copy
-                        </button>
+                        </Button>
                         <button
                           type="button"
                           className="gyro-cloud-icon-button"
@@ -574,18 +576,13 @@ export function CloudOverview({
                   ))}
                 </div>
               ) : (
-                <div className="gyro-cloud-empty">
-                  <FolderIcon size={26} aria-hidden="true" />
-                  <h3>
-                    {stale
-                      ? "Saved projects unavailable"
-                      : "No projects saved yet"}
-                  </h3>
-                  <p>
-                    Choose a project and review the files before anything leaves
-                    this Mac.
-                  </p>
-                </div>
+                <Empty
+                  className="gyro-cloud-empty"
+                  size="compact"
+                  icon={<FolderIcon size={24} />}
+                  title={<h3>{stale ? "Saved projects unavailable" : "No projects saved yet"}</h3>}
+                  description="Choose a project and review the files before anything leaves this Mac."
+                />
               )}
               <p className="gyro-cloud-caption">
                 Restores create a new folder. Your local files stay untouched.
@@ -659,14 +656,14 @@ export function CloudOverview({
                   stay on this Mac.
                 </p>
               </div>
-              <button
+              <Button
                 type="button"
-                className="gyro-primary-button"
+                variant="prominent"
                 disabled={busy || stale || !usage?.active}
                 onClick={() => onPanel("chats")}
               >
                 Back up a chat
-              </button>
+              </Button>
             </div>
             {versions.some((v) => v.kind === "chat") ? (
               versions
@@ -681,13 +678,12 @@ export function CloudOverview({
                   />
                 ))
             ) : (
-              <div className="gyro-cloud-empty">
-                <h3>No chats backed up</h3>
-                <p>
-                  Your local chats stay private until you select and review a
-                  backup.
-                </p>
-              </div>
+              <Empty
+                className="gyro-cloud-empty"
+                size="compact"
+                title={<h3>No chats backed up</h3>}
+                description="Your local chats stay private until you select and review a backup."
+              />
             )}
             <LinkRow
               title="Agent handoffs & assistance"
@@ -817,14 +813,14 @@ export function CloudOverview({
                   limit={usage?.policy.devices}
                   compact
                 />
-                <button
+                <Button
                   type="button"
-                  className="gyro-primary-button"
+                  variant="prominent"
                   disabled={busy}
                   onClick={() => onPanel("devices")}
                 >
                   Manage devices
-                </button>
+                </Button>
                 <div className="gyro-cloud-aside-links">
                   <LinkRow
                     title="Plan & billing"

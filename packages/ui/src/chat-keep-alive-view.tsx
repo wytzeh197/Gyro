@@ -1,4 +1,4 @@
-import { SquareTerminal } from "lucide-react";
+import { SquareTerminal } from "./icons";
 
 import {
   keepAliveStatusLabel,

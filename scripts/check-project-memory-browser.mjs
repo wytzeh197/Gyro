@@ -339,7 +339,7 @@ try {
     windowsVirtualKeyCode: 27,
   });
   assert.equal(
-    await evaluate("document.querySelector('.gyro-project-edit-dialog').open"),
+    await evaluate("!!document.querySelector('.gyro-project-edit-dialog')"),
     true,
     "Escape preserves the memory draft inside the dialog",
   );
@@ -349,7 +349,7 @@ try {
     "save memory in project settings",
   );
   assert.equal(
-    await evaluate("document.querySelector('.gyro-project-edit-dialog').open"),
+    await evaluate("!!document.querySelector('.gyro-project-edit-dialog')"),
     true,
     "memory actions keep project settings open",
   );

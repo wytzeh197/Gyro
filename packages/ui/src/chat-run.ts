@@ -59,6 +59,7 @@ export type WorkItem =
       /** Recorded failure details; never inferred from assistant narration. */
       error?: string;
       category?: CommandCategory;
+      grouped?: boolean;
       /** What the command was for, when the provider says. Falls back to the command. */
       intent?: string;
     }
@@ -71,6 +72,7 @@ export type WorkItem =
       path?: string;
       error?: string;
       errorCode?: string;
+      noMatches?: boolean;
     }
   | {
       kind: "file";
@@ -495,7 +497,9 @@ export function runCallText(
   switch (item.kind) {
     case "command":
       return {
-        label: running ? "Running" : "Ran",
+        label: item.status === "failed" && item.grouped
+          ? "Shell command group"
+          : running ? "Running" : "Ran",
         description: displayCommand(item.command),
       };
     case "file":
@@ -522,6 +526,7 @@ export function runCallText(
         : { label: `${verb} ${image ? "image" : "file"}` };
     }
     case "search": {
+      if (item.noMatches) return { label: "No matches", description: item.query };
       const verb = running ? "Searching" : "Searched";
       if (!item.query) {
         return {
@@ -1262,7 +1267,8 @@ function classifyCommandActivity({
       : onlyLooks && INSPECT_COMMAND.test(programs[0] ?? "")
         ? "inspect"
         : undefined;
-  return { kind: "command", id, status, command, intent, category, ...(error ? { error } : {}) };
+  const grouped = shape.joins.some((join) => join !== "|");
+  return { kind: "command", id, status, command, intent, category, grouped, ...(error ? { error } : {}) };
 }
 
 const READ_PROGRAMS = new Set(["sed", "head", "tail", "cat", "awk"]);
@@ -1785,6 +1791,7 @@ function workItemFromCapabilityCall(
         path: text(inspection, "path"),
         error: status === "failed" ? summary : undefined,
         errorCode: text(inspection, "errorCode"),
+        noMatches: status === "done" && (summary === "No matches" || summary === "Returned 0 workspace matches"),
       };
 
     // Reading a workspace file is the same beat as a provider read, so it gets
@@ -2000,11 +2007,11 @@ export function runRowText(step: RunStep): RunRowText {
           item.status === "running"
             ? commandVerb(item.category, true)
             : item.status === "failed"
-              ? commandFailedVerb(item.category)
+              ? (item.grouped ? "Shell command group failed" : commandFailedVerb(item.category))
               : commandVerb(item.category, false),
         // Intent (why) wins over the raw command (what). A provider note is the
         // same shape as intent when Bash was reclassified with a description.
-        description: item.intent ?? item.command,
+        description: item.grouped ? displayCommand(item.command) : item.intent ?? item.command,
       };
     case "file":
       return {
@@ -2017,6 +2024,7 @@ export function runRowText(step: RunStep): RunRowText {
         description: readTarget(item.path),
       };
     case "search":
+      if (item.noMatches) return { label: "No matches", description: item.query };
       return {
         label:
           item.status === "failed"
@@ -2510,7 +2518,7 @@ function workIdentity(item: WorkItem): string | undefined {
     case "command":
       return `command:${item.command}`;
     case "search":
-      return item.query ? `search:${item.scope}:${item.query}` : undefined;
+      return item.query ? `search:${item.scope}:${item.query}:${item.noMatches ? "empty" : "matches"}` : undefined;
     case "browser":
       return item.target ? `browser:${item.action}:${item.target}` : undefined;
     case "tool":

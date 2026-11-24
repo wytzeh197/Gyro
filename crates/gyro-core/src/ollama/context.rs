@@ -9,8 +9,13 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::time::Duration;
 
-#[derive(Debug)]
-pub(super) struct OllamaContextOverflow;
+const GENERATION_HEADROOM_TOKENS: u64 = 2048;
+
+#[derive(Debug, Default)]
+pub(crate) struct OllamaContextOverflow {
+    prompt_tokens: Option<u64>,
+    pub(crate) rejected_allocation: Option<u64>,
+}
 impl std::fmt::Display for OllamaContextOverflow {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str("Ollama context cannot fit this request without discarding content. Compact history or select a model with a larger window.")
@@ -18,17 +23,71 @@ impl std::fmt::Display for OllamaContextOverflow {
 }
 impl std::error::Error for OllamaContextOverflow {}
 
-pub(super) fn context_overflow_message(value: &Value) -> bool {
-    value.as_str().is_some_and(|message| {
-        let message = message.trim();
-        message == "the input length exceeds the context length"
+impl OllamaContextOverflow {
+    pub(super) fn from_response_error(value: &Value) -> Option<Self> {
+        let Some(message) = value.as_str().map(str::trim) else {
+            return Self::from_structured_error(value);
+        };
+        if message == "the input length exceeds the context length"
             || message.starts_with("the prompt is longer than the context length")
-    })
+        {
+            return Some(Self::default());
+        }
+        // Some Ollama versions forward llama-server's error envelope as a
+        // string inside their own error field.
+        let envelope: Value = serde_json::from_str(message).ok()?;
+        Self::from_structured_error(envelope.get("error")?)
+    }
+
+    fn from_structured_error(value: &Value) -> Option<Self> {
+        if value["type"] != "exceed_context_size_error" {
+            return None;
+        }
+        let prompt_tokens = value["n_prompt_tokens"]
+            .as_u64()
+            .zip(value["n_ctx"].as_u64())
+            .and_then(|(prompt, context)| (context > 0 && prompt >= context).then_some(prompt));
+        Some(Self {
+            prompt_tokens,
+            rejected_allocation: None,
+        })
+    }
+
+    pub(super) fn recovery_window(
+        &self,
+        allocated: Option<u64>,
+        maximum: Option<u64>,
+    ) -> Option<u64> {
+        let (allocated, maximum) = allocated
+            .zip(maximum)
+            .filter(|(allocated, maximum)| allocated < maximum)?;
+        let Some(prompt) = self.prompt_tokens else {
+            return Some(maximum);
+        };
+        // The tokenizer already established that the unchanged prompt would
+        // fill or exceed even the model's maximum allocation.
+        if prompt >= maximum {
+            return None;
+        }
+        Some(allocation_step(
+            prompt
+                .saturating_add(GENERATION_HEADROOM_TOKENS)
+                .max(allocated + 1),
+            maximum,
+        ))
+    }
+}
+
+fn allocation_step(tokens: u64, maximum: u64) -> u64 {
+    tokens
+        .checked_next_power_of_two()
+        .unwrap_or(maximum)
+        .min(maximum)
 }
 
 /// The estimate chooses an allocation, never which history to discard. Ollama's
 /// tokenizer remains authoritative: truncate/shift are disabled, and only an
-/// explicit context rejection permits a bounded retry at the model's maximum.
+/// explicit context rejection permits a bounded retry with a larger window.
 pub(super) fn request_context_window(
     request: &OllamaToolChatRequest<'_>,
     content_chars: impl FnOnce() -> usize,
@@ -45,20 +104,13 @@ pub(super) fn request_context_window(
         minimum <= maximum,
         "Ollama minimum context exceeds the model window"
     );
-    let overhead = 2048u64
+    let overhead = GENERATION_HEADROOM_TOKENS
         .saturating_add((request.messages.len() as u64).saturating_mul(64))
         .saturating_add((request.tools.len() as u64).saturating_mul(32));
     // Ollama reloads the model whenever num_ctx changes, so the allocation
     // grows in power-of-two steps: a growing conversation reloads a handful
     // of times instead of once per 4K of history.
-    let allocate = |estimate: u64| {
-        estimate
-            .max(4096)
-            .max(minimum)
-            .checked_next_power_of_two()
-            .unwrap_or(maximum)
-            .min(maximum)
-    };
+    let allocate = |estimate: u64| allocation_step(estimate.max(4096).max(minimum), maximum);
     if allocate(overhead) == maximum {
         return Ok(Some(maximum));
     }

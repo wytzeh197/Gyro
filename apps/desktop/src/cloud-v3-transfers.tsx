@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Button,
   FolderIcon,
   MessageSquareIcon,
   FileTextIcon,
@@ -203,18 +204,16 @@ export function PendingCloudSaves({
             Cloud versions stay untouched.
           </p>
           <div>
-            <button
-              type="button"
-              className="gyro-secondary-button"
+            <Button
+              variant="outline"
               disabled={busy}
               autoFocus
               onClick={() => setRemoving(null)}
             >
               Keep save
-            </button>
-            <button
-              type="button"
-              className="gyro-secondary-button"
+            </Button>
+            <Button
+              variant="destructive-outline"
               disabled={busy}
               onClick={() => {
                 void onRemove(removing).then((done) => {
@@ -223,7 +222,7 @@ export function PendingCloudSaves({
               }}
             >
               Remove prepared copy
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -241,22 +240,17 @@ export function PendingCloudSaves({
                 : "Your local files stay on this Mac."}
             </p>
             <div>
-              <button
-                type="button"
-                className="gyro-cloud-pending-dismiss"
-                onClick={onClose}
-              >
+              <Button variant="ghost" onClick={onClose}>
                 {items.length ? "Not now" : "Close"}
-              </button>
+              </Button>
               {selected && current && (
-                <button
-                  type="button"
-                  className="gyro-primary-button"
+                <Button
+                  variant="prominent"
                   disabled={busy || current.disabled}
                   onClick={() => onResume(selected.requestId)}
                 >
                   {current.action}
-                </button>
+                </Button>
               )}
             </div>
           </footer>

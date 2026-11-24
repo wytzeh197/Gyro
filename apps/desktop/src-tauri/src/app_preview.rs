@@ -11,6 +11,12 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 #[cfg(target_os = "macos")]
 #[path = "app_preview_macos.rs"]
 mod platform;
+#[cfg(target_os = "macos")]
+#[path = "app_preview_simulator.rs"]
+mod simulator;
+#[cfg(target_os = "macos")]
+#[path = "app_preview_xcode.rs"]
+mod xcode;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +32,12 @@ pub struct Target {
     pub pid: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bounds: Option<[f64; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub booted: Option<bool>,
 }
 fn web_target() -> Target {
     Target {
@@ -37,6 +49,9 @@ fn web_target() -> Target {
         window_id: None,
         pid: None,
         bounds: None,
+        device_family: None,
+        device_type: None,
+        booted: None,
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -100,7 +115,11 @@ struct Slot {
     capture: Option<Reference>,
 }
 #[derive(Default)]
-pub struct ManagerState(Mutex<HashMap<String, Slot>>);
+pub struct ManagerState {
+    slots: Mutex<HashMap<String, Slot>>,
+    #[cfg(target_os = "macos")]
+    build: Mutex<()>,
+}
 impl ManagerState {
     fn with<T>(
         &self,
@@ -111,7 +130,7 @@ impl ManagerState {
         if session.is_empty() {
             return Err("Preview requires an owning session".into());
         }
-        let mut slots = self.0.lock().map_err(|_| "Preview state unavailable")?;
+        let mut slots = self.slots.lock().map_err(|_| "Preview state unavailable")?;
         let slot = slots.entry(session.into()).or_insert_with(|| Slot {
             workspace: workspace.into(),
             ..Slot::default()
@@ -146,7 +165,7 @@ pub fn targets<R: Runtime>(
             Ok(windows) => targets.extend(windows),
             Err(e) => issues.push(e),
         }
-        match simulator_devices() {
+        match simulator::targets() {
             Ok(devices) => targets.extend(devices),
             Err(e) => issues.push(e),
         }
@@ -178,7 +197,7 @@ pub fn select<R: Runtime>(
             slot.capture = None;
             let _ = app.emit(
                 "gyro:app-preview-changed",
-                json!({"sessionId":session,"target":target}),
+                json!({"sessionId":session,"workspace":workspace,"target":target}),
             );
             Ok(())
         })?;
@@ -194,7 +213,7 @@ fn current_target(target: &Target) -> Result<Target, String> {
     #[cfg(target_os = "macos")]
     {
         let all = if target.kind == "simulator" {
-            simulator_devices()?
+            simulator::targets()?
         } else {
             platform::windows()?
         };
@@ -263,22 +282,18 @@ pub fn capture<R: Runtime>(
     };
     use sha2::{Digest, Sha256};
     let digest = (target.kind != "web").then(|| Sha256::digest(&png).to_vec());
-    #[cfg(target_os = "macos")]
-    let (png, frame) = platform::frame(
-        &png,
-        width,
-        height,
-        target.kind == "simulator" || (target.kind == "web" && target.width < 500.),
-    )?;
-    #[cfg(not(target_os = "macos"))]
-    let frame = Frame {
-        x: 0.,
-        y: 0.,
-        width: width as f64,
-        height: height as f64,
-        image_width: width,
-        image_height: height,
+    let raw_frame = Frame {
+        x: 0., y: 0., width: f64::from(width), height: f64::from(height),
+        image_width: width, image_height: height,
     };
+    #[cfg(target_os = "macos")]
+    let (png, frame) = if target.kind != "web" {
+        (png, raw_frame)
+    } else {
+        platform::frame(&png, width, height, target.kind == "web" && target.width < 500.)?
+    };
+    #[cfg(not(target_os = "macos"))]
+    let frame = raw_frame;
     let paths = gyro_core::GyroPaths::for_current_user().map_err(|e| e.to_string())?;
     let mut saved: BrowserPreviewCapture =
         crate::browser::preview::persist_browser_preview_capture(
@@ -306,7 +321,7 @@ pub fn capture<R: Runtime>(
         "coordinateSpace":"framed-image-pixels","capturedAt":saved.created_at,
         "status":"captured","expiresAfterMs":15000,
         "interaction":if target.kind=="simulator" {"capture-only; use Simulator for native input"} else {"click"},
-        "framing":crate::browser::types::BROWSER_OBSERVATION_FRAMING,
+        "framing":if target.kind!="web" {"device-pixels"} else {crate::browser::types::BROWSER_OBSERVATION_FRAMING},
         "evidence":{"runtime":target.kind,"liveStream":false,"screenshotModelVisible":false}
     });
     app.state::<ManagerState>()
@@ -361,93 +376,13 @@ pub fn click<R: Runtime>(
         Ok(json!({"target":reference.target,"inputDispatched":true,"verification":"Capture again to verify the result","status":"stale"}))
     })
 }
-fn command_output(program: &str, args: &[&str]) -> Result<Vec<u8>, String> {
-    // No shell, device identifiers come only from discovery; bound external commands.
-    let file = tempfile::tempfile().map_err(|e| e.to_string())?;
-    let err = tempfile::tempfile().map_err(|e| e.to_string())?;
-    let mut child = std::process::Command::new(program)
-        .args(args)
-        .stdout(file.try_clone().map_err(|e| e.to_string())?)
-        .stderr(err.try_clone().map_err(|e| e.to_string())?)
-        .spawn()
-        .map_err(|e| format!("{program}: {e}"))?;
-    let started = Instant::now();
-    loop {
-        match child.try_wait().map_err(|e| e.to_string())? {
-            Some(status) => {
-                use std::io::{Read, Seek, SeekFrom};
-                let mut output = if status.success() { file } else { err };
-                output.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
-                let mut bytes = Vec::new();
-                output
-                    .take(1024 * 1024)
-                    .read_to_end(&mut bytes)
-                    .map_err(|e| e.to_string())?;
-                return if status.success() {
-                    Ok(bytes)
-                } else {
-                    Err(String::from_utf8_lossy(&bytes).trim().to_string())
-                };
-            }
-            None if started.elapsed() > Duration::from_secs(15) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("{program} timed out"));
-            }
-            None => std::thread::sleep(Duration::from_millis(30)),
-        }
-    }
-}
-fn simulator_devices() -> Result<Vec<Target>, String> {
-    let bytes=command_output("/usr/bin/xcrun",&["simctl","list","devices","booted","--json"])
-        .map_err(|e|format!("iPhone Simulator unavailable: {e}. Full Xcode and a booted iPhone runtime are required."))?;
-    let value: Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-    let mut targets = Vec::new();
-    if let Some(groups) = value["devices"].as_object() {
-        for device in groups.values().filter_map(Value::as_array).flatten() {
-            let name = device["name"].as_str().unwrap_or("");
-            let Some(udid) = device["udid"]
-                .as_str()
-                .filter(|s| uuid::Uuid::parse_str(s).is_ok())
-            else {
-                continue;
-            };
-            if device["state"] == "Booted"
-                && device["isAvailable"] == true
-                && name.starts_with("iPhone")
-            {
-                targets.push(Target {
-                    id: format!("simulator:{udid}"),
-                    kind: "simulator".into(),
-                    title: name.into(),
-                    width: 0.,
-                    height: 0.,
-                    window_id: None,
-                    pid: None,
-                    bounds: None,
-                });
-            }
-        }
-    }
-    if targets.is_empty() {
-        return Err(
-            "No booted iPhone Simulator. Boot an installed iPhone in Xcode, then refresh targets."
-                .into(),
-        );
-    }
-    Ok(targets)
-}
 #[cfg(target_os = "macos")]
 fn simulator_capture(target: &Target) -> Result<(Vec<u8>, u32, u32), String> {
-    let udid = target
-        .id
-        .strip_prefix("simulator:")
-        .ok_or("Invalid simulator target")?;
-    uuid::Uuid::parse_str(udid).map_err(|_| "Invalid simulator identifier")?;
+    let udid = simulator::udid(target)?;
     let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
     let path = dir.path().join("screen.png");
-    command_output(
-        "/usr/bin/xcrun",
+    simulator::command(
+        None,
         &[
             "simctl",
             "io",
@@ -456,11 +391,153 @@ fn simulator_capture(target: &Target) -> Result<(Vec<u8>, u32, u32), String> {
             "--type=png",
             path.to_str().ok_or("Invalid capture path")?,
         ],
+        15,
     )?;
     let png = std::fs::read(path).map_err(|e| e.to_string())?;
     let (w, h) = platform::png_dimensions(&png)?;
     Ok((png, w, h))
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewOptions {
+    project: Option<String>,
+    scheme: Option<String>,
+    region: Option<PixelRegion>,
+    xcode_path: Option<String>,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+pub(super) struct PixelRegion {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+}
+
+impl PixelRegion {
+    fn is_inside(self, width: u32, height: u32) -> bool {
+        self.width > 0 && self.height > 0
+            && self.x.checked_add(self.width).is_some_and(|end| end <= width)
+            && self.y.checked_add(self.height).is_some_and(|end| end <= height)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn project_root(session: &str, workspace: &str) -> Result<std::path::PathBuf, String> {
+    let requested = std::path::Path::new(workspace);
+    if !requested.is_absolute() {
+        return Err("Open the app’s project folder in Gyro first".into());
+    }
+    let root = requested.canonicalize().map_err(|e| e.to_string())?;
+    if let Some(owner) = session.strip_prefix("workbench:") {
+        if owner != workspace {
+            return Err("Preview project does not belong to this workspace".into());
+        }
+    } else {
+        let store = crate::stores::open_store()?;
+        let chat = store.get_session(crate::stores::parse_uuid(session)?)
+            .map_err(crate::stores::to_string)?.ok_or("The preview chat no longer exists")?;
+        if chat.workspace_path.as_os_str().is_empty()
+            || crate::providers::binding::session_execution_workspace(&chat, store.paths())? != root
+        {
+            return Err("Preview project does not belong to this chat".into());
+        }
+    }
+    Ok(root)
+}
+
+#[cfg(target_os = "macos")]
+fn run_simulator(
+    app: &AppHandle, session: &str, workspace: &str, options: PreviewOptions,
+) -> Result<Value, String> {
+    use sha2::{Digest, Sha256};
+    let root = project_root(session, workspace)?;
+    let state = app.state::<ManagerState>();
+    let _build = state.build.try_lock().map_err(|_| "A Simulator build is already running")?;
+    let (target, revision) = state.with(session, workspace, |slot| {
+        let target = slot.target.clone().filter(|target| target.kind == "simulator")
+            .ok_or("Select an iPhone or iPad Simulator")?;
+        slot.revision += 1;
+        slot.capture = None;
+        Ok((target, slot.revision))
+    })?;
+    let cache_key = format!("{:x}", Sha256::digest(root.as_os_str().as_encoded_bytes()));
+    let derived = app.path().app_cache_dir().map_err(|e| e.to_string())?
+        .join("simulator-derived-data").join(cache_key);
+    let project = options.project.as_deref().ok_or("Choose an Xcode project")?;
+    let scheme = options.scheme.as_deref().ok_or("Choose an Xcode scheme")?;
+    simulator::run(&root, &derived, &target, project, scheme, |phase| {
+        let _ = app.emit("gyro:app-preview-build", json!({
+            "sessionId":session, "workspace":workspace, "targetId":target.id, "phase":phase,
+        }));
+    })?;
+    let available = current_target(&target)?;
+    state.with(session, workspace, |slot| {
+        if slot.revision != revision {
+            return Err("Preview selection changed during the Simulator build".into());
+        }
+        slot.target = Some(available);
+        Ok(())
+    })?;
+    capture(app, session, workspace)
+}
+
+/// Transient preview pixels stay in memory. Only explicit captures enter the
+/// persisted capture queue, so auto-refresh cannot prune a comparison baseline.
+#[cfg(target_os = "macos")]
+fn simulator_frame(app: &AppHandle, session: &str, workspace: &str) -> Result<Value, String> {
+    use base64::Engine as _;
+    let target = selected(app, session, workspace)?;
+    if target.kind != "simulator" {
+        return Err("Select a Simulator device to refresh its screen".into());
+    }
+    let (png, width, height) = simulator_capture(&target)?;
+    if png.len() > crate::app::limits::MAX_BROWSER_PREVIEW_CAPTURE_BYTES {
+        return Err("The Simulator frame exceeded the capture limit".into());
+    }
+    if selected(app, session, workspace)?.id != target.id {
+        return Err("Preview selection changed during refresh".into());
+    }
+    let src = format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png));
+    Ok(json!({
+        "target": target,
+        "screenshot": {
+            "path": "", "filename": "",
+            "width":width, "height":height, "src":src,
+            "createdAt":chrono::Utc::now().to_rfc3339(),
+        },
+        "contentRect": {"x":0, "y":0, "width":width, "height":height},
+        "expiresAfterMs":0, "interaction":"capture-only",
+    }))
+}
+
+#[cfg(target_os = "macos")]
+fn crop_capture(app: &AppHandle, session: &str, workspace: &str, id: &str, region: PixelRegion) -> Result<Value, String> {
+    let reference = app.state::<ManagerState>().with(session, workspace, |slot| {
+        // Annotation freezes the selected image. The input expiry is for clicks,
+        // not for the time someone spends writing feedback about frozen pixels.
+        slot.capture.clone().filter(|capture| capture.id == id && capture.revision == slot.revision
+            && capture.target.kind != "web").ok_or_else(|| "Preview changed. Select the region again.".into())
+    })?;
+    if !region.is_inside(reference.frame.image_width, reference.frame.image_height)
+        || f64::from(region.x) < reference.frame.x || f64::from(region.y) < reference.frame.y
+        || f64::from(region.x + region.width) > reference.frame.x + reference.frame.width
+        || f64::from(region.y + region.height) > reference.frame.y + reference.frame.height
+    {
+        return Err("Select a region inside the app screen".into());
+    }
+    let paths = gyro_core::GyroPaths::for_current_user().map_err(|e| e.to_string())?;
+    let path = paths.browser_captures_dir.join(id);
+    let (png, _) = crate::workspace::files::read_bounded_regular_file(
+        &path, crate::app::limits::MAX_BROWSER_PREVIEW_CAPTURE_BYTES, "app preview capture",
+    ).map_err(|_| "The preview capture is unavailable")?;
+    let cropped = platform::crop(&png, region)?;
+    let saved = crate::browser::preview::persist_browser_preview_capture(
+        &paths, &cropped, region.width, region.height, chrono::Utc::now(),
+    )?;
+    serde_json::to_value(saved).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn app_preview_request(
     app: AppHandle,
@@ -471,9 +548,25 @@ pub async fn app_preview_request(
     capture_id: Option<String>,
     x: Option<f64>,
     y: Option<f64>,
+    options: Option<PreviewOptions>,
 ) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || match action.as_str() {
         "targets" => targets(&app, &session_id, &workspace_key),
+        #[cfg(target_os = "macos")]
+        "xcode-setup" => serde_json::to_value(xcode::setup()).map_err(|e| e.to_string()),
+        #[cfg(target_os = "macos")]
+        "choose-xcode" => {
+            let state = app.state::<ManagerState>();
+            let _build = state.build.try_lock().map_err(|_| "Wait for the Simulator build to finish before switching Xcode")?;
+            let path = options.and_then(|options| options.xcode_path).ok_or("Choose Xcode")?;
+            xcode::choose(std::path::Path::new(&path))?;
+            Ok(Value::Null)
+        }
+        #[cfg(target_os = "macos")]
+        "open-xcode" => {
+            xcode::open()?;
+            Ok(Value::Null)
+        }
         "select" => select(
             &app,
             &session_id,
@@ -482,6 +575,24 @@ pub async fn app_preview_request(
         )
         .and_then(|t| serde_json::to_value(t).map_err(|e| e.to_string())),
         "capture" => capture(&app, &session_id, &workspace_key),
+        #[cfg(target_os = "macos")]
+        "simulator-frame" => simulator_frame(&app, &session_id, &workspace_key),
+        #[cfg(target_os = "macos")]
+        "schemes" => {
+            let root = project_root(&session_id, &workspace_key)?;
+            serde_json::to_value(simulator::schemes(&root)?).map_err(|e| e.to_string())
+        }
+        #[cfg(target_os = "macos")]
+        "run" => run_simulator(&app, &session_id, &workspace_key, options.ok_or("Choose an Xcode scheme")?),
+        #[cfg(target_os = "macos")]
+        "open-device" => {
+            let target = selected(&app, &session_id, &workspace_key)?;
+            simulator::open_device(&current_target(&target)?)?;
+            Ok(Value::Null)
+        }
+        #[cfg(target_os = "macos")]
+        "crop" => crop_capture(&app, &session_id, &workspace_key, capture_id.as_deref().ok_or("Capture required")?,
+            options.and_then(|options| options.region).ok_or("Select a region")?),
         "click" => click(
             &app,
             &session_id,
@@ -521,6 +632,14 @@ mod tests {
         ] {
             assert!(frame.point(x, y, &t).is_err());
         }
+    }
+    #[test]
+    fn native_pixel_region_is_exact_and_cannot_overflow() {
+        let region = PixelRegion { x: 920, y: 225, width: 240, height: 83 };
+        assert!(region.is_inside(1206, 2622));
+        assert!(!PixelRegion { x: 1206, ..region }.is_inside(1206, 2622));
+        assert!(!PixelRegion { width: u32::MAX, ..region }.is_inside(1206, 2622));
+        assert!(!PixelRegion { height: 0, ..region }.is_inside(1206, 2622));
     }
     #[test]
     fn capture_identity_revision_and_expiry_are_required() {

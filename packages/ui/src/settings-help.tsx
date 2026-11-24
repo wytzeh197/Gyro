@@ -1,6 +1,6 @@
 import { SettingsGroup } from "./settings-controls";
 import { useId, useState } from "react";
-import { ArrowRight, ArrowUpRight, ChevronDown, Search, X } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ChevronDown, Search, X } from "./icons";
 import type { SettingsSectionId } from "./types";
 
 type HelpArticle = {
@@ -47,7 +47,7 @@ const helpArticleGroups: { label: string; articles: HelpArticle[] }[] = [
       {
         title: "What does Approve for Me allow?",
         answer:
-          "Lets routine work run without asking each time, while riskier actions still ask. Codex stays in the project sandbox: commands that leave it are blocked and edits outside it still ask. Claude uses its auto mode, and Grok and Kimi approve their routine calls; anything they escalate still asks. Gemini, Cursor, and Antigravity work inside their sandboxes, and Gyro approves Gemini's, Cursor's, and OpenCode's requests for you. Ollama and the other API providers run workspace commands freely, but HTTPS commands, terminals, and file edits still ask or go to review.",
+          "Lets routine work run without asking each time, while riskier actions still ask. Codex stays in the project sandbox: commands that leave it are blocked and edits outside it still ask. Claude uses its auto mode, and Grok and Kimi approve their routine calls; anything they escalate still asks. Cursor works in its sandbox and asks before leaving it. OpenCode edits and reads the project freely and asks for shell commands, web access, and paths outside the project. Gemini and Antigravity work inside their sandboxes, and Gyro approves Gemini's other requests for you. Ollama and the other API providers run workspace commands freely, but HTTPS commands, terminals, and file edits still ask or go to review.",
       },
       {
         title: "What does Full Access allow?",

@@ -63,6 +63,55 @@ pub(super) fn conversation_history_text_for_session(
     )
 }
 
+/// Only native launch fallbacks call this. A resumed provider keeps its own context.
+pub(super) fn native_checkpoint_history(
+    request: &gyro_core::provider_runtime::types::ProviderChatRequest,
+    prefetched_history: Option<PrefetchedHistory>,
+) -> Option<String> {
+    let session = parse_uuid(&request.session_id).ok()?;
+    let store = open_store().ok()?;
+    let config = super::efficiency::config();
+    let history = history_from_store(&store, session, config, prefetched_history);
+    let checkpoint = store
+        .read_efficiency_context_events(session)
+        .ok()
+        .and_then(|events| {
+            recovery_from_events(
+                &events,
+                request.workspace_path.as_deref()?,
+                &request.message,
+            )
+        });
+    match checkpoint {
+        Some(checkpoint) => {
+            gyro_core::provider_observation::efficiency_event(|events| {
+                events.checkpoint_recoveries = events.checkpoint_recoveries.saturating_add(1);
+            });
+            Some(match history {
+                Some(history) => format!("{checkpoint}\n\n{history}"),
+                None => checkpoint,
+            })
+        }
+        None => history,
+    }
+}
+
+fn recovery_from_events(events: &[SessionEvent], workspace: &str, message: &str) -> Option<String> {
+    let latest = events.iter().rev().find(|event| {
+        matches!(
+            event.kind,
+            SessionEventKind::TaskCheckpoint | SessionEventKind::GoalUpdated
+        )
+    })?;
+    if latest.kind != SessionEventKind::TaskCheckpoint {
+        return None;
+    }
+    let checkpoint: gyro_core::efficiency::checkpoint::TaskCheckpoint =
+        serde_json::from_value(latest.payload.clone()).ok()?;
+    (checkpoint.workspace == workspace).then_some(())?;
+    checkpoint.recovery_context(message)
+}
+
 fn history_from_store(
     store: &SessionStore,
     session_uuid: Uuid,
@@ -169,6 +218,12 @@ fn local_context_checkpoint(event: &SessionEvent) -> Option<&str> {
         .then(|| event.payload.get("contextSummary"))
         .flatten()
         .and_then(serde_json::Value::as_str)
+}
+
+fn checkpoint_preserves_pending_user(event: &SessionEvent, pending_turn: Option<Uuid>) -> bool {
+    // A before-prompt checkpoint is written after the request was saved, but
+    // its summary covers only earlier turns.
+    pending_turn.is_some() && pending_turn == event.turn_id
 }
 
 /// What a manual `/compact` did to the handoff history without a model call.
@@ -372,13 +427,22 @@ fn conversation_before_current_request(events: &[SessionEvent]) -> Vec<HistoryLi
 /// Every spoken turn since the last checkpoint, whole and in order.
 fn conversation_lines(events: &[SessionEvent]) -> Vec<HistoryLine<'_>> {
     let mut lines = Vec::new();
+    let mut pending_turn = None;
     for event in events {
         if let Some(summary) = local_context_checkpoint(event) {
+            let pending_user = if checkpoint_preserves_pending_user(event, pending_turn) {
+                lines.pop()
+            } else {
+                pending_turn = None;
+                None
+            };
             lines.clear();
             lines.push(("Context summary", Cow::Borrowed(summary)));
+            lines.extend(pending_user);
             continue;
         }
         if let Some((role, text)) = spoken_line(event) {
+            pending_turn = if role == "User" { event.turn_id } else { None };
             lines.push((role, Cow::Borrowed(text)));
         }
     }
@@ -511,13 +575,18 @@ struct CompactionTranscript {
     first_chars: usize,
     last: VecDeque<char>,
     omitted_middle: bool,
-    pending_user: Option<String>,
+    pending_user: Option<(Option<Uuid>, String)>,
 }
 
 impl CompactionTranscript {
     fn record(&mut self, event: &SessionEvent) {
         if let Some(summary) = local_context_checkpoint(event) {
+            let pending_user = self
+                .pending_user
+                .take()
+                .filter(|(turn, _)| checkpoint_preserves_pending_user(event, *turn));
             *self = Self::default();
+            self.pending_user = pending_user;
             self.line("Context summary", summary);
             return;
         }
@@ -526,11 +595,11 @@ impl CompactionTranscript {
         };
         // A trailing user message belongs to the next request. Only include
         // it here if another spoken message follows it.
-        if let Some(previous) = self.pending_user.take() {
+        if let Some((_, previous)) = self.pending_user.take() {
             self.line("User", &previous);
         }
         if role == "User" {
-            self.pending_user = Some(text.to_owned());
+            self.pending_user = Some((event.turn_id, text.to_owned()));
         } else {
             self.line(role, text);
         }
@@ -679,6 +748,42 @@ mod tests {
     use serde_json::Value;
 
     #[test]
+    fn native_recovery_falls_back_for_another_workspace_or_a_new_goal() {
+        let session = Uuid::new_v4();
+        let instruction = SessionEvent::new(
+            session,
+            SessionEventKind::UserMessage,
+            "Preserve the literal casing",
+            Value::Null,
+        );
+        let checkpoint = gyro_core::efficiency::checkpoint::TaskCheckpoint::derive(
+            session,
+            &[instruction],
+            "/project",
+            1,
+        );
+        let event = SessionEvent::new(
+            session,
+            SessionEventKind::TaskCheckpoint,
+            "",
+            serde_json::to_value(checkpoint).unwrap(),
+        );
+        assert!(
+            recovery_from_events(std::slice::from_ref(&event), "/project", "Continue")
+                .unwrap()
+                .contains("Preserve the literal casing")
+        );
+        assert!(recovery_from_events(std::slice::from_ref(&event), "/other", "Continue").is_none());
+        let goal = SessionEvent::new(
+            session,
+            SessionEventKind::GoalUpdated,
+            "New goal",
+            Value::Null,
+        );
+        assert!(recovery_from_events(&[event, goal], "/project", "Continue").is_none());
+    }
+
+    #[test]
     fn interrupted_response_commentary_is_not_replayed_as_a_completed_answer() {
         let session = Uuid::new_v4();
         let mut events = vec![
@@ -809,6 +914,63 @@ mod tests {
         assert!(history.contains("Use green instead"));
         assert_eq!(history.matches("Keep the design blue").count(), 1);
         assert!(local_compaction_summary(&events).is_some());
+    }
+
+    #[test]
+    fn pre_prompt_compaction_preserves_the_current_request_in_later_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let store =
+            SessionStore::open(gyro_core::GyroPaths::from_base_dir(dir.path().join("data")))
+                .unwrap();
+        let session = store
+            .create_session(
+                dir.path(),
+                gyro_core::SessionOrigin::Desktop,
+                "Compacting chat",
+            )
+            .unwrap();
+        let turn = Uuid::new_v4();
+        let request = "Use green and keep the mobile layout";
+        store
+            .append_user_turn_message_with_turn_id(session.id, request, Value::Null, turn)
+            .unwrap();
+        store
+            .append_system_events_with_turn_id(
+                session.id,
+                vec![(
+                    "Compacted context".into(),
+                    serde_json::json!({"contextSummary": "Blue was previously selected."}),
+                    Some(turn),
+                )],
+            )
+            .unwrap();
+
+        let prompt_history = || {
+            let (events, _) = store.read_prompt_history_events(session.id).unwrap();
+            conversation_history_from_events(events).unwrap()
+        };
+        let summary_input = || compaction_transcript_for_session(&store, session.id).unwrap();
+        assert!(!prompt_history().contains(request));
+        assert!(!summary_input().contains(request));
+
+        store
+            .append_event_with_turn_id(
+                session.id,
+                SessionEventKind::AssistantMessage,
+                "Green is selected.",
+                Value::Null,
+                Some(turn),
+            )
+            .unwrap();
+        store
+            .append_user_turn_message(session.id, "Continue", Value::Null)
+            .unwrap();
+
+        let expected = format!(
+            "Context summary: Blue was previously selected.\n\nUser: {request}\n\nAssistant: Green is selected."
+        );
+        assert_eq!(prompt_history(), expected);
+        assert_eq!(summary_input(), expected);
     }
 
     #[test]

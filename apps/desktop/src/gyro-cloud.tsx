@@ -1,7 +1,12 @@
 import {
+  Button,
+  Empty,
+  Input,
+  Spinner,
   CheckIcon,
   CloseIcon,
   CopyIcon,
+  Dialog,
   EyeIcon,
   EyeOffIcon,
   ReadOnlyChatMessage,
@@ -282,7 +287,7 @@ export function CloudSignIn({
 
   const emailField = (
     <AuthField label="Email">
-      <input
+      <Input
         autoComplete="email"
         className="gyro-cloud-input"
         onChange={(event) => edit(setEmail)(event.target.value)}
@@ -308,7 +313,7 @@ export function CloudSignIn({
   );
   const proofField = (
     <AuthField label={mode === "confirm" ? "Confirmation" : "Link or code"}>
-      <input
+      <Input
         autoComplete="one-time-code"
         className="gyro-cloud-input"
         onChange={(event) => edit(setProof)(event.target.value)}
@@ -404,7 +409,7 @@ export function CloudSignIn({
         {description ? <p>{description}</p> : null}
         {mode === "sign-up" && (
           <AuthField label="Name">
-            <input
+            <Input
               autoComplete="name"
               className="gyro-cloud-input"
               maxLength={80}
@@ -482,9 +487,9 @@ export function CloudSignIn({
                 helpToggle("Didn’t get it?")
               ))}
           </div>
-          <button className="gyro-primary-button" disabled={busy}>
+          <Button size="md" type="submit" disabled={busy}>
             {busy ? progress : action}
-          </button>
+          </Button>
         </div>
       </section>
       <CloudNotice failed={notice.failed} message={notice.message} />
@@ -505,7 +510,6 @@ export function GyroCloud({
   initialStatus?: CloudStatus;
   onStatus?: (status: CloudStatus) => void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const archiveRef = useRef<HTMLDivElement>(null);
   const loaded = useRef(false);
   const [status, setStatus] = useState<Status | undefined>(initialStatus);
@@ -546,7 +550,6 @@ export function GyroCloud({
   }
 
   useEffect(() => {
-    if (!inline && !dialog.current?.open) dialog.current?.showModal();
     if (loaded.current) return;
     loaded.current = true;
     void run("Opening Gyro Cloud…", refresh);
@@ -586,13 +589,13 @@ export function GyroCloud({
               label={busy ? "Loading Cloud…" : "Couldn’t load Cloud"}
               detail="Cloud needs a connection to your Gyro Account."
             >
-              <button
-                className="gyro-secondary-button"
+              <Button
+                variant="outline"
                 onClick={() => void run("Loading Cloud…", refresh)}
                 type="button"
               >
                 Try again
-              </button>
+              </Button>
             </SettingsRow>
           </SettingsGroup>
         ) : !status.signedIn ? (
@@ -611,8 +614,8 @@ export function GyroCloud({
                   label="Your sign-in expired"
                   detail="Sign in again to keep using Cloud."
                 >
-                  <button
-                    className="gyro-primary-button"
+                  <Button
+                    size="md"
                     onClick={() =>
                       void run("Resetting sign-in…", async () => {
                         setPage(undefined);
@@ -630,7 +633,7 @@ export function GyroCloud({
                     type="button"
                   >
                     Sign in again
-                  </button>
+                  </Button>
                 </SettingsRow>
               </SettingsGroup>
             )}
@@ -644,8 +647,8 @@ export function GyroCloud({
                 >
                   <div className="gyro-cloud-recovery">
                     <code>{generated}</code>
-                    <button
-                      className="gyro-secondary-button"
+                    <Button
+                      variant="outline"
                       onClick={() =>
                         void run("Copying recovery code…", async () => {
                           await navigator.clipboard.writeText(generated);
@@ -660,13 +663,13 @@ export function GyroCloud({
                         <CopyIcon aria-hidden="true" size={13} />
                       )}
                       {copied ? "Copied" : "Copy code"}
-                    </button>
+                    </Button>
                   </div>
                   <SettingsRow
                     label="Saved somewhere safe?"
                   >
-                    <button
-                      className="gyro-primary-button"
+                    <Button
+                      size="md"
                       onClick={() =>
                         void run("Saving recovery key…", async () => {
                           await cloud("confirm");
@@ -678,7 +681,7 @@ export function GyroCloud({
                       type="button"
                     >
                       I saved the code
-                    </button>
+                    </Button>
                   </SettingsRow>
                 </SettingsGroup>
               ) : status.backupExists ? (
@@ -697,7 +700,7 @@ export function GyroCloud({
                       label="Unlock your backups"
                     >
                       <div className="gyro-cloud-actions">
-                        <input
+                        <Input
                           aria-label="Recovery code"
                           autoComplete="off"
                           className="gyro-cloud-input"
@@ -706,12 +709,12 @@ export function GyroCloud({
                           type="password"
                           value={code}
                         />
-                        <button
-                          className="gyro-primary-button"
+                        <Button
+                          size="md" type="submit"
                           disabled={!code.trim()}
                         >
                           Unlock
-                        </button>
+                        </Button>
                       </div>
                     </SettingsRow>
                   </SettingsGroup>
@@ -722,8 +725,8 @@ export function GyroCloud({
                     label="Set up encrypted backup"
                     detail="Save a recovery code to get started."
                   >
-                    <button
-                      className="gyro-primary-button"
+                    <Button
+                      size="md"
                       onClick={() =>
                         void run("Generating recovery code…", async () => {
                           setGenerated(
@@ -734,7 +737,7 @@ export function GyroCloud({
                       type="button"
                     >
                       Set up backup
-                    </button>
+                    </Button>
                   </SettingsRow>
                 </SettingsGroup>
               )
@@ -747,8 +750,8 @@ export function GyroCloud({
                     >
                       <div className="gyro-cloud-actions">
                         {conflict && (
-                          <button
-                            className="gyro-secondary-button"
+                          <Button
+                            variant="outline"
                             onClick={() =>
                               void run("Replacing encrypted chat…", () =>
                                 upload(conflict),
@@ -757,17 +760,17 @@ export function GyroCloud({
                             type="button"
                           >
                             Replace cloud copy
-                          </button>
+                          </Button>
                         )}
-                        <button
-                          className="gyro-primary-button"
+                        <Button
+                          size="md"
                           onClick={() =>
                             void run("Uploading encrypted chat…", () => upload())
                           }
                           type="button"
                         >
                           Back up
-                        </button>
+                        </Button>
                       </div>
                     </SettingsRow>
                   </SettingsGroup>
@@ -789,12 +792,15 @@ export function GyroCloud({
                   }
                 >
                   {!page ? (
-                    <p className="gyro-cloud-empty">Loading your chats…</p>
-                  ) : page.items.length === 0 ? (
-                    <p className="gyro-cloud-empty">
-                      No cloud chats yet. Choose “Back up to Cloud” from a
-                      chat’s menu.
+                    <p className="gyro-cloud-empty" role="status">
+                      <Spinner decorative size="xs" /> Loading your chats…
                     </p>
+                  ) : page.items.length === 0 ? (
+                    <Empty
+                      size="compact"
+                      title="No cloud chats yet"
+                      description="Choose “Back up to Cloud” from a chat’s menu."
+                    />
                   ) : null}
                   {page?.items.map((chat) =>
                     removing === chat.id ? (
@@ -804,15 +810,15 @@ export function GyroCloud({
                         detail="Downloaded history stays on this device."
                       >
                         <div className="gyro-cloud-actions">
-                          <button
-                            className="gyro-secondary-button"
+                          <Button
+                            variant="outline"
                             onClick={() => setRemoving(undefined)}
                             type="button"
                           >
                             Cancel
-                          </button>
-                          <button
-                            className="gyro-danger-button"
+                          </Button>
+                          <Button
+                            variant="destructive"
                             onClick={() =>
                               void run("Removing cloud copy…", async () => {
                                 await cloud("delete", { id: chat.id });
@@ -824,7 +830,7 @@ export function GyroCloud({
                             type="button"
                           >
                             Delete cloud copy
-                          </button>
+                          </Button>
                         </div>
                       </SettingsRow>
                     ) : (
@@ -847,8 +853,8 @@ export function GyroCloud({
                           >
                             <TrashIcon aria-hidden="true" size={14} />
                           </button>
-                          <button
-                            className="gyro-secondary-button"
+                          <Button
+                            variant="outline"
                             onClick={() =>
                               void run(
                                 "Downloading and verifying chat…",
@@ -870,15 +876,15 @@ export function GyroCloud({
                             type="button"
                           >
                             Restore
-                          </button>
+                          </Button>
                         </div>
                       </SettingsRow>
                     ),
                   )}
                   {page?.cursor && (
                     <div className="gyro-cloud-more">
-                      <button
-                        className="gyro-secondary-button"
+                      <Button
+                        variant="outline"
                         onClick={() =>
                           void run("Loading more chats…", async () => {
                             const next = await cloud<Page>("list", {
@@ -893,7 +899,7 @@ export function GyroCloud({
                         type="button"
                       >
                         Load more
-                      </button>
+                      </Button>
                     </div>
                   )}
                 </SettingsGroup>
@@ -905,8 +911,8 @@ export function GyroCloud({
                   >
                     {restored.map((id) => (
                       <SettingsRow key={id} label={chatTitle(id)}>
-                        <button
-                          className="gyro-secondary-button"
+                        <Button
+                          variant="outline"
                           onClick={() =>
                             void run("Opening history…", async () => {
                               setArchive(await cloud<Archive>("open", { id }));
@@ -915,7 +921,7 @@ export function GyroCloud({
                           type="button"
                         >
                           Open
-                        </button>
+                        </Button>
                       </SettingsRow>
                     ))}
                   </SettingsGroup>
@@ -940,13 +946,13 @@ export function GyroCloud({
                       label={archive.title}
                       description={`Read-only history · ${formatCloudDate(archive.createdAt)}${archive.model ? ` · ${archive.model}` : ""}`}
                       actions={
-                        <button
-                          className="gyro-secondary-button"
+                        <Button
+                          variant="outline"
                           onClick={() => setArchive(undefined)}
                           type="button"
                         >
                           Close
-                        </button>
+                        </Button>
                       }
                     >
                       {archive.messages.map((entry, index) => (
@@ -986,29 +992,29 @@ export function GyroCloud({
   return inline ? (
     <div className="gyro-cloud-panel">{content}</div>
   ) : (
-    <dialog
-      ref={dialog}
-      className="gyro-cloud-dialog"
-      aria-labelledby="gyro-cloud-title"
-      onCancel={(event) => {
-        event.preventDefault();
-        if (!busy) onClose?.();
+    <Dialog.Root
+      open
+      disablePointerDismissal
+      onOpenChange={(next) => {
+        if (!next && !busy) onClose?.();
       }}
     >
-      <header>
-        <h2 id="gyro-cloud-title">Gyro Cloud</h2>
-        <button
-          aria-label="Close"
-          className="gyro-cloud-icon-button"
-          disabled={!!busy}
-          onClick={onClose}
-          type="button"
-        >
-          <CloseIcon aria-hidden="true" size={15} />
-        </button>
-      </header>
-      {/* Reuses the Settings surface so groups and rows look the same here. */}
-      <div className="gyro-settings-surface gyro-cloud-panel">{content}</div>
-    </dialog>
+      <Dialog.Content
+        className="gyro-cloud-dialog gyro-cloud-archive-dialog"
+        size="lg"
+      >
+        <header>
+          <Dialog.Title>Gyro Cloud</Dialog.Title>
+          <Dialog.Close
+            aria-label="Close"
+            className="gyro-cloud-icon-button"
+            disabled={!!busy}
+          >
+            <CloseIcon aria-hidden="true" size={15} />
+          </Dialog.Close>
+        </header>
+        <div className="gyro-settings-surface gyro-cloud-panel">{content}</div>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

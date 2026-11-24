@@ -7,8 +7,8 @@ use crate::{
 };
 use gyro_core::workspace_sandbox::PreparedWorkspaceSandbox;
 use gyro_core::{
-    CancellationToken, CapabilityRunMode, CredentialPolicy, ExecutionRequest, ExecutionTermination,
-    GyroConfig, GyroPaths,
+    augmented_gui_path, CancellationToken, CapabilityRunMode, CredentialPolicy, ExecutionRequest,
+    ExecutionTermination, GyroConfig, GyroPaths,
 };
 use portable_pty::CommandBuilder;
 use std::{
@@ -226,6 +226,23 @@ pub(super) fn run_model_command(
     }
     let output = gyro_core::run_command(request, cancellation, |_| {})?;
     Ok(command_output(output))
+}
+
+/// Keep the executable separate from argv. A literal executable may have
+/// spaces in its name, so check that spelling before diagnosing command text.
+pub(super) fn validate_model_program(program: &str, cwd: &Path) -> anyhow::Result<()> {
+    anyhow::ensure!(!program.contains('\0'), "program cannot contain NUL");
+    if !program.contains(char::is_whitespace) || cwd.join(program).is_file() {
+        return Ok(());
+    }
+    let found_on_path = !program.contains('/')
+        && std::env::split_paths(&augmented_gui_path())
+            .any(|entry| cwd.join(entry).join(program).is_file());
+    anyhow::ensure!(
+        found_on_path,
+        "No executable was found for the complete program value. Put only the executable name or path in program and pass arguments separately in args, for example program \"node\" and args [\"--test\", \"example.test.mjs\"]. No command was started."
+    );
+    Ok(())
 }
 
 pub(super) fn model_terminal_request(

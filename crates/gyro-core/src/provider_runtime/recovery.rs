@@ -330,39 +330,14 @@ where
         .and_then(provider_resume_cursor_from_binding);
     // A manual resend can arrive after the previous worker has gone away.
     // Saved tool receipts still prohibit replay when its cursor was lost.
-    let saved_events = Uuid::parse_str(&request.session_id)
-        .ok()
-        .and_then(|session| store.read_events(session).ok())
-        .unwrap_or_default();
-    let same_turn = |event: &crate::SessionEvent| {
-        event.turn_id.map(|id| id.to_string()).as_deref() == request.turn_id.as_deref()
+    let saved_work = match request
+        .turn_id
+        .as_deref()
+        .and_then(|id| Uuid::parse_str(id).ok())
+    {
+        Some(turn) => store.provider_turn_has_interrupted_work(session_uuid(request)?, turn)?,
+        None => false,
     };
-    let saved_failure = saved_events
-        .iter()
-        .filter(|event| same_turn(event))
-        .any(|event| {
-            event.payload["kind"].as_str() == Some("provider-status")
-                && matches!(
-                    event.payload["status"].as_str(),
-                    Some("failed" | "cancelled" | "interrupted")
-                )
-        });
-    let saved_work = saved_failure
-        && saved_events
-            .iter()
-            .filter(|event| same_turn(event))
-            .any(|event| {
-                matches!(
-                    event.payload["schema"].as_str(),
-                    Some("gyro.capability.v1" | "gyro.mutation.v1")
-                ) || (event.payload["kind"].as_str() == Some("provider-activity")
-                    && matches!(
-                        event.payload["activityKind"].as_str(),
-                        Some("command" | "file" | "tool")
-                    ))
-                    || (event.payload["kind"].as_str() == Some("provider-approval")
-                        && event.payload["status"].as_str() == Some("applied"))
-            });
     if (saved_work || is_continuation(request))
         && !durable_native_cursor(request, binding_cursor.as_ref())
     {
@@ -404,9 +379,9 @@ where
             if binding.is_some()
                 && !attempt.published_output
                 && !attempt.continuing_work
-                && provider_retry::take_retry()
+                && is_stale_resume_error(&format!("{error:#}"))
                 && stopped().is_none()
-                && is_stale_resume_error(&format!("{error:#}")) =>
+                && provider_retry::take_retry() =>
         {
             let session_id = session_uuid(request)?;
             let _ = store.clear_provider_session_binding(session_id, &request.provider_id);

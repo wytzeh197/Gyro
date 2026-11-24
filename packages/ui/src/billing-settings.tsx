@@ -1,5 +1,7 @@
+import { Input } from "./primitives/controls";
+import { Button } from "./primitives/button";
 import { BillingRights } from "./billing-rights";
-import { CreditCard } from "lucide-react";
+import { CreditCard } from "./icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { SettingsSection } from "./settings-presentation";
 import { SettingsGroup, SettingsRow } from "./settings-controls";
@@ -219,13 +221,13 @@ export function CloudConnectionSettings({
           <div className="gyro-settings-transfer-actions">
             {children}
             {actions.refresh ? (
-              <button
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 onClick={actions.refresh}
               >
                 Refresh status
-              </button>
+              </Button>
             ) : null}
           </div>
         </div>
@@ -258,7 +260,7 @@ export function CloudConnectionSettings({
           >
             <label>
               Email{" "}
-              <input
+              <Input
                 type="email"
                 aria-label="Gyro email"
                 autoComplete="email"
@@ -275,7 +277,7 @@ export function CloudConnectionSettings({
             {snapshot.authStage === "proof" ? (
               <label>
                 Sign-in link or code{" "}
-                <input
+                <Input
                   type="password"
                   aria-label="Sign-in link or code"
                   autoComplete="one-time-code"
@@ -307,9 +309,9 @@ export function CloudConnectionSettings({
               </label>
             ) : null}
             <div className="gyro-settings-transfer-actions">
-              <button
+              <Button
                 type="submit"
-                className="gyro-primary-button"
+                size="md"
                 disabled={
                   snapshot.status === "checking" ||
                   (snapshot.authStage === "proof" && !isCloudSignInProof(proof))
@@ -318,14 +320,14 @@ export function CloudConnectionSettings({
                 {snapshot.authStage === "proof"
                   ? "Verify sign-in"
                   : "Send sign-in email"}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 onClick={actions.signOut}
               >
                 Return to local Gyro
-              </button>
+              </Button>
             </div>
           </form>
         </SettingsGroup>
@@ -348,22 +350,22 @@ export function CloudConnectionSettings({
           (snapshot.accountLabel && actions.signOut) ? (
           <div className="gyro-settings-transfer-actions">
             {!snapshot.accountLabel && actions.restore ? (
-              <button
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 onClick={actions.restore}
               >
                 Sign in / Restore subscription
-              </button>
+              </Button>
             ) : null}
             {snapshot.accountLabel && actions.signOut ? (
-              <button
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 onClick={actions.signOut}
               >
                 Sign out of Gyro
-              </button>
+              </Button>
             ) : null}
           </div>
           ) : null}
@@ -445,6 +447,7 @@ function LastPayment({
           {payment.brand === "mastercard" ? (
             <svg
               className="gyro-card-mark"
+              data-brand="mastercard"
               viewBox="0 0 32 22"
               aria-hidden="true"
             >
@@ -528,39 +531,39 @@ export function BillingSettings({
     name: string,
   ) =>
     snapshot.availability === "coming-soon" ? (
-      <button
+      <Button
         type="button"
-        className="gyro-secondary-button"
+        variant="outline"
         aria-label={`Subscribe to ${name}, coming soon`}
         disabled
       >
         Coming soon
-      </button>
+      </Button>
     ) : actions.subscribe ? (
-      <button
+      <Button
         type="button"
-        className="gyro-secondary-button"
+        variant="outline"
         onClick={() =>
           actions.subscribe?.(id, modernCloud ? "personal" : undefined)
         }
       >
         Subscribe to {name}
-      </button>
+      </Button>
     ) : modernCloud &&
       actions.cloud &&
       snapshot.plan !== id &&
       !snapshot.scheduledPlan &&
       paidStates.includes(snapshot.status) ? (
-      <button
+      <Button
         type="button"
-        className="gyro-secondary-button"
+        variant="outline"
         disabled={changingPlan}
         onClick={() => {
           if (id === "plus" || id === "premium") setPendingPlan(id);
         }}
       >
         Change at next renewal
-      </button>
+      </Button>
     ) : modernCloud && currentPlan === id ? null : (
       <span>
         {snapshot.scheduledPlan === id
@@ -666,13 +669,13 @@ export function BillingSettings({
           />
         ) : null}
         {actions.manage ? (
-          <button
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             onClick={actions.manage}
           >
             Manage billing
-          </button>
+          </Button>
         ) : null}
       </CloudConnectionSettings>
       <SettingsGroup
@@ -791,17 +794,17 @@ export function BillingSettings({
               active until then.
             </p>
             <div className="gyro-settings-transfer-actions">
-              <button
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 disabled={changingPlan}
                 onClick={() => setPendingPlan(undefined)}
               >
                 Keep current plan
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 disabled={changingPlan}
                 onClick={() => {
                   const id = pendingPlan;
@@ -835,7 +838,7 @@ export function BillingSettings({
                 }}
               >
                 Confirm plan change
-              </button>
+              </Button>
             </div>
           </div>
         ) : null}
@@ -867,9 +870,9 @@ export function BillingSettings({
         {snapshot.status === "checkout-pending" ? (
           <div className="gyro-settings-transfer-actions">
             {actions.finishCheckout ? (
-              <button
+              <Button
                 type="button"
-                className="gyro-primary-button"
+                size="md"
                 onClick={actions.finishCheckout}
               >
                 {snapshot.productionCloud
@@ -877,16 +880,16 @@ export function BillingSettings({
                   : snapshot.staging
                     ? "Open test checkout"
                     : "Complete simulated checkout"}
-              </button>
+              </Button>
             ) : null}
             {actions.abandonCheckout ? (
-              <button
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 onClick={actions.abandonCheckout}
               >
                 Return to local Gyro
-              </button>
+              </Button>
             ) : null}
           </div>
         ) : null}
@@ -906,13 +909,13 @@ export function BillingSettings({
             and local token estimates.
           </p>
           {snapshot.staging && actions.mockManagedRequest ? (
-            <button
+            <Button
               type="button"
-              className="gyro-secondary-button"
+              variant="outline"
               onClick={actions.mockManagedRequest}
             >
               Run mock AI request
-            </button>
+            </Button>
           ) : null}
           {snapshot.usage?.length ? (
             snapshot.usage.map((wallet) => (
@@ -965,31 +968,31 @@ export function BillingSettings({
           </p>
           <div className="gyro-settings-transfer-actions">
             {actions.simulateManagedRequest ? (
-              <button
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 onClick={actions.simulateManagedRequest}
               >
                 Simulate managed usage
-              </button>
+              </Button>
             ) : null}
             {actions.simulateCancellation ? (
-              <button
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 onClick={actions.simulateCancellation}
               >
                 Simulate renewal cancellation
-              </button>
+              </Button>
             ) : null}
             {actions.simulateExpiry ? (
-              <button
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 onClick={actions.simulateExpiry}
               >
                 Simulate expiry
-              </button>
+              </Button>
             ) : null}
           </div>
         </SettingsGroup>
@@ -1020,13 +1023,13 @@ export function BillingSettings({
             limits.
           </p>
           <div className="gyro-settings-transfer-actions">
-            <button
+            <Button
               type="button"
-              className="gyro-secondary-button"
+              variant="outline"
               onClick={onOpenCloud}
             >
               Open Gyro Cloud settings
-            </button>
+            </Button>
           </div>
         </SettingsGroup>
       ) : null}

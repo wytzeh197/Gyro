@@ -1,6 +1,23 @@
 use super::*;
 use crate::terminal::types::{PaneGovernance, TerminalProcessManager};
 
+#[test]
+fn model_program_distinguishes_a_command_line_from_a_literal_path() {
+    let root = tempfile::tempdir().unwrap();
+    validate_model_program("node", root.path()).unwrap();
+    let error = validate_model_program("node --test sum.test.mjs", root.path())
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("pass arguments separately in args"));
+    assert!(error.contains("No command was started"));
+
+    let executable = root.path().join("Test Runner");
+    std::fs::write(&executable, "fixture").unwrap();
+    validate_model_program("./Test Runner", root.path()).unwrap();
+    validate_model_program(executable.to_str().unwrap(), root.path()).unwrap();
+    assert!(validate_model_program("node\0", root.path()).is_err());
+}
+
 // Report presence only; test diagnostics must never echo environment values.
 const PROBE: &str = r#"printf '%s|%s|%s|%s|%s|%s' \
     "${GYRO_COMMAND_FIXTURE_API_KEY+set}" "${OPENAI_API_KEY+set}" \

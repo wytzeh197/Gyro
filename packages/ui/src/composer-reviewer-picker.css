@@ -31,12 +31,30 @@
   outline-offset: -2px;
 }
 
+.gyro-reviewer-menu {
+  display: flex;
+  flex-direction: column;
+  inline-size: min(calc(372px * var(--gyro-ui-scale)), var(--anchor-width));
+  min-inline-size: 0;
+  max-inline-size: var(--available-width);
+  padding: 0;
+  overscroll-behavior: contain;
+}
+
+.gyro-reviewer-menu button {
+  background: transparent;
+  border: 0;
+  font: inherit;
+  text-align: left;
+}
+
 .gyro-reviewer-menu > .gyro-reviewer-controls {
   display: grid;
+  flex: none;
   justify-content: stretch;
   gap: var(--gyro-space-standard);
   padding: var(--gyro-space-standard) var(--gyro-space-standard) var(--gyro-space-standard);
-  border-bottom: 1px solid var(--gyro-premium-hairline-soft);
+  border-bottom: 1px solid var(--gyro-border-light);
 }
 
 .gyro-reviewer-title,
@@ -86,7 +104,7 @@
   gap: calc(var(--gyro-chat-space-1) * 1.25);
   height: calc(24px * var(--gyro-ui-scale, 1));
   padding: 0 calc(var(--gyro-chat-space-1) * 2.25);
-  border: 1px solid var(--gyro-premium-hairline-soft);
+  border: 1px solid var(--gyro-border-light);
   border-radius: var(--gyro-radius-pill);
   font-size: var(--gyro-font-micro);
   white-space: nowrap;
@@ -144,6 +162,7 @@
   padding: 0 var(--gyro-space-compact) var(--gyro-space-compact);
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-color: var(--gyro-border-strong) transparent;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
 }
@@ -155,11 +174,11 @@
 .gyro-reviewer-group-heading {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: var(--gyro-z-base);
   display: flex;
   align-items: center;
   padding: var(--gyro-space-standard) var(--gyro-space-standard) var(--gyro-space-compact);
-  background: var(--gyro-surface-raised);
+  background: var(--gyro-elevated);
   color: var(--gyro-muted);
   font-size: var(--gyro-font-micro);
   font-weight: 600;
@@ -169,7 +188,7 @@
 .gyro-reviewer-group-heading em {
   margin-left: calc(var(--gyro-chat-space-1) * 0.5);
   padding: 0 calc(var(--gyro-chat-space-1) * 1.25);
-  border: 1px solid var(--gyro-premium-hairline-soft);
+  border: 1px solid var(--gyro-border-light);
   border-radius: var(--gyro-radius-pill);
   font-style: normal;
   font-weight: 500;
@@ -181,6 +200,7 @@
   display: flex;
   align-items: center;
   gap: var(--gyro-space-compact);
+  width: 100%;
   min-height: calc(30px * var(--gyro-ui-scale, 1));
   padding: 0 var(--gyro-space-standard) 0 var(--gyro-space-compact);
   border-radius: var(--gyro-radius-md);
@@ -201,7 +221,10 @@
   background: var(--gyro-control-hover);
 }
 
-.gyro-reviewer-menu .gyro-reviewer-option:focus-visible { outline: 0; box-shadow: inset 0 0 0 1px var(--gyro-border); }
+.gyro-reviewer-menu button:focus-visible {
+  outline: 2px solid var(--gyro-border-focus);
+  outline-offset: -2px;
+}
 
 .gyro-reviewer-option[aria-current="true"] .gyro-reviewer-model-name { font-weight: 600; }
 
@@ -217,7 +240,7 @@
   margin-left: auto;
   flex: none;
   padding: 0 calc(var(--gyro-chat-space-1) * 1.5);
-  border: 1px solid var(--gyro-premium-hairline-soft);
+  border: 1px solid var(--gyro-border-light);
   border-radius: var(--gyro-radius-pill);
   color: var(--gyro-muted);
   font-size: var(--gyro-font-micro);
@@ -236,7 +259,7 @@
 .gyro-reviewer-menu > footer {
   flex: none;
   padding: var(--gyro-space-compact);
-  border-top: 1px solid var(--gyro-premium-hairline-soft);
+  border-top: 1px solid var(--gyro-border-light);
 }
 
 .gyro-reviewer-menu > footer button {

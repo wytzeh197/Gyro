@@ -12,7 +12,7 @@ import {
   MessageSquare,
   Search,
   Workflow,
-} from "lucide-react";
+} from "../icons";
 import type {
   WorkflowDefinition,
   WorkflowLibrary,

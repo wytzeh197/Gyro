@@ -7,8 +7,8 @@ use super::{
     types::{ChatMode, ProviderChatRequest},
 };
 use crate::{
-    timing, CapabilityClass, CapabilityId, CapabilityResourceRef, CapabilityResponse,
-    CapabilityRunMode, CapabilityStatus,
+    efficiency::progress::Decision, timing, CapabilityClass, CapabilityId, CapabilityResourceRef,
+    CapabilityResponse, CapabilityRunMode, CapabilityStatus,
 };
 use serde::Serialize;
 use std::borrow::Cow;
@@ -31,6 +31,19 @@ pub fn is_workspace_edit(id: CapabilityId) -> bool {
         id,
         CapabilityId::WorkspaceEdit | CapabilityId::WorkspaceProposeEdit
     )
+}
+
+pub fn is_workspace_test(id: CapabilityId, arguments: &serde_json::Value) -> bool {
+    id == CapabilityId::WorkspaceRunTest
+        || (id == CapabilityId::WorkspaceRunCommand
+            && crate::execution::is_foreground_test_command(
+                arguments["program"].as_str().unwrap_or_default(),
+                arguments["args"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(serde_json::Value::as_str),
+            ))
 }
 
 fn roots_may_match(left: Option<&str>, right: Option<&str>) -> bool {
@@ -516,15 +529,91 @@ pub fn observe_response(response: &CapabilityResponse, spill_requested: bool) {
             {
                 e.spill_recoveries = e.spill_recoveries.saturating_add(1);
             }
-            match result.data["progressAction"].as_str() {
-                Some("correct") => {
-                    e.repeated_call_notices = e.repeated_call_notices.saturating_add(1)
-                }
-                Some("pause") => e.repeated_call_pauses = e.repeated_call_pauses.saturating_add(1),
-                _ => {}
+        }
+        let progress_action = response
+            .error
+            .as_ref()
+            .and_then(|error| error.progress_action)
+            .or_else(
+                || match response.result.as_ref()?.data["progressAction"].as_str() {
+                    Some("correct") => Some(Decision::Correct),
+                    Some("pause") => Some(Decision::Pause),
+                    _ => None,
+                },
+            );
+        match progress_action {
+            Some(Decision::Correct) => {
+                e.repeated_call_notices = e.repeated_call_notices.saturating_add(1)
             }
+            Some(Decision::Pause) => {
+                e.repeated_call_pauses = e.repeated_call_pauses.saturating_add(1)
+            }
+            _ => {}
         }
     });
+}
+
+/// Stop an unchanged retry after the broker has already warned about the same
+/// invalid path. Count generations here so a parallel tool batch can finish.
+pub(crate) fn repeated_rejected_path(
+    warned: &mut Option<(CapabilityId, serde_json::Value)>,
+    single_call: bool,
+    calls: &[(CapabilityId, serde_json::Value)],
+    responses: &[CapabilityResponse],
+) -> bool {
+    let previous = warned.take();
+    let (true, [call], [response]) = (single_call, calls, responses) else {
+        return false;
+    };
+    let Some(error) = response.error.as_ref().filter(|error| {
+        response.status == CapabilityStatus::Failed
+            && error.code == crate::efficiency::progress::OUTSIDE_WORKSPACE_INSPECTION_PATH
+    }) else {
+        return false;
+    };
+    if previous.as_ref() == Some(call) {
+        crate::provider_observation::efficiency_event(|events| {
+            events.repeated_call_pauses = events.repeated_call_pauses.saturating_add(1);
+        });
+        return true;
+    }
+    if error.progress_action == Some(Decision::Correct) {
+        *warned = Some(call.clone());
+    }
+    false
+}
+
+#[test]
+fn unchanged_rejected_path_stops_only_after_a_single_call_correction() {
+    use serde_json::json;
+
+    let request = (CapabilityId::WorkspaceRead, json!({"path":"/src/main.rs"}));
+    let one = std::slice::from_ref(&request);
+    let failure = CapabilityResponse::failed(
+        "test",
+        Uuid::nil(),
+        crate::efficiency::progress::OUTSIDE_WORKSPACE_INSPECTION_PATH,
+        "Invalid absolute path",
+    );
+    let mut correction = failure.clone();
+    correction.error.as_mut().unwrap().progress_action = Some(Decision::Correct);
+    let failed = std::slice::from_ref(&failure);
+    let corrected = std::slice::from_ref(&correction);
+    let mut warned = None;
+
+    assert!(!repeated_rejected_path(&mut warned, true, one, failed));
+    assert!(!repeated_rejected_path(&mut warned, true, one, corrected));
+    assert!(repeated_rejected_path(&mut warned, true, one, failed));
+    assert!(!repeated_rejected_path(&mut warned, true, one, failed));
+
+    assert!(!repeated_rejected_path(&mut warned, true, one, corrected));
+    let changed = [(CapabilityId::WorkspaceRead, json!({"path":"src/main.rs"}))];
+    assert!(!repeated_rejected_path(&mut warned, true, &changed, failed));
+    assert!(!repeated_rejected_path(&mut warned, true, one, failed));
+
+    assert!(!repeated_rejected_path(&mut warned, true, one, corrected));
+    assert!(!repeated_rejected_path(&mut warned, false, one, failed));
+    assert!(!repeated_rejected_path(&mut warned, true, one, failed));
 }
 
 pub const COMPACT_INVOKE: &str = "gyro_tool_invoke";
@@ -778,13 +867,20 @@ pub fn append_ordered_tool_messages(
     messages: &mut Vec<serde_json::Value>,
     replies: Vec<Option<serde_json::Value>>,
 ) -> anyhow::Result<()> {
-    let replies = replies
+    let mut replies = replies
         .into_iter()
         .enumerate()
         .map(|(index, reply)| {
             reply.ok_or_else(|| anyhow::anyhow!("missing tool reply at slot {index}"))
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
+    // Context pressure is estimated before the next provider request is
+    // prepared. Fold the fresh replies here so duplicates cannot trigger
+    // compaction or consume the retained tail budget.
+    let saved = crate::efficiency::context::compact_duplicate_reads(&mut replies);
+    if saved > 0 {
+        crate::provider_observation::retired_context(saved);
+    }
     messages.extend(replies);
     Ok(())
 }
@@ -792,7 +888,8 @@ pub fn append_ordered_tool_messages(
 pub fn inline_tool_schema(id: CapabilityId) -> bool {
     matches!(
         id,
-        CapabilityId::WorkspaceList
+        CapabilityId::WorkspaceContext
+            | CapabilityId::WorkspaceList
             | CapabilityId::WorkspaceSearch
             | CapabilityId::WorkspaceRead
             | CapabilityId::WorkspaceReadRange
@@ -865,14 +962,11 @@ pub fn advertised_tool_parameters(
     catalog: &dyn ToolCatalog,
     id: CapabilityId,
 ) -> serde_json::Value {
-    if inline_tool_schema(id) {
-        catalog.schema_ref(id).into_owned()
-    } else {
-        // Keep concise argument guidance (reference sources, units, defaults)
-        // so deferred tools are callable without a discovery round. The catalog
-        // retains the complete documentation.
-        catalog.compact_schema_ref(id).into_owned()
-    }
+    // Deferred tools keep concise argument guidance so they are callable
+    // without a discovery round. Catalog pages carry the full documentation.
+    catalog
+        .advertised_schema_ref(id, !inline_tool_schema(id))
+        .into_owned()
 }
 
 fn advertised_tool_definition(
@@ -960,23 +1054,39 @@ fn is_paged_spill_read(capability: &str, data: &serde_json::Value) -> bool {
     ) && data["source"] == "spill"
 }
 
-fn spills_terminal_pane(capability: &str) -> bool {
+fn is_explicit_text_page(data: &serde_json::Value, field: &str) -> bool {
+    let window = match field {
+        "output" => "outputWindow",
+        "stdout" => "stdoutWindow",
+        "stderr" => "stderrWindow",
+        "text" => "textWindow",
+        _ => return false,
+    };
+    data[window]["requestedOffset"].is_u64()
+}
+
+fn spills_terminal_pane(capability: &str, data: &serde_json::Value) -> bool {
     matches!(
         capability,
         "terminal.open" | "terminal.read" | "terminal.wait" | "terminal.input" | "terminal.stop"
-    )
+    ) && !is_explicit_text_page(data, "output")
+}
+
+fn spillable_text<'a>(data: &'a serde_json::Value, field: &str, minimum: usize) -> Option<&'a str> {
+    data[field]
+        .as_str()
+        .filter(|text| text.len() >= minimum && !is_explicit_text_page(data, field))
 }
 
 fn may_spill_result(capability: &str, data: &serde_json::Value, minimum: usize) -> bool {
     !is_paged_spill_read(capability, data)
-        && (SPILL_TEXT_FIELDS.iter().any(|field| {
-            data[*field]
-                .as_str()
-                .is_some_and(|text| text.len() >= minimum)
-        }) || (spills_terminal_pane(capability)
-            && data
-                .get("pane")
-                .is_some_and(|pane| may_spill_result(capability, pane, minimum))))
+        && (SPILL_TEXT_FIELDS
+            .iter()
+            .any(|field| spillable_text(data, field, minimum).is_some())
+            || (spills_terminal_pane(capability, data)
+                && data
+                    .get("pane")
+                    .is_some_and(|pane| may_spill_result(capability, pane, minimum))))
 }
 
 /// Replace oversized string fields with a head/tail preview and a spill:// address.
@@ -1002,21 +1112,15 @@ pub fn spill_result_data_within(
     }
     // Terminal snapshots nest their output under pane, unlike command results.
     // Apply the same recoverable preview there; keep status, paging and revision
-    // fields intact. Do not recurse into arbitrary tool data or user documents.
-    if spills_terminal_pane(capability) {
+    // fields intact. Explicit output pages already fit the observation budget.
+    if spills_terminal_pane(capability, data) {
         if let Some(pane) = data.get_mut("pane").filter(|pane| pane.is_object()) {
             spill_result_data_within(capability, tool, pane, window);
         }
     }
-    let Some(object) = data.as_object_mut() else {
-        return;
-    };
     let min_bytes = spill_minimum(window);
     for &field in SPILL_TEXT_FIELDS {
-        let Some(slot) = object.get_mut(field) else {
-            continue;
-        };
-        let Some(text) = slot.as_str().filter(|text| text.len() >= min_bytes) else {
+        let Some(text) = spillable_text(data, field, min_bytes) else {
             continue;
         };
         let preview = match window {
@@ -1032,7 +1136,7 @@ pub fn spill_result_data_within(
             });
             continue;
         }
-        *slot = serde_json::Value::String(preview.text);
+        data[field] = serde_json::Value::String(preview.text);
     }
 }
 
@@ -1053,6 +1157,102 @@ pub fn check_native_tool_recovery(
         "The model returned only invalid Gyro tool calls after one corrective retry; no invalid actions were executed. Check the tool names and arguments before continuing."
     );
     Ok(())
+}
+
+/// Annotate known outcomes without changing tool status, resource ownership, or evidence.
+pub fn add_recovery_feedback(response: &mut CapabilityResponse) {
+    if let Some(error) = response.error.as_mut() {
+        if response.status == CapabilityStatus::Failed && error.code == "stale-edit-base" {
+            error.message = crate::sanitize_capability_summary(&format!(
+                "{}. Read the current file or exact affected range, then rebuild the edit against that version.",
+                error.message.trim_end_matches('.'),
+            ));
+        }
+        return;
+    }
+    if response.status != CapabilityStatus::Completed {
+        return;
+    }
+    let Some(result) = response.result.as_mut() else {
+        return;
+    };
+    let Some(resource) = result.resource.as_ref() else {
+        return;
+    };
+    let data = &result.data;
+    let hint = match (result.capability_id, resource.kind.as_str()) {
+        (
+            CapabilityId::TerminalOpen
+            | CapabilityId::TerminalRead
+            | CapabilityId::TerminalWait
+            | CapabilityId::WorkspaceRunTask
+            | CapabilityId::WorkspaceRunTest,
+            "terminal",
+        ) if data["pane"]["status"] == "running" => Some(if data["pane"]["outputCursor"].is_object() {
+            " Wait with gyro_terminal_wait using resource.id as resourceId and pane.outputCursor as knownOutputCursor."
+        } else {
+            " Wait with gyro_terminal_wait using resource.id as resourceId."
+        }),
+        (CapabilityId::TerminalOpen | CapabilityId::TerminalRead | CapabilityId::TerminalWait, "terminal")
+            if data["completed"] == true && data["exitCode"].as_i64().is_some_and(|code| code != 0) =>
+        {
+            Some(" Inspect the failure in pane.output. If needed, page it with gyro_terminal_read using outputOffset.")
+        }
+        (CapabilityId::WorkspaceRunTask | CapabilityId::WorkspaceRunTest | CapabilityId::WorkspaceRunCommand, "output")
+            if data["status"] == "timed-out"
+                || (data["exitCode"].as_i64().is_some_and(|code| code != 0)
+                    && data["blockedDestinations"].as_array().is_none_or(Vec::is_empty)) =>
+        {
+            Some(" Inspect stdout and stderr. Retrieve omitted diagnostics with gyro_workspace_read_output using resource.id as outputId.")
+        }
+        _ => None,
+    };
+    if let Some(hint) = hint.filter(|hint| !result.summary.ends_with(hint)) {
+        result.summary = crate::sanitize_capability_summary(&format!("{}{hint}", result.summary));
+    }
+}
+
+#[test]
+fn harness_feedback_preserves_evidence_and_respects_denials() {
+    use crate::capabilities::CapabilityResult;
+    use serde_json::json;
+
+    let mut response = CapabilityResponse::completed(
+        "test",
+        CapabilityResult {
+            call_id: Uuid::nil(),
+            capability_id: CapabilityId::TerminalOpen,
+            summary: "Running".into(),
+            data: json!({"pane":{"status":"running","outputCursor":{"start":0,"end":4,"generation":"a"}}}),
+            resource: Some(CapabilityResourceRef {
+                id: "terminal:owned".into(),
+                kind: "terminal".into(),
+                label: "Command".into(),
+            }),
+        },
+    );
+    let original = response.result.as_ref().unwrap().clone();
+    add_recovery_feedback(&mut response);
+    add_recovery_feedback(&mut response);
+    let result = response.result.unwrap();
+    assert_eq!(result.data, original.data);
+    assert_eq!(result.resource.unwrap().id, "terminal:owned");
+    assert_eq!(result.summary.matches("gyro_terminal_wait").count(), 1);
+    assert!(result.summary.contains("knownOutputCursor"));
+
+    let mut denied = CapabilityResponse::failed("test", Uuid::nil(), "denied", "Approval denied");
+    let original = denied.clone();
+    add_recovery_feedback(&mut denied);
+    assert_eq!(denied, original);
+    let mut cancelled = CapabilityResponse::failed("test", Uuid::nil(), "cancelled", "Cancelled");
+    let original = cancelled.clone();
+    add_recovery_feedback(&mut cancelled);
+    assert_eq!(cancelled, original);
+    let mut stale = CapabilityResponse::failed("test", Uuid::nil(), "stale-edit-base", "Stale");
+    add_recovery_feedback(&mut stale);
+    assert!(model_response_text(&stale)
+        .unwrap()
+        .contains("exact affected range"));
 }
 
 /// Keep actionable capability evidence in provider context without repeatedly
@@ -1115,19 +1315,6 @@ pub fn model_response_text(response: &CapabilityResponse) -> anyhow::Result<Stri
         app_version: (!response.compatible).then_some(response.app_version.as_str()),
     };
     Ok(serde_json::to_string(&payload)?)
-}
-
-pub fn is_workspace_test(id: CapabilityId, arguments: &serde_json::Value) -> bool {
-    id == CapabilityId::WorkspaceRunTest
-        || (id == CapabilityId::WorkspaceRunCommand
-            && crate::execution::is_foreground_test_command(
-                arguments["program"].as_str().unwrap_or_default(),
-                arguments["args"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(serde_json::Value::as_str),
-            ))
 }
 
 pub(super) fn execute_with_reused_tests(
@@ -1491,6 +1678,40 @@ mod terminal_evidence_tests {
         let original = document.clone();
         spill_result_data_within("workspace.read", "gyro_workspace_read", &mut document, None);
         assert_eq!(document, original);
+    }
+
+    #[test]
+    fn explicit_output_windows_remain_exact_without_disabling_other_previews() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = crate::GyroPaths::from_base_dir(temp.path().join("gyro"));
+        let _scope = spill::SessionScope::start(&paths, Uuid::new_v4());
+        let page = "line 🦀 with exact evidence\n".repeat(160);
+        let mut terminal = json!({
+            "pane": {"output": page, "status": "failed"},
+            "exitCode": 1,
+            "outputWindow": {"requestedOffset": 0, "offset": 0, "nextOffset": 4_320}
+        });
+        let original = terminal.clone();
+        spill_result_data_within("terminal.read", "gyro_terminal_read", &mut terminal, None);
+        assert_eq!(
+            terminal, original,
+            "terminal paging must preserve its requested text"
+        );
+
+        let mut command = json!({
+            "stdout": page,
+            "stderr": "long unrequested diagnostics\n".repeat(200),
+            "stdoutWindow": {"requestedOffset": 100, "offset": 100, "nextOffset": 4_420},
+            "stderrWindow": {"offset": 0}
+        });
+        spill_result_data_within(
+            "workspace.read_output",
+            "gyro_workspace_read_output",
+            &mut command,
+            None,
+        );
+        assert_eq!(command["stdout"], page);
+        assert!(command["stderr"].as_str().unwrap().contains("spill://"));
     }
 }
 

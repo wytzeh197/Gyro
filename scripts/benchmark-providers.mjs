@@ -1,7 +1,6 @@
 // Explicit, billable integration benchmark. No provider calls without --spec.
 import { spawn } from "node:child_process";
 import {
-  mkdtemp,
   readFile,
   writeFile,
   realpath,
@@ -14,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import {
   benchmarkStoreDirectory,
+  createBenchmarkRoot,
   isolatedBenchmarkLayout,
   readBenchmarkLayout,
 } from "./provider-benchmark-layout.mjs";
@@ -57,9 +57,9 @@ if (
 ) {
   throw new Error("Invalid bounded benchmark spec");
 }
-const root = await realpath(
-  values.resume ?? (await mkdtemp(join(tmpdir(), "gyro-benchmark-"))),
-);
+const root = values.resume
+  ? await realpath(values.resume)
+  : await createBenchmarkRoot("gyro-benchmark-", isolatedBenchmarkLayout);
 const temp = await realpath(tmpdir());
 if (!root.startsWith(temp + "/") && !root.startsWith("/private/tmp/"))
   throw new Error("Use a disposable temporary directory");

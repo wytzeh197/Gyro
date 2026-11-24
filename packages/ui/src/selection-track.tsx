@@ -1,4 +1,15 @@
-import { useLayoutEffect, useRef, type ReactNode } from "react";
+import {
+  useLayoutEffect,
+  useRef,
+  type HTMLAttributes,
+  type ReactNode,
+  type Ref,
+} from "react";
+
+type TrackProps = Pick<
+  HTMLAttributes<HTMLDivElement>,
+  "aria-label" | "className" | "role" | "children"
+> & { ref: Ref<HTMLDivElement> };
 
 /** Selection moves; initial layout, wrapping, and resizing always snap. */
 export function SelectionTrack({
@@ -6,11 +17,13 @@ export function SelectionTrack({
   className,
   label,
   value,
+  render,
 }: {
   children: ReactNode;
   className: string;
-  label: string;
+  label?: string;
   value: string;
+  render?: (props: TrackProps) => ReactNode;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<(animate: boolean) => void>(() => {});
@@ -72,15 +85,17 @@ export function SelectionTrack({
     previousValue.current = value;
   }, [value]);
 
-  return (
-    <div
-      aria-label={label}
-      className={`${className} gyro-selection-track`}
-      ref={rootRef}
-      role="group"
-    >
-      <span aria-hidden="true" className="gyro-selection-indicator" />
-      {children}
-    </div>
-  );
+  const props: TrackProps = {
+    "aria-label": label,
+    className: `${className} gyro-selection-track`,
+    ref: rootRef,
+    role: "group",
+    children: (
+      <>
+        <span aria-hidden="true" className="gyro-selection-indicator" />
+        {children}
+      </>
+    ),
+  };
+  return render ? render(props) : <div {...props} />;
 }

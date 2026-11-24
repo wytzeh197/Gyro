@@ -63,18 +63,18 @@
   font-size: var(--gyro-font-support);
   color: inherit;
   transition:
-    border-color var(--gyro-premium-motion) var(--gyro-premium-ease),
-    background-color var(--gyro-premium-motion) var(--gyro-premium-ease);
+    border-color var(--gyro-motion) var(--gyro-ease),
+    background-color var(--gyro-motion) var(--gyro-ease);
 }
 .gyro-scheduled-search::placeholder {
   color: var(--gyro-faint);
 }
 .gyro-scheduled-search:hover {
-  border-color: var(--gyro-premium-hairline-strong);
+  border-color: var(--gyro-border-heavy);
 }
 .gyro-scheduled-search:focus {
   outline: none;
-  border-color: var(--gyro-premium-hairline-strong);
+  border-color: var(--gyro-border-heavy);
   background: var(--gyro-surface);
 }
 .gyro-scheduled-search:focus-visible {
@@ -88,7 +88,7 @@
   padding: 3px;
   border-radius: var(--gyro-radius-md);
   background: var(--gyro-segment-bg);
-  box-shadow: inset 0 0 0 1px var(--gyro-premium-hairline-soft);
+  box-shadow: inset 0 0 0 1px var(--gyro-border-light);
 }
 .gyro-scheduled-filters button {
   border: 0;
@@ -102,8 +102,8 @@
   padding: 5px 12px;
   cursor: pointer;
   transition:
-    background-color var(--gyro-premium-motion) var(--gyro-premium-ease),
-    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+    background-color var(--gyro-motion) var(--gyro-ease),
+    color var(--gyro-motion-fast) var(--gyro-ease);
 }
 .gyro-scheduled-filters button:hover {
   color: var(--gyro-text);
@@ -111,7 +111,7 @@
 .gyro-scheduled-filters button[aria-pressed="true"] {
   background: var(--gyro-segment-active);
   color: var(--gyro-segment-active-text);
-  box-shadow: inset 0 0 0 1px var(--gyro-premium-hairline-soft);
+  box-shadow: inset 0 0 0 1px var(--gyro-border-light);
 }
 /* Scheduled work and suggestions sit in grouped cards: one hairline frame,
    rows divided by inset rules, like a native settings list. */
@@ -138,12 +138,12 @@
   text-align: left;
   cursor: pointer;
   font: inherit;
-  transition: background-color var(--gyro-premium-motion)
-    var(--gyro-premium-ease);
+  transition: background-color var(--gyro-motion)
+    var(--gyro-ease);
 }
 .gyro-scheduled-item + .gyro-scheduled-item,
 .gyro-scheduled-suggestions button + button {
-  box-shadow: inset 0 1px 0 var(--gyro-premium-hairline-soft);
+  box-shadow: inset 0 1px 0 var(--gyro-border-light);
 }
 .gyro-scheduled-item:hover,
 .gyro-scheduled-item.is-selected,
@@ -195,7 +195,7 @@
   padding: 3px 9px 3px 8px;
   border-radius: var(--gyro-radius-pill);
   background: var(--gyro-control-bg);
-  box-shadow: inset 0 0 0 1px var(--gyro-premium-hairline-soft);
+  box-shadow: inset 0 0 0 1px var(--gyro-border-light);
   color: var(--gyro-muted);
   font-size: var(--gyro-font-caption);
   font-style: normal;
@@ -260,7 +260,7 @@
 .gyro-scheduled-suggestions button > svg:last-child {
   color: var(--gyro-faint);
   flex-shrink: 0;
-  transition: color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+  transition: color var(--gyro-motion-fast) var(--gyro-ease);
 }
 .gyro-scheduled-suggestions button:hover > svg:last-child {
   color: var(--gyro-text);
@@ -564,8 +564,8 @@
   background: var(--gyro-surface);
   color: var(--gyro-text);
   transition:
-    border-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
-    box-shadow var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+    border-color var(--gyro-motion-fast) var(--gyro-ease),
+    box-shadow var(--gyro-motion-fast) var(--gyro-ease);
 }
 .gyro-scheduled-editor
   .gyro-scheduled-intent
@@ -763,8 +763,8 @@
 }
 
 .gyro-scheduled-setting.is-editable {
-  transition: background-color var(--gyro-premium-motion-fast)
-    var(--gyro-premium-ease);
+  transition: background-color var(--gyro-motion-fast)
+    var(--gyro-ease);
 }
 
 .gyro-scheduled-setting.is-editable:hover,
@@ -812,8 +812,8 @@
   color: var(--gyro-text);
   text-align: right;
   transition:
-    background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
-    border-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+    background-color var(--gyro-motion-fast) var(--gyro-ease),
+    border-color var(--gyro-motion-fast) var(--gyro-ease);
 }
 
 .gyro-automation-choice-trigger > span {
@@ -825,7 +825,7 @@
 .gyro-automation-choice-trigger svg {
   flex: none;
   color: var(--gyro-muted);
-  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
+  transition: transform var(--gyro-motion) var(--gyro-ease);
 }
 
 .gyro-automation-choice-trigger.is-open svg {
@@ -838,31 +838,16 @@
   border-color: var(--gyro-border);
 }
 
+/* The shared popup surface (primitives.css) owns border, elevation and motion. */
 .gyro-automation-choice-menu {
-  position: fixed;
-  z-index: var(--gyro-layer-dialog);
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 5px;
+  inline-size: min(360px, 100vw - 24px);
+  max-block-size: min(320px, var(--available-height, 320px));
   padding: 6px;
   overflow: hidden;
-  border: 1px solid var(--gyro-border-strong);
-  border-radius: var(--gyro-radius-lg);
-  background: var(--gyro-surface-raised);
-  color: var(--gyro-text);
-  box-shadow: 0 16px 40px var(--gyro-shadow);
-  animation: gyro-automation-menu-in var(--gyro-premium-motion)
-    var(--gyro-premium-ease) both;
-}
-
-@keyframes gyro-automation-menu-in {
-  from {
-    transform: translateY(-4px) scale(0.99);
-  }
-  to {
-    transform: translateY(0) scale(1);
-  }
 }
 
 .gyro-automation-choice-search {
@@ -964,8 +949,8 @@
 }
 
 .gyro-scheduled-conditional {
-  animation: gyro-automation-fields-in var(--gyro-premium-motion-slow)
-    var(--gyro-premium-ease) both;
+  animation: gyro-automation-fields-in var(--gyro-motion-slow)
+    var(--gyro-ease) both;
 }
 
 @keyframes gyro-automation-fields-in {
@@ -1013,8 +998,8 @@
   padding: 6px 10px;
   border-radius: var(--gyro-radius-md);
   list-style: none;
-  transition: background-color var(--gyro-premium-motion-fast)
-    var(--gyro-premium-ease);
+  transition: background-color var(--gyro-motion-fast)
+    var(--gyro-ease);
 }
 
 .gyro-scheduled-advanced summary::-webkit-details-marker {
@@ -1038,7 +1023,7 @@
 }
 
 .gyro-scheduled-advanced summary svg {
-  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
+  transition: transform var(--gyro-motion) var(--gyro-ease);
 }
 
 .gyro-scheduled-advanced[open] summary svg {
@@ -1046,8 +1031,8 @@
 }
 
 .gyro-scheduled-advanced[open] > label {
-  animation: gyro-automation-fields-in var(--gyro-premium-motion-slow)
-    var(--gyro-premium-ease) both;
+  animation: gyro-automation-fields-in var(--gyro-motion-slow)
+    var(--gyro-ease) both;
 }
 
 :root[data-theme="dark"] .gyro-scheduled-editor footer {
@@ -1063,7 +1048,6 @@
   .gyro-scheduled-page .gyro-scheduled-intent :is(input, textarea) {
     transition: none;
   }
-  .gyro-automation-choice-menu,
   .gyro-scheduled-conditional,
   .gyro-scheduled-advanced[open] > label {
     animation: none;

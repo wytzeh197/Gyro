@@ -1,27 +1,28 @@
 /* Sessions and Workspace share the same navigation surround. */
 :root[data-theme]
-  .gyro-app-shell:is(.is-thread-layout, .is-workspace-chrome-active, .is-settings-layout) {
+  .gyro-app-shell:is(.is-thread-layout, .is-workspace-chrome-active, .is-settings-layout, .is-terminal-grid-layout) {
   --gyro-chat-surround: color-mix(
     in srgb,
-    var(--gyro-sidebar) 97%,
-    var(--gyro-text)
+    var(--gyro-surface-under) 95%,
+    white
   );
+  --gyro-chat-rim: 3px;
+  --gyro-chat-canvas-radius: calc(var(--gyro-radius-md) * 1.3);
+  --gyro-shell-open-radius: 0 var(--gyro-chat-canvas-radius) var(--gyro-chat-canvas-radius) 0;
 }
 
 :root[data-theme="light"]
-  .gyro-app-shell:is(.is-thread-layout, .is-workspace-chrome-active, .is-settings-layout) {
+  .gyro-app-shell:is(.is-thread-layout, .is-workspace-chrome-active, .is-settings-layout, .is-terminal-grid-layout) {
   --gyro-chat-surround: color-mix(
     in srgb,
-    var(--gyro-sidebar) 96%,
-    var(--gyro-text)
+    var(--gyro-surface-under) 97%,
+    black
   );
 }
 
 /* The conversation is an inset canvas. Navigation and companion tools share
    the surrounding material, including the thin top and bottom window rim. */
-:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) {
-  --gyro-chat-rim: 6px;
-  --gyro-chat-canvas-radius: 12px;
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout, .is-terminal-grid-layout) {
   --gyro-chat-header-control-size: max(
     28px,
     calc(28px * var(--gyro-ui-scale, 1))
@@ -40,7 +41,7 @@
 /* Keep the same separation with native material, including the system's
    reduced-transparency preference, without adding a second sidebar layer. */
 :root[data-native-material="sidebar"][data-theme="light"]
-  .gyro-app-shell:is(.is-thread-layout, .is-workspace-chrome-active, .is-settings-layout) {
+  .gyro-app-shell:is(.is-thread-layout, .is-workspace-chrome-active, .is-settings-layout, .is-terminal-grid-layout) {
   --gyro-sidebar-material: color-mix(
     in srgb,
     var(--gyro-chat-surround) max(88%, var(--gyro-window-tint)),
@@ -85,43 +86,54 @@
   background: var(--gyro-chat-surround);
 }
 
-:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) > .gyro-main {
+:root[data-theme] .gyro-app-shell:is(.is-thread-layout, .is-settings-layout, .is-workspace-chrome-active, .is-terminal-grid-layout) > .gyro-main {
   background: transparent;
   clip-path: none;
   box-sizing: border-box;
   padding: var(--gyro-chat-rim) var(--gyro-chat-rim) var(--gyro-chat-rim) 0;
 }
 
-:root[data-theme]
-  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout)
-  > .gyro-main
-  > .gyro-seam-corner {
-  display: none;
+:root[data-theme] .gyro-app-shell:is(.is-workspace-chrome-active, .is-terminal-grid-layout) > .gyro-main {
+  margin: var(--gyro-chat-rim) var(--gyro-chat-rim) var(--gyro-chat-rim) 0;
+  padding: 0;
+  border: var(--gyro-hairline) solid var(--gyro-border-light);
+  border-radius: var(--gyro-shell-open-radius);
+  transition: border-radius var(--gyro-motion-fast) var(--gyro-ease) var(--gyro-motion-slow);
+}
+
+:root[data-theme] .gyro-app-shell:is(.is-workspace-chrome-active, .is-terminal-grid-layout).is-sidebar-hidden > .gyro-main {
+  border-radius: var(--gyro-chat-canvas-radius);
+}
+
+:root[data-theme] .gyro-app-shell:is(.is-workspace-chrome-active, .is-terminal-grid-layout) > .gyro-main
+  :is(.gyro-workspace-route, .gyro-ide-surface) {
+  border-radius: inherit;
 }
 
 /* Sample native material once, behind the complete surround. Chat content
    remains opaque; menus keep their existing stacking and containing blocks. */
 :root[data-native-material="sidebar"][data-theme]
-  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout) {
+  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout, .is-terminal-grid-layout) {
   background: transparent;
   isolation: isolate;
   position: relative;
 }
 
 :root[data-native-material="sidebar"][data-theme]
-  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout)::before {
+  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout, .is-terminal-grid-layout)::before {
   content: "";
   position: absolute;
   inset: 0;
   background: var(--gyro-sidebar-material);
   -webkit-backdrop-filter: var(--gyro-window-blur);
   backdrop-filter: var(--gyro-window-blur);
+  clip-path: var(--gyro-glass-cutout, none);
   pointer-events: none;
   z-index: -1;
 }
 
 :root[data-native-material="sidebar"][data-theme]
-  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout)
+  .gyro-app-shell:is(.is-thread-layout, .is-settings-layout, .is-terminal-grid-layout)
   > .gyro-sidebar::before {
   content: none;
 }
@@ -167,13 +179,6 @@
   .gyro-sidebar
   .gyro-session-row.is-active:is(:hover, :focus-within) {
   background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
-}
-
-/* Center hidden-sidebar controls on the inset chat header. Its top rim
-   moves that center down by half the rim relative to the full window row. */
-:root[data-theme]
-  .gyro-app-shell.is-thread-layout > .gyro-sidebar-restore-cluster {
-  top: calc(var(--gyro-chat-rim) / 2);
 }
 
 /* Reserve a small left rim below navigation without moving macOS traffic lights. */
@@ -244,3 +249,118 @@
     animation-timeline: scroll(self);
   }
 }
+
+/* One compact window row. The inset chat canvas and window navigation end at
+   the same baseline; controls keep their existing sizes and drag regions. */
+:root {
+  --gyro-window-header-height: 44px;
+  --gyro-window-header-control-inset: 6px;
+  --gyro-window-header-bottom-inset: 4px;
+}
+
+/* Override the older hidden-sidebar minimum as well as the grid row. */
+
+:root[data-theme]
+  .gyro-app-shell
+  .gyro-sidebar-persistent-header
+  > .gyro-sidebar-windowbar,
+:root[data-theme] .gyro-app-shell .gyro-sidebar-windowbar.is-settings {
+  height: var(--gyro-window-header-height);
+  min-height: var(--gyro-window-header-height);
+  align-items: center;
+  /* With the bottom hairline and the extra height below the controls, this
+     keeps their center at y 22 (inset-y 15 + half of the 14px light), level
+     with the native traffic lights. */
+  padding-top: calc(var(--gyro-window-header-control-inset) - 1px);
+  padding-bottom: var(--gyro-window-header-bottom-inset);
+}
+
+/* One horizontal start for the first titlebar control, after the traffic
+   lights plus a 14px breather, so the sidebar toggle does not shift between
+   chat, settings and the collapsed sidebar. Workspace keeps its rail layout. */
+:root {
+  --gyro-window-controls-start: calc(
+    var(--gyro-traffic-light-inset-x) + var(--gyro-traffic-light-size) * 3 +
+      var(--gyro-traffic-light-gap) * 2 + 14px
+  );
+}
+:root[data-theme]
+  .gyro-app-shell:not(.is-workspace-chrome-active)
+  .gyro-sidebar-persistent-header
+  > .gyro-sidebar-windowbar,
+:root[data-theme]
+  .gyro-app-shell:not(.is-workspace-chrome-active)
+  > .gyro-sidebar-restore-cluster {
+  padding-left: var(--gyro-window-controls-start);
+}
+:root[data-theme]
+  .gyro-app-shell:not(.is-workspace-chrome-active)
+  .gyro-sidebar-windowbar.is-settings {
+  /* The settings bar's back control carries a 2px inner inset. */
+  padding-left: calc(var(--gyro-window-controls-start) - 2px);
+}
+
+/* Hidden-sidebar controls sit on the native traffic-light center in every
+   layout. The row is derived from the same tokens the Rust inset uses, so the
+   chat rim and older 48px thread rules can no longer push them down. The
+   thread selector outranks the legacy `:root .is-thread-layout` min-height. */
+:root[data-theme] .gyro-app-shell > .gyro-sidebar-restore-cluster,
+:root[data-theme]
+  .gyro-app-shell.is-thread-layout
+  > .gyro-sidebar-restore-cluster {
+  top: 0;
+  height: calc(
+    (var(--gyro-traffic-light-inset-y) + (var(--gyro-traffic-light-size) / 2)) *
+      2
+  );
+  min-height: 0;
+  align-items: center;
+  padding-block: 0;
+}
+
+/* Workspace's exposed editor strip and rail share the same window baseline. */
+:root[data-theme]
+  .gyro-app-shell.is-workspace-chrome-active
+  > .gyro-sidebar::before {
+  height: var(--gyro-window-header-height);
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-workspace-chrome-active
+  > .gyro-sidebar::after {
+  top: var(--gyro-window-header-height);
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-workspace-chrome-active
+  .gyro-workspace-activity-rail::after {
+  top: calc(
+    var(--gyro-window-header-height) + var(--gyro-workspace-panel-radius)
+  );
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
+  > .gyro-workspace-activity-rail::after {
+  top: var(--gyro-window-header-height);
+}
+
+:root[data-theme] .gyro-app-shell .gyro-workspace-activity-rail-drag {
+  flex-basis: var(--gyro-window-header-height);
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
+  .gyro-workspace-route.is-code {
+  --gyro-ide-tab-height: var(--gyro-window-header-height);
+}
+
+:root[data-theme]
+  .gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
+  .gyro-workspace-route.is-code
+  .gyro-editor-tabs {
+  padding-bottom: var(--gyro-window-header-bottom-inset);
+}
+
+/* The 24px visual tile sits inside the existing 28px click target. Content-box
+   clipping gives the tile a smaller nested radius without adding a wrapper. */

@@ -167,6 +167,25 @@ try {
   const gate = (rows) =>
     report(rows, cohort).groups.find((g) => g.variant === "combined").gate;
   const baseline = { ...base, variant: "baseline" };
+  const requiredVerificationCommands = [{ program: "node", args: ["--test", "sum.test.mjs"] }];
+  const receiptCohort = {
+    ...cohort,
+    tasks: [{ ...cohort.tasks[0], requiredVerificationCommands }],
+  };
+  const verificationContract = "sha256:" + createHash("sha256")
+    .update(JSON.stringify(["foreground-test/final-fixture-v1", [["node", ["--test", "sum.test.mjs"], "."]]]))
+    .digest("hex");
+  const verification = {
+    verificationContract,
+    independentVerifierPassed: true,
+    requiredVerification: { verified: true },
+  };
+  const receiptGroup = (rows) => report(rows, receiptCohort).groups.find((g) => g.variant === "combined");
+  assert.equal(receiptGroup([{ ...baseline, ...verification }, { ...candidate, ...verification }]).gate, "pilot-qualified");
+  assert.equal(receiptGroup([baseline, { ...candidate, ...verification }]).gate, "incomplete", "fixture-only and receipt-required trials cannot pair");
+  const missingReceipt = receiptGroup([{ ...baseline, ...verification }, { ...candidate, ...verification, requiredVerification: undefined }]);
+  assert.equal(missingReceipt.gate, "incomplete");
+  assert.equal(missingReceipt.successes, 0, "a declared pass without its required receipt cannot count");
   assert.equal(
     gate([
       baseline,

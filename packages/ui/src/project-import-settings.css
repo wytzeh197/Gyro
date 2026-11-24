@@ -8,52 +8,6 @@
   margin: 0;
 }
 
-.gyro-import-button {
-  align-items: center;
-  background: var(--gyro-control-bg);
-  border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-md);
-  color: var(--gyro-text);
-  cursor: pointer;
-  display: inline-flex;
-  flex-shrink: 0;
-  font: inherit;
-  font-size: var(--gyro-font-support);
-  font-weight: 500;
-  gap: 6px;
-  justify-content: center;
-  min-height: calc(30px * var(--gyro-ui-scale, 1));
-  padding: calc(5px * var(--gyro-ui-scale, 1))
-    calc(10px * var(--gyro-ui-scale, 1));
-  white-space: nowrap;
-}
-
-.gyro-import-button:hover:not(:disabled) {
-  background: var(--gyro-control-hover);
-}
-
-.gyro-import-button.is-quiet {
-  background: transparent;
-  border-color: transparent;
-  color: var(--gyro-accent-strong);
-}
-
-.gyro-import-button.is-primary {
-  background: var(--gyro-primary-bg);
-  border-color: transparent;
-  color: var(--gyro-primary-text);
-}
-
-.gyro-import-button.is-primary:hover:not(:disabled) {
-  background: var(--gyro-primary-hover);
-}
-
-.gyro-import-button:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-
-.gyro-import-button:focus-visible,
 .gyro-import-checkbox:focus-visible,
 .gyro-import-project-expand:focus-visible,
 .gyro-import-callout-open:focus-visible,
@@ -362,10 +316,6 @@
   padding: 28px 20px;
   text-align: center;
 }
-.gyro-import-empty > span {
-  font-size: var(--gyro-font-support);
-  line-height: 1.5;
-}
 .gyro-import-loading {
   align-items: center;
   color: var(--gyro-muted);
@@ -374,23 +324,6 @@
   gap: 8px;
   padding: var(--gyro-space-card);
 }
-.gyro-import-spinner {
-  animation: gyro-import-spin 1s linear infinite;
-}
-@keyframes gyro-import-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .gyro-import-spinner {
-    animation: none;
-  }
-}
-:root[data-reduce-motion="true"] .gyro-import-spinner {
-  animation: none;
-}
-
 .gyro-project-import-callout {
   align-items: center;
   display: flex;

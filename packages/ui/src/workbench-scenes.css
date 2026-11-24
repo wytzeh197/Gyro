@@ -1,0 +1,128 @@
+.gyro-scene {
+  --gyro-scene-dot: color-mix(
+    in srgb,
+    var(--gyro-text-primary) 15%,
+    transparent
+  );
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  block-size: 6.25rem;
+  padding-inline: var(--gyro-space-panel);
+  overflow: hidden;
+  background:
+    radial-gradient(circle, var(--gyro-scene-dot) 1px, transparent 1px) center /
+      10px 10px,
+    var(--gyro-panel);
+  border-radius: var(--gyro-radius-lg);
+  color: var(--gyro-text-secondary);
+}
+
+.gyro-scene--project,
+.gyro-scene--compact {
+  block-size: 4rem;
+}
+
+.gyro-scene-tile {
+  display: grid;
+  place-items: center;
+  position: relative;
+  min-inline-size: 2.5rem;
+  block-size: 2.5rem;
+  border: 1px solid var(--gyro-border-heavy);
+  border-radius: var(--gyro-radius-lg);
+  background: var(--gyro-elevated);
+}
+
+.gyro-scene-tile .gyro-brand-mark {
+  inline-size: 1.35rem;
+  block-size: 1.35rem;
+}
+.gyro-scene-halo {
+  position: relative;
+  color: var(--gyro-accent);
+}
+.gyro-scene-halo::before {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: var(--gyro-radius-xl);
+  border: 1px solid var(--gyro-accent);
+  opacity: 0.24;
+  animation: gyro-scene-halo calc(2.6s * var(--gyro-motion-factor, 1))
+    var(--gyro-ease-out) infinite;
+}
+
+.gyro-scene-link {
+  position: relative;
+  inline-size: clamp(1.25rem, 9vw, 4rem);
+  block-size: 1px;
+  background: var(--gyro-border-heavy);
+}
+
+.gyro-scene-link i {
+  position: absolute;
+  top: -2px;
+  left: 0;
+  inline-size: 5px;
+  block-size: 5px;
+  border-radius: var(--gyro-radius-pill);
+  background: var(--gyro-accent);
+  animation: gyro-scene-packet calc(2.6s * var(--gyro-motion-factor, 1)) linear
+    infinite;
+}
+.gyro-scene-halo + .gyro-scene-link i {
+  animation-direction: reverse;
+}
+.gyro-scene-shortcut {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+}
+.gyro-scene-shortcut .gyro-keycap:last-child {
+  animation: gyro-scene-keypress calc(2.6s * var(--gyro-motion-factor, 1))
+    var(--gyro-ease-spring) infinite;
+}
+
+@keyframes gyro-scene-halo {
+  60%,
+  to {
+    scale: 1.16;
+    opacity: 0;
+  }
+}
+@keyframes gyro-scene-packet {
+  from {
+    left: 0;
+    opacity: 0;
+  }
+  16%,
+  72% {
+    opacity: 1;
+  }
+  to {
+    left: calc(100% - 5px);
+    opacity: 0;
+  }
+}
+@keyframes gyro-scene-keypress {
+  38%,
+  60% {
+    translate: 0 0;
+  }
+  46%,
+  51% {
+    translate: 0 3px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-scene *,
+  .gyro-scene *::before {
+    animation: none;
+  }
+}
+:root[data-reduce-motion="true"] .gyro-scene :is(i, .gyro-keycap),
+:root[data-reduce-motion="true"] .gyro-scene-halo::before {
+  animation: none;
+}

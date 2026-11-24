@@ -635,6 +635,23 @@ impl RunnerHost {
     /// Fetches `gyro/cloud/{id}` into the local repo as a branch of the same
     /// name, and returns its commit. Nothing is checked out or merged.
     pub async fn fetch_result(&self, repo: &Path, project: &str, run_id: &str) -> Result<String> {
+        let status = self.show(run_id).await?;
+        if !status.state.is_terminal() || status.project != project {
+            bail!("The server has no finished result for this project run");
+        }
+        let commit = status
+            .result_commit
+            .context("The run has no result commit")?;
+        self.fetch_result_at(repo, project, run_id, &commit).await
+    }
+
+    pub async fn fetch_result_at(
+        &self,
+        repo: &Path,
+        project: &str,
+        run_id: &str,
+        commit: &str,
+    ) -> Result<String> {
         checked(run_id, "run id")?;
         let branch = format!("refs/heads/gyro/cloud/{run_id}");
         git::fetch(
@@ -642,6 +659,7 @@ impl RunnerHost {
             &self.repo_url(project)?,
             &self.remote.git_ssh_command()?,
             &branch,
+            commit,
         )
         .await
     }
@@ -661,6 +679,8 @@ pub struct ServerRun {
     /// Byte offset of the last event Gyro has handled.
     pub offset: u64,
     pub result_branch: String,
+    #[serde(default)]
+    pub base_commit: Option<String>,
     #[serde(default)]
     pub result_commit: Option<String>,
     pub created_at: u64,

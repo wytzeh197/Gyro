@@ -1470,6 +1470,15 @@ const commandFailure = "Exit code: 1\nError: Chromium executable was not found";
 const failedCommand = activity("command", "node scripts/check-theme.mjs", {
   status: "failed", note: commandFailure,
 });
+const failedGroup = activity("command", "git status\nls missing", {
+  status: "failed", note: "Exit code: 1",
+});
+const groupItem = workItemFromEvent(failedGroup);
+assert.equal(groupItem.grouped, true);
+assert.equal(runCallText({ kind: "work", item: groupItem }).label, "Shell command group");
+const emptySearch = workItemFromEvent(capabilityCall("workspace-search", { summary: "No matches" }));
+assert.equal(runCallText({ kind: "work", item: emptySearch }).label, "No matches");
+assert.equal(emptySearch.status, "done");
 const failedCommandItem = workItemFromEvent(failedCommand);
 assert.equal(failedCommandItem.error, commandFailure, "command diagnostics survive the event adapter");
 assert.equal(failedCommandItem.intent, undefined, "failure output is not command intent");

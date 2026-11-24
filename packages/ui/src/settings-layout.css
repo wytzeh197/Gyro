@@ -4,7 +4,7 @@
   --gyro-settings-card: var(--gyro-pane);
   --gyro-settings-title-size: calc(var(--gyro-font-heading) * 1.45);
   --gyro-settings-row-height: calc(
-    var(--gyro-control-standard) + var(--gyro-space-panel)
+    (var(--gyro-control-standard) + var(--gyro-space-panel)) * var(--gyro-density-scale)
   );
   padding: calc(var(--gyro-space-section) * 2)
     calc(var(--gyro-space-section) * 2) calc(var(--gyro-space-section) * 3);
@@ -206,33 +206,6 @@
   .gyro-settings-surface.is-minimal-settings
   .gyro-settings-disclosure-body {
   padding: var(--gyro-space-compact) 0 0;
-}
-:root[data-theme]
-  .gyro-settings-surface.is-minimal-settings
-  .gyro-settings-empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: var(--gyro-space-card);
-  padding: calc(var(--gyro-space-section) * 2) var(--gyro-space-panel);
-  color: var(--gyro-muted);
-}
-:root[data-theme]
-  .gyro-settings-surface.is-minimal-settings
-  .gyro-settings-empty-state
-  strong {
-  color: var(--gyro-text);
-  font-size: var(--gyro-font-lead);
-}
-:root[data-theme]
-  .gyro-settings-surface.is-minimal-settings
-  .gyro-settings-empty-state
-  p {
-  margin: 0;
-  max-width: 56ch;
-  font-size: var(--gyro-font-chrome);
-  line-height: 1.5;
 }
 :root[data-theme]
   .gyro-settings-surface.is-minimal-settings
@@ -735,4 +708,981 @@
   .gyro-settings-group-rows
   > .gyro-settings-disclosure-group {
   margin-top: calc(var(--gyro-space-section) * 2);
+}
+
+/* Quiet-until-active option groups.
+   A group of choices reads as plain icon + label. Only the option you are on
+   carries a soft fill; hover gets a fainter wash. No item borders, no boxed
+   track around the group. Real actions (primary/secondary buttons) keep their
+   own button treatment so they still stand apart from choices.
+
+   Loaded last. Settings rules arrive from several layers (some with
+   !important), so these selectors lead with `html:root[data-theme]` to win on
+   specificity without leaning on load order. */
+
+:root {
+  --gyro-quiet-hover: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  --gyro-quiet-active: color-mix(in srgb, var(--gyro-text) 10%, transparent);
+  /* Navigation lists sit in a tinted sidebar, so they read lighter still. */
+  --gyro-quiet-nav-hover: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+  --gyro-quiet-nav-active: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+}
+
+/* -- Segmented choices: Off/Peek/Follow, text size, density, motion, scope,
+      CLI focus. The track disappears; the sliding indicator is the fill. -- */
+html:root[data-theme]
+  .gyro-settings-surface
+  :is(
+    .gyro-settings-segmented,
+    .gyro-workspace-settings-scopes,
+    .gyro-cli-launch-focus
+  ) {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  gap: 2px;
+  padding: 0;
+}
+
+html:root[data-theme]
+  .gyro-settings-surface
+  :is(
+    .gyro-settings-segmented,
+    .gyro-workspace-settings-scopes,
+    .gyro-cli-launch-focus
+  )
+  > button {
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-sm);
+  box-shadow: none;
+  color: var(--gyro-muted);
+}
+
+html:root[data-theme]
+  .gyro-settings-surface
+  :is(
+    .gyro-settings-segmented,
+    .gyro-workspace-settings-scopes,
+    .gyro-cli-launch-focus
+  )
+  > button:not(.is-active):hover {
+  background: var(--gyro-quiet-hover);
+  color: var(--gyro-text);
+}
+
+html:root[data-theme]
+  .gyro-settings-surface
+  :is(
+    .gyro-settings-segmented,
+    .gyro-workspace-settings-scopes,
+    .gyro-cli-launch-focus
+  )
+  > button.is-active {
+  background: var(--gyro-quiet-active);
+  box-shadow: none;
+  color: var(--gyro-text);
+}
+
+/* Once the sliding indicator is measured it carries the fill instead. */
+html:root[data-theme]
+  .gyro-settings-surface
+  .gyro-selection-track[data-selection-ready]
+  > button.is-active {
+  background: transparent;
+}
+
+html:root[data-theme]
+  .gyro-settings-surface
+  .gyro-selection-track
+  > .gyro-selection-indicator {
+  background: var(--gyro-quiet-active);
+  border-radius: var(--gyro-radius-sm);
+  box-shadow: none;
+}
+
+/* -- Settings sidebar: plain icon + label rows; the current page gets a light
+      wash, with no edge marker or inset bar. -- */
+html:root[data-theme] .gyro-app-shell .gyro-sidebar-action.is-settings-page {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+html:root[data-theme]
+  .gyro-app-shell
+  .gyro-sidebar-action.is-settings-page:not(.is-active):hover {
+  background: var(--gyro-quiet-nav-hover);
+}
+
+html:root[data-theme] .gyro-app-shell .gyro-sidebar-action.is-settings-page.is-active {
+  background: var(--gyro-quiet-nav-active);
+}
+
+html:root[data-theme]
+  .gyro-app-shell
+  .gyro-sidebar-action.is-settings-page.is-active::before {
+  display: none;
+}
+
+/* -- Settings pages: one divider rule. Lines sit under section titles only;
+      rows inside a section are separated by spacing, never by a rule. -- */
+html:root[data-theme]
+  .gyro-settings-surface
+  :is(
+    [data-settings-page="keyboard"] .gyro-settings-row,
+    .gyro-workspace-keybindings label,
+    .gyro-help-topic details,
+    .gyro-cli-profiles-table tbody :is(th, td),
+    .gyro-provider-row,
+    .gyro-usage-toolbar
+  ) {
+  border-bottom-color: transparent;
+}
+
+/* Open sections don't echo their own values back in the header. */
+html:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-group
+  .gyro-settings-group-summary {
+  display: none;
+}
+
+/* Reset appears only when there is something to reset. */
+html:root[data-theme] .gyro-settings-surface .gyro-settings-group-reset:disabled {
+  display: none;
+}
+
+/* The appearance save-status strip stays as a live region but only shows
+   when a save fails. */
+html:root[data-theme]
+  .gyro-settings-surface
+  .gyro-appearance-scope:not(:has(.is-error)) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Read-only values read as information, not controls. */
+html:root[data-theme] .gyro-settings-surface .gyro-settings-info-value {
+  color: var(--gyro-muted);
+  font-weight: 400;
+}
+
+/* Keyboard shortcuts: plain muted glyphs, no keycap box. */
+html:root[data-theme] .gyro-settings-surface .gyro-settings-key {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--gyro-muted);
+  font-family: inherit;
+  font-size: var(--gyro-font-support);
+  letter-spacing: 0.04em;
+}
+
+/* Number fields are sized for numbers; only glob lists run wide. */
+html:root[data-theme]
+  .gyro-settings-surface
+  .gyro-workspace-settings-list
+  input[type="number"] {
+  width: calc(96px * var(--gyro-ui-scale, 1));
+  max-width: 100%;
+  justify-self: end;
+}
+
+/* CLI launch count: a quiet stepper with no box around it. */
+html:root[data-theme] .gyro-settings-surface .gyro-cli-launch-stepper {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+html:root[data-theme]
+  .gyro-settings-surface
+  .gyro-cli-launch-stepper
+  button:hover:not(:disabled) {
+  background: var(--gyro-quiet-hover);
+}
+
+/* No card inside a card: usage empty state sits flat in its section. */
+html:root[data-theme] .gyro-settings-surface .gyro-usage-empty {
+  border: 0;
+  min-height: 0;
+  padding: var(--gyro-space-section) 0;
+}
+
+html:root[data-theme] .gyro-settings-surface .gyro-usage-empty > svg {
+  width: calc(24px * var(--gyro-ui-scale, 1));
+  height: calc(24px * var(--gyro-ui-scale, 1));
+  color: var(--gyro-faint);
+}
+
+/* Settings sidebar fits a normal window without scrolling. */
+html:root[data-theme] .gyro-app-shell .gyro-sidebar-actions.is-settings-pages {
+  gap: calc(10px * var(--gyro-ui-scale, 1));
+}
+html:root[data-theme] .gyro-app-shell .gyro-sidebar-action.is-settings-page {
+  min-height: calc(27px * var(--gyro-ui-scale, 1));
+}
+
+/* Tools: "bundled with Gyro" already says it is core, so the badge goes;
+   other source badges use sentence case like the rest of the page. */
+html:root[data-theme] .gyro-settings-surface .gyro-workspace-contribution-title em.is-core {
+  display: none;
+}
+html:root[data-theme] .gyro-settings-surface .gyro-workspace-contribution-title em {
+  letter-spacing: 0;
+  text-transform: capitalize;
+}
+
+/* --- keycard: mark · provider · key · action on one 54px band --------- */
+:root[data-theme] .gyro-provider-api-key-section {
+  display: block;
+  max-width: none;
+  padding: 0;
+}
+
+:root[data-theme] .gyro-provider-api-key {
+  display: block;
+  gap: 0;
+}
+
+:root[data-theme] .gyro-provider-api-key-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  min-height: 54px;
+  padding: 10px 14px;
+}
+
+/* The selected provider is identity, not a form value: same mark the list
+   rows carry, sized for a control band. */
+:root[data-theme] .gyro-provider-api-key-row .gyro-provider-logo {
+  border-radius: 7px;
+  flex: 0 0 auto;
+  height: 22px;
+  width: 22px;
+}
+
+/* Every provider that can take a key is visible. A native select here only
+   showed the selected name, which read as OpenAI being the only choice. */
+:root[data-theme] .gyro-provider-api-key-choices {
+  gap: 6px;
+  padding: 12px 14px 2px;
+}
+
+:root[data-theme] .gyro-provider-api-key-choices button {
+  background: transparent;
+  border: 0.5px solid transparent;
+  border-radius: var(--gyro-radius-pill);
+  box-shadow: none;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
+  height: 28px;
+  min-height: 0;
+  padding: 0 10px 0 6px;
+}
+
+/* Quiet until chosen: unselected providers are logo + name, hover is a faint
+   wash, and only the selected provider carries a fill (shared settings controls). */
+:root[data-theme]
+  .gyro-provider-api-key-choices
+  button:not(.is-selected):not(:disabled):hover {
+  background: var(--gyro-quiet-hover);
+}
+
+:root[data-theme] .gyro-provider-api-key-choices button.is-selected {
+  background: var(--gyro-quiet-active);
+  border-color: transparent;
+  color: var(--gyro-text);
+}
+
+:root[data-theme] .gyro-provider-api-key-choices button:disabled {
+  opacity: 0.6;
+}
+
+:root[data-theme] .gyro-provider-api-key-choices .gyro-provider-logo {
+  border-radius: var(--gyro-radius-sm);
+  height: 16px;
+  width: 16px;
+}
+
+:root[data-theme] .gyro-provider-api-key-row > input {
+  background: var(--gyro-control);
+  border: 0.5px solid var(--gyro-border-heavy);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-text);
+  flex: 1 1 200px;
+  font-size: var(--gyro-font-micro);
+  height: 32px;
+  min-height: 0;
+  padding: 0 9px;
+}
+
+:root[data-theme] .gyro-provider-api-key-row > input::placeholder {
+  color: var(--gyro-faint);
+}
+
+:root[data-theme] .gyro-provider-api-key-row > input:focus-visible {
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-accent) 55%,
+    var(--gyro-border-heavy)
+  );
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gyro-accent) 14%, transparent);
+  outline: none;
+}
+
+/* Save and "Use in chat" are the same ghost chrome as the list's actions. */
+:root[data-theme] .gyro-provider-api-key-row > button {
+  background: transparent;
+  border: 0.5px solid var(--gyro-border-heavy);
+  border-radius: var(--gyro-radius-md);
+  box-shadow: none;
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-caption);
+  font-weight: 500;
+  height: 30px;
+  min-height: 0;
+  padding: 0 12px;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+:root[data-theme] .gyro-provider-api-key-row > button:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-accent) 10%,
+    transparent
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-accent) 40%,
+    var(--gyro-border-heavy)
+  );
+}
+
+:root[data-theme] .gyro-provider-api-key-row > button:disabled {
+  color: var(--gyro-faint);
+}
+
+/* The consequence line is a footer band, not a third line of the form. */
+:root[data-theme] .gyro-provider-api-key > span {
+  border-top: 0.5px solid var(--gyro-border-light);
+  color: var(--gyro-muted);
+  display: block;
+  font-size: var(--gyro-font-caption);
+  line-height: 1.45;
+  margin: 0;
+  padding: 8px 14px 9px;
+}
+
+/* --- custom endpoints: configured rows, then one form, all in the panel */
+:root[data-theme] .gyro-provider-custom-section {
+  display: block;
+  gap: 0;
+  padding: 0;
+}
+
+:root[data-theme] .gyro-provider-custom-list {
+  gap: 0;
+  margin: 0;
+  max-width: none;
+}
+
+/* A configured endpoint is a band in the panel, not a card inside a card. */
+:root[data-theme] .gyro-provider-custom-list > li {
+  background: transparent;
+  border: 0;
+  border-bottom: 0.5px solid var(--gyro-border-light);
+  border-radius: 0;
+  gap: 10px;
+  padding: 10px 14px;
+}
+
+:root[data-theme] .gyro-provider-custom-list > li:hover {
+  background: color-mix(in srgb, var(--gyro-text) 2.4%, transparent);
+}
+
+:root[data-theme] .gyro-provider-custom-list > li > div > strong {
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-micro);
+  font-weight: 600;
+}
+
+:root[data-theme] .gyro-provider-custom-list > li > div > span {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+}
+
+/* Removing an endpoint is a quiet text action; it stays red only on hover. */
+:root[data-theme] .gyro-provider-custom-list .gyro-danger-button {
+  background: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-md);
+  box-shadow: none;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+  font-weight: 500;
+  height: 24px;
+  min-height: 0;
+  padding: 0 7px;
+}
+
+:root[data-theme]
+  .gyro-provider-custom-list
+  .gyro-danger-button:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-danger) 10%,
+    transparent
+  );
+  color: var(--gyro-danger);
+}
+
+:root[data-theme] .gyro-provider-custom-form {
+  display: grid;
+  gap: 12px 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: none;
+  padding: 14px 14px 0;
+}
+
+:root[data-theme] .gyro-provider-custom-form > label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+:root[data-theme] .gyro-provider-custom-form > label > span {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+}
+
+:root[data-theme] .gyro-provider-custom-form > label.is-wide,
+:root[data-theme] .gyro-provider-custom-actions,
+:root[data-theme] .gyro-provider-custom-note,
+:root[data-theme] .gyro-provider-custom-error {
+  grid-column: 1 / -1;
+}
+
+:root[data-theme] .gyro-provider-custom-form :is(input, textarea) {
+  background: var(--gyro-control);
+  border: 0.5px solid var(--gyro-border-heavy);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-micro);
+  min-width: 0;
+  width: 100%;
+}
+
+:root[data-theme] .gyro-provider-custom-form input {
+  height: 32px;
+  min-height: 0;
+  padding: 0 9px;
+}
+
+/* Model ids is a short list, not a document: four lines is the whole form's
+   height budget, so it does not push the actions out of view. */
+:root[data-theme] .gyro-provider-custom-form textarea {
+  line-height: 1.55;
+  min-height: 68px;
+  padding: 7px 9px;
+  resize: vertical;
+}
+
+:root[data-theme]
+  .gyro-provider-custom-form
+  :is(input, textarea):focus-visible {
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-accent) 55%,
+    var(--gyro-border-heavy)
+  );
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gyro-accent) 14%, transparent);
+  outline: none;
+}
+
+/* "Fetch models" trails the key it reads, on the key's baseline. */
+:root[data-theme] .gyro-provider-custom-fetch {
+  align-self: end;
+  display: flex;
+  justify-content: flex-start;
+  padding-bottom: 1px;
+}
+
+:root[data-theme] .gyro-provider-custom-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+/* Adding an endpoint is not the section's loudest pixel. */
+:root[data-theme] .gyro-provider-custom-actions > button {
+  background: transparent;
+  border: 0.5px solid var(--gyro-border-heavy);
+  border-radius: var(--gyro-radius-md);
+  box-shadow: none;
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-caption);
+  font-weight: 500;
+  gap: 6px;
+  height: 30px;
+  min-height: 0;
+  padding: 0 12px;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+:root[data-theme] .gyro-provider-custom-actions > button:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-accent) 10%,
+    transparent
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-accent) 40%,
+    var(--gyro-border-heavy)
+  );
+}
+
+:root[data-theme] .gyro-provider-custom-fetch > button {
+  background: transparent;
+  border: 0.5px solid var(--gyro-border-heavy);
+  border-radius: var(--gyro-radius-md);
+  box-shadow: none;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+  font-weight: 500;
+  gap: 6px;
+  height: 28px;
+  min-height: 0;
+  padding: 0 10px;
+}
+
+:root[data-theme] .gyro-provider-custom-fetch > button:hover:not(:disabled) {
+  border-color: var(--gyro-border-heavy);
+  color: var(--gyro-text);
+}
+
+:root[data-theme] .gyro-provider-custom-error {
+  margin: 0;
+}
+
+:root[data-theme] .gyro-provider-custom-note {
+  border-top: 0.5px solid var(--gyro-border-light);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+  line-height: 1.45;
+  margin: 2px -14px 0;
+  padding: 8px 14px 9px;
+}
+
+@media (max-width: 760px) {
+  :root[data-theme] .gyro-provider-custom-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :root[data-theme] .gyro-provider-custom-fetch {
+    padding-bottom: 0;
+  }
+
+  :root[data-theme] .gyro-provider-api-key-choices {
+    padding-right: 12px;
+  }
+}
+
+/* Removing a saved key is a band action, red only once it is hovered. */
+:root[data-theme] .gyro-provider-api-key-row > .gyro-danger-button {
+  color: var(--gyro-muted);
+}
+
+:root[data-theme]
+  .gyro-provider-api-key-row
+  > .gyro-danger-button:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--gyro-danger) 10%,
+    transparent
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-danger) 38%,
+    var(--gyro-border-heavy)
+  );
+  color: var(--gyro-danger);
+}
+
+/*
+ * Providers: one quiet panel.
+ *
+ * The account rows were ten independently bordered cards, and each one
+ * stretched a border-boxed <select> across its whole width — a raw form
+ * control sitting in the middle of Settings, which is what read as cheap.
+ * The list is now a single hairline panel: hairline dividers, the default
+ * model as a quiet value, a status pill, and action chrome that only firms
+ * up on hover. DOM order is preserved as the available width changes.
+ */
+:root[data-theme] .gyro-provider-table.is-native-list {
+  container: gyro-provider-table / inline-size;
+  min-width: 0;
+  --gyro-provider-columns: minmax(0, 0.95fr) minmax(0, 1fr) minmax(0, 1.2fr)
+    calc(180px * var(--gyro-ui-scale, 1));
+  background: color-mix(in srgb, var(--gyro-text) 1.6%, transparent);
+  border: 0.5px solid var(--gyro-border-heavy);
+  border-radius: 14px;
+  gap: 0;
+  row-gap: 0;
+}
+
+:root[data-theme] .gyro-provider-table.is-native-list > .gyro-provider-row {
+  background: transparent;
+  border: 0;
+  border-bottom: 0.5px solid var(--gyro-border-light);
+  border-radius: 0;
+  box-shadow: none;
+  gap: 6px 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  margin: 0;
+  padding: 12px 16px;
+  transition: background-color 140ms ease;
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  > .gyro-provider-row.is-readiness-only {
+  background: color-mix(in srgb, var(--gyro-pane) 24%, transparent);
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  > .gyro-provider-row:nth-child(2) {
+  border-top-left-radius: 13px;
+  border-top-right-radius: 13px;
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  > .gyro-provider-row:last-child {
+  border-bottom: 0;
+  border-bottom-left-radius: 13px;
+  border-bottom-right-radius: 13px;
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  > .gyro-provider-row:hover {
+  background: color-mix(in srgb, var(--gyro-text) 2.4%, transparent);
+}
+
+.gyro-provider-table.is-native-list .gyro-provider-identity {
+  gap: 12px;
+  grid-template-columns: 32px minmax(0, 1fr);
+}
+
+.gyro-provider-table.is-native-list
+  .gyro-provider-identity
+  > .gyro-provider-logo {
+  border-radius: var(--gyro-radius-md);
+  box-shadow: none;
+  height: 32px;
+  width: 32px;
+}
+
+.gyro-provider-table.is-native-list .gyro-provider-identity strong {
+  font-size: var(--gyro-font-support);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  > .gyro-provider-table-head {
+  display: none;
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  > .gyro-provider-row
+  > .gyro-provider-identity {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  > .gyro-provider-row
+  > .gyro-settings-status {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+/* The default model reads as a value, not a field: no border, muted, and only
+   as wide as its own text. */
+/* Stacked layout: the value sits on the second line and the actions close that
+   same line, so a row is two lines instead of three. */
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  > .gyro-provider-row
+  > .gyro-provider-default-model {
+  grid-column: 1;
+  grid-row: 2;
+  justify-self: start;
+  margin: 0;
+  min-width: 0;
+  width: var(--gyro-provider-default-model-width, fit-content);
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  > .gyro-provider-row
+  > .gyro-settings-provider-actions {
+  align-self: center;
+  grid-column: 2;
+  grid-row: 2;
+  justify-content: flex-end;
+}
+
+:root[data-theme]
+  .gyro-provider-table.is-native-list
+  .gyro-provider-default-model
+  select {
+  background-color: transparent;
+  border: 0;
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
+  height: calc(24px * var(--gyro-ui-scale, 1));
+  max-width: 100%;
+  padding: 0 22px 0 0;
+  width: fit-content;
+}
+
+.gyro-provider-table.is-native-list .gyro-provider-default-model select:hover {
+  color: var(--gyro-text);
+}
+
+.gyro-provider-table.is-native-list
+  .gyro-provider-default-model
+  select:focus-visible {
+  color: var(--gyro-text);
+  outline: 2px solid color-mix(in srgb, var(--gyro-accent) 50%, transparent);
+  outline-offset: 2px;
+}
+
+.gyro-provider-table.is-native-list .gyro-provider-default-model > strong {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Connection state inherits its status tint instead of floating as loose text. */
+/* State is text, not a third chip: the row already carries a button and a menu,
+   and a pill beside them read as three controls of equal weight. */
+.gyro-provider-table.is-native-list
+  > .gyro-provider-row
+  > .gyro-settings-status {
+  background: none;
+  font-size: var(--gyro-font-caption);
+  font-weight: 500;
+  gap: 7px;
+  justify-self: end;
+  letter-spacing: 0.004em;
+  padding: 0;
+  white-space: normal;
+}
+
+/* Inside the pill the dot stands alone; the halo ring doubled it up. */
+.gyro-provider-table.is-native-list
+  > .gyro-provider-row
+  > .gyro-settings-status
+  > i {
+  box-shadow: none;
+  height: calc(6px * var(--gyro-ui-scale, 1));
+  width: calc(6px * var(--gyro-ui-scale, 1));
+}
+
+.gyro-provider-table.is-native-list
+  .gyro-settings-provider-actions
+  .gyro-secondary-button,
+.gyro-provider-table.is-native-list
+  .gyro-settings-provider-actions
+  .gyro-primary-button {
+  background: transparent;
+  border: 0.5px solid var(--gyro-border-heavy);
+  border-radius: var(--gyro-radius-lg);
+  color: color-mix(in srgb, var(--gyro-text) 86%, transparent);
+  font-size: var(--gyro-font-caption);
+  font-weight: 500;
+  letter-spacing: 0.008em;
+  min-height: calc(28px * var(--gyro-ui-scale, 1));
+  padding: 0 11px;
+}
+
+.gyro-provider-table.is-native-list
+  .gyro-settings-provider-actions
+  .gyro-secondary-button:hover:not(:disabled),
+.gyro-provider-table.is-native-list
+  .gyro-settings-provider-actions
+  .gyro-primary-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--gyro-accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--gyro-accent) 34%, transparent);
+  color: var(--gyro-text);
+}
+
+.gyro-provider-table.is-native-list
+  .gyro-settings-provider-actions
+  .gyro-provider-details__trigger {
+  background: transparent;
+  border: 0.5px solid transparent;
+  border-radius: var(--gyro-radius-lg);
+  color: color-mix(in srgb, var(--gyro-text) 52%, transparent);
+}
+
+.gyro-provider-table.is-native-list
+  .gyro-settings-provider-actions
+  .gyro-provider-details__trigger:hover {
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+  color: var(--gyro-muted);
+}
+
+/*
+ * Use the table's available width, not the window width: Settings has a
+ * sidebar, a capped content rail, and nested disclosure gutters. Header and
+ * rows share shrinkable tracks, reserving space for both action controls.
+ */
+@container gyro-provider-table (min-width: 740px) {
+  :root[data-theme]
+    .gyro-provider-table.is-native-list
+    > .gyro-provider-row:nth-child(2) {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+  }
+  :root[data-theme] .gyro-provider-table.is-native-list > .gyro-provider-row {
+    align-items: center;
+    column-gap: 14px;
+    grid-template-columns: var(--gyro-provider-columns);
+    min-height: calc(56px * var(--gyro-ui-scale, 1));
+    padding: 10px 16px;
+    row-gap: 0;
+  }
+
+  :root[data-theme]
+    .gyro-provider-table.is-native-list
+    > .gyro-provider-row
+    > .gyro-provider-identity {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  :root[data-theme]
+    .gyro-provider-table.is-native-list
+    > .gyro-provider-row
+    > .gyro-provider-default-model {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: stretch;
+    margin: 0;
+    min-width: 0;
+    /* The cell fills its column so the value starts on the column's left edge
+       instead of shrinking and centring itself in the space. */
+    width: 100%;
+  }
+
+  :root[data-theme]
+    .gyro-provider-table.is-native-list
+    > .gyro-provider-row
+    > .gyro-settings-status {
+    grid-column: 3;
+    grid-row: 1;
+    /* Keep the full connection state readable when text is enlarged. */
+    justify-self: start;
+    max-width: 100%;
+  }
+
+  :root[data-theme]
+    .gyro-provider-table.is-native-list
+    > .gyro-provider-row
+    > .gyro-settings-provider-actions {
+    grid-column: 4;
+    grid-row: 1;
+    justify-content: flex-end;
+  }
+
+  /*
+   * The header is a separate grid, so it needs the row's exact list to sit on
+   * the same verticals. Without this it kept the old four-column list and its
+   * labels landed 100–200px away from the values they name.
+   */
+  :root[data-theme]
+    .gyro-provider-table.is-native-list
+    > .gyro-provider-table-head {
+    display: grid;
+    column-gap: 14px;
+    grid-template-columns: var(--gyro-provider-columns);
+    padding: 10px 16px;
+  }
+}
+
+/* Very narrow panes retain every value and action in DOM reading order. */
+@container gyro-provider-table (max-width: 439px) {
+  :root[data-theme] .gyro-provider-table.is-native-list > .gyro-provider-row {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 10px;
+  }
+  :root[data-theme]
+    .gyro-provider-table.is-native-list
+    > .gyro-provider-row
+    > :is(
+      .gyro-provider-identity,
+      .gyro-provider-default-model,
+      .gyro-settings-status,
+      .gyro-settings-provider-actions
+    ) {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+    justify-content: flex-start;
+  }
+}
+
+/*
+ * Provider connect surfaces: the API-key card, the custom-endpoint form and the
+ * usage picker.
+ *
+ * They were the last boxed-in-a-box controls in this section: a 620px content
+ * rail that stopped 240px short of its own panel edge, a filled blue button
+ * among hairline ghost actions, labels heavier than the values they describe,
+ * and a provider picker with no mark — so the row did not read as the same
+ * provider the list above just showed with its logo. Same language as the list:
+ * one panel, hairline bands, quiet values, ghost actions.
+ */
+
+/* --- the panel both groups sit in ------------------------------------- */
+:root[data-theme]
+  .gyro-settings-group-rows:has(> .gyro-provider-api-key-section),
+:root[data-theme]
+  .gyro-settings-group-rows:has(> .gyro-provider-custom-section) {
+  background: color-mix(in srgb, var(--gyro-text) 1.6%, transparent);
+  border: 0.5px solid var(--gyro-border-heavy);
+  border-radius: 14px;
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
 }

@@ -125,7 +125,7 @@
   margin: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  box-shadow: 0 16px 48px var(--gyro-premium-shadow);
+  box-shadow: var(--gyro-shadow-dialog);
   background: var(--gyro-surface);
   color: var(--gyro-text);
 }

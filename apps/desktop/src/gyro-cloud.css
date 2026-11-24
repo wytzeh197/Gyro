@@ -269,26 +269,10 @@
   border-color: color-mix(in srgb, var(--gyro-danger) 40%, transparent);
 }
 
-.gyro-cloud-dialog {
-  box-sizing: border-box;
-  width: min(40rem, calc(100% - var(--gyro-space-section) * 2));
-  max-height: calc(100% - var(--gyro-space-section) * 2);
-  padding: 0;
-  overflow: hidden;
-  color: var(--gyro-text);
-  background: var(--gyro-pane);
-  border: 1px solid var(--gyro-border-soft);
-  border-radius: var(--gyro-radius-lg);
-  box-shadow: 0 16px 48px color-mix(in srgb, var(--gyro-shadow) 35%, transparent);
+.gyro-dialog.gyro-cloud-archive-dialog {
+  max-inline-size: 40rem;
 }
-.gyro-cloud-dialog[open] {
-  display: flex;
-  flex-direction: column;
-}
-.gyro-cloud-dialog::backdrop {
-  background: color-mix(in srgb, var(--gyro-shadow) 30%, transparent);
-}
-.gyro-cloud-dialog > header {
+.gyro-cloud-archive-dialog > header {
   display: flex;
   flex: none;
   align-items: center;
@@ -297,12 +281,12 @@
     var(--gyro-space-comfortable) var(--gyro-space-section);
   border-bottom: 1px solid var(--gyro-border-soft);
 }
-.gyro-cloud-dialog > header h2 {
+.gyro-cloud-archive-dialog > header h2 {
   margin: 0;
   font-size: var(--gyro-font-support);
   font-weight: 600;
 }
-:root[data-theme] .gyro-cloud-dialog > .gyro-settings-surface {
+:root[data-theme] .gyro-cloud-archive-dialog > .gyro-settings-surface {
   display: block;
   flex: 1 1 auto;
   min-height: 0;

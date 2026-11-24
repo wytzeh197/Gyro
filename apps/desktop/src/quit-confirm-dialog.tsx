@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import "./quit-confirm-dialog.css";
-import { createPortal } from "react-dom";
+import { AlertDialog, Button, Kbd } from "@gyro-dev/ui";
 
 export function QuitConfirmDialog({
   onResolve,
@@ -9,23 +9,11 @@ export function QuitConfirmDialog({
   onResolve: (quit: boolean) => Promise<void>;
   willInstallUpdate?: boolean;
 }) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const busyRef = useRef(false);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<"quit" | "cancel" | null>(null);
   const [error, setError] = useState<string>();
-  useEffect(() => {
-    const previousFocus = document.activeElement;
-    const dialog = dialogRef.current;
-    dialog?.showModal();
-    cancelRef.current?.focus();
-    return () => {
-      dialog?.close();
-      if (previousFocus instanceof HTMLElement && previousFocus.isConnected)
-        previousFocus.focus();
-    };
-  }, []);
 
   async function resolve(quit: boolean) {
     if (busyRef.current) return;
@@ -47,53 +35,60 @@ export function QuitConfirmDialog({
     }
   }
 
-  return createPortal(
-    <dialog
-      ref={dialogRef}
-      className="gyro-quit-dialog"
-      aria-labelledby="gyro-quit-title"
-      aria-describedby="gyro-quit-description"
-      aria-busy={busy}
-      onCancel={(event) => {
-        event.preventDefault();
-        void resolve(false);
+  return (
+    <AlertDialog.Root
+      open
+      onOpenChange={(next) => {
+        if (!next) void resolve(false);
       }}
-      onKeyDown={(event) => event.stopPropagation()}
     >
-      <div className="gyro-quit-dialog-body">
-        <h2 id="gyro-quit-title">Quit Gyro?</h2>
-        <p id="gyro-quit-description">
-          {willInstallUpdate
-            ? "Gyro will install the downloaded update before closing."
-            : "Gyro will close."}
-        </p>
-        {error ? (
-          <p className="gyro-quit-error" role="alert">
-            {error}
-          </p>
-        ) : null}
-      </div>
-      <footer>
-        <button
-          ref={cancelRef}
-          className="gyro-quit-cancel"
-          disabled={busy}
-          onClick={() => void resolve(false)}
-          type="button"
-        >
-          {pending === "cancel" ? "Cancelling…" : "Cancel"}
-          {pending ? null : <kbd aria-hidden="true">Esc</kbd>}
-        </button>
-        <button
-          className="gyro-quit-confirm"
-          disabled={busy}
-          onClick={() => void resolve(true)}
-          type="button"
-        >
-          {pending === "quit" ? "Quitting…" : "Quit"}
-        </button>
-      </footer>
-    </dialog>,
-    document.body,
+      <AlertDialog.Content
+        className="gyro-quit-dialog"
+        aria-labelledby="gyro-quit-title"
+        aria-describedby="gyro-quit-description"
+        aria-busy={busy}
+        initialFocus={cancelRef}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape") event.stopPropagation();
+        }}
+      >
+        <AlertDialog.Header>
+          <AlertDialog.Title id="gyro-quit-title">Quit Gyro?</AlertDialog.Title>
+          <AlertDialog.Description id="gyro-quit-description">
+            {willInstallUpdate
+              ? "Gyro will install the downloaded update before closing."
+              : "Gyro will close."}
+          </AlertDialog.Description>
+          {error ? (
+            <p className="gyro-quit-error" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </AlertDialog.Header>
+        <AlertDialog.Footer>
+          <Button
+            ref={cancelRef}
+            className="gyro-quit-cancel"
+            disabled={busy}
+            onClick={() => void resolve(false)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            {pending === "cancel" ? "Cancelling…" : "Cancel"}
+            {pending ? null : <Kbd aria-hidden="true">Esc</Kbd>}
+          </Button>
+          <Button
+            className="gyro-quit-confirm"
+            disabled={busy}
+            onClick={() => void resolve(true)}
+            size="sm"
+            type="button"
+          >
+            {pending === "quit" ? "Quitting…" : "Quit"}
+          </Button>
+        </AlertDialog.Footer>
+      </AlertDialog.Content>
+    </AlertDialog.Root>
   );
 }

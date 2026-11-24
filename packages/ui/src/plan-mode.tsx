@@ -21,9 +21,9 @@ import {
   LoaderCircle,
   MessageCircleQuestion,
   Minus,
-  PanelRight,
+  PanelRightClosed,
   X,
-} from "lucide-react";
+} from "./icons";
 import {
   InlineMarkdown,
   useComposerAnswer,
@@ -248,7 +248,7 @@ export function PlanCard({
               title="Open in panel"
               type="button"
             >
-              <PanelRight size={13} />
+              <PanelRightClosed size={13} />
             </button>
           ) : null}
         </span>

@@ -89,6 +89,7 @@ pub trait RunnerHost: Send + Sync {
         _waiting: bool,
     ) {
     }
+    fn note_provider_call(&self, _request: &ProviderChatRequest) {}
     fn supports_generated_images(&self) -> bool {
         true
     }
@@ -154,6 +155,10 @@ pub trait RunnerHost: Send + Sync {
     fn emit(&self, request: &ProviderChatRequest, event: RunEvent<'_>);
     fn conversation_history(&self, request: &ProviderChatRequest) -> Option<String>;
     fn save_checkpoint(&self, request: &ProviderChatRequest);
+    fn save_recovery_checkpoint(&self, request: &ProviderChatRequest) -> Option<String> {
+        self.save_checkpoint(request);
+        None
+    }
     /// Manual compaction is consumed only at a completed tool/response boundary.
     fn context_compaction_requested(&self, _request: &ProviderChatRequest) -> bool {
         false

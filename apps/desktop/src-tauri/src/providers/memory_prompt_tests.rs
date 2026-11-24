@@ -55,7 +55,8 @@ fn project_memory_reaches_every_provider_in_fresh_and_resumed_desktop_prompts() 
             // API and Ollama runners consume this stable/dynamic split. Memory
             // must stay in the dynamic tail even without native tool support.
             for tools in [false, true] {
-                let (stable, dynamic) = provider_context_sections(&request, None, tools, false);
+                let (stable, dynamic) =
+                    provider_context_sections(&request, None, tools, false, None);
                 assert!(!stable.contains("Run frontend tests with pnpm test"));
                 assert_eq!(
                     dynamic.matches("Run frontend tests with pnpm test").count(),

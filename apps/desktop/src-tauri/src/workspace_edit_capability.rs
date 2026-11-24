@@ -11,7 +11,10 @@ use crate::{
         config::load_config_blocking,
         limits::{MAX_WORKSPACE_FILE_EDIT_BYTES, PROVIDER_CAPABILITY_EVENT},
     },
-    capabilities::access::{capability_argument_string, capability_full_access_enabled},
+    capabilities::access::{
+        approve_for_me_applies_file_changes, capability_argument_string,
+        capability_full_access_enabled,
+    },
     delegated_agents,
     ide::task_discovery::content_hash,
     state::{managers::with_ide_evidence, provider_run::BoundProviderCapabilityContext},
@@ -29,6 +32,7 @@ use tauri::Emitter;
 use uuid::Uuid;
 
 const WORKSPACE_EDIT_SCHEMA: &str = "gyro.workspace-edit.v1";
+const MISSING_PROPOSAL_BASE: &str = "No proposal was created. For a text replacement, use gyro_workspace_edit with oldString and newString after reading the file. For a whole-file replacement, supply the complete file content and pass contentHash from gyro_workspace_read as expectedHash.";
 
 /// What the caller asked for, so the result can stay honest about it.
 enum EditShape {
@@ -36,6 +40,87 @@ enum EditShape {
     Content,
     /// An exact string was replaced in the file on disk.
     Replacement { count: usize, line: u64 },
+}
+
+/// Catch inputs that cannot produce an edit before asking for write approval.
+/// A path suggestion is only a new spelling of the supplied bound-root operand.
+pub(super) fn edit_argument_error(
+    workspace: &Path,
+    id: CapabilityId,
+    arguments: &Value,
+) -> Option<String> {
+    let path = capability_argument_string(arguments, "path").ok()?;
+    let missing_proposal_hash = id == CapabilityId::WorkspaceProposeEdit
+        && arguments
+            .get("expectedHash")
+            .and_then(Value::as_str)
+            .is_none();
+    let needs_hash_or_create = missing_proposal_hash
+        && arguments.get("createIfMissing").and_then(Value::as_bool) != Some(true);
+    let proposal_guidance = " For an existing file, copy contentHash from the latest successful read to expectedHash. Use createIfMissing: true only for a new file the user requested.";
+    if Path::new(path).is_absolute() {
+        let relative = crate::capability_workspace_helpers::relative_path_in_bound_root(
+            workspace,
+            Path::new(path),
+            false,
+        );
+        let mut message = match relative {
+            Ok(relative) => {
+                format!("Edit paths must be workspace-relative. Retry with path {relative:?}.")
+            }
+            Err(_) => {
+                let candidate = crate::capability_workspace_helpers::relative_path_in_bound_root(
+                    Path::new("/"),
+                    Path::new(path),
+                    false,
+                )
+                .ok()
+                .filter(|relative| {
+                    !gyro_core::capability_path_is_sensitive(relative)
+                        && gyro_core::security::assert_path_inside_workspace(
+                            workspace,
+                            Path::new(relative),
+                        )
+                        .is_ok_and(|target| {
+                            target.is_file()
+                                && target
+                                    .strip_prefix(workspace)
+                                    .ok()
+                                    .and_then(Path::to_str)
+                                    .is_some_and(|path| {
+                                        !gyro_core::capability_path_is_sensitive(path)
+                                    })
+                        })
+                });
+                match candidate {
+                    Some(relative) => format!("If you meant the Workspace-relative file, retry the edit with path {relative:?} without the leading slash."),
+                    None => "Edit paths must be relative to the selected Workspace root, without a leading slash. Use an exact path from the user's request or a Workspace tool result.".into(),
+                }
+            }
+        };
+        if needs_hash_or_create {
+            message.push_str(proposal_guidance);
+        }
+        return Some(message);
+    }
+    if !missing_proposal_hash {
+        return None;
+    }
+    // Creation intent does not make a hash optional when the file already exists.
+    let existing = gyro_core::normalize_capability_relative_path(path)
+        .ok()
+        .and_then(|relative| {
+            gyro_core::security::assert_path_inside_workspace(workspace, Path::new(&relative)).ok()
+        })
+        .is_some_and(|candidate| candidate.exists());
+    if existing {
+        return Some(format!(
+            "An existing file requires expectedHash. {MISSING_PROPOSAL_BASE}"
+        ));
+    }
+    needs_hash_or_create.then(|| {
+        format!("The proposal needs expectedHash or explicit file creation.{proposal_guidance}")
+    })
 }
 
 /// New files require an explicit tool intent; a failed read must not silently
@@ -50,7 +135,7 @@ fn require_creation_intent(
         Ok(_) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             anyhow::ensure!(arguments.get("createIfMissing").and_then(Value::as_bool) == Some(true),
-                "No file exists at {path:?}; no proposal was created. Creating a new file requires createIfMissing: true and must be part of the user's requested change. {}",
+                "No file exists at {path:?}; no proposal was created. If the user's requested change calls for this new file, retry this same call with createIfMissing: true instead of creating an empty file first. {}",
                 crate::capability_workspace_helpers::workspace_path_recovery(workspace, path));
             Ok(())
         }
@@ -78,8 +163,7 @@ pub(super) fn execute(
     );
     let apply_immediately = bound.policy.mode == CapabilityRunMode::Normal
         && (capability_full_access_enabled(&config)
-            || (matches!(bound.provider_id.as_str(), "openai" | "anthropic")
-                && !config.require_file_edit_approval))
+            || approve_for_me_applies_file_changes(&config, &bound.provider_id, bound.policy.mode))
         && delegated_agents::file_edit_ceiling(app, &bound.session_id);
 
     let store = open_store().map_err(anyhow::Error::msg)?;
@@ -97,9 +181,7 @@ pub(super) fn execute(
                 .and_then(Value::as_str)
                 .map(str::to_string);
             if candidate.exists() && expected_hash.is_none() {
-                anyhow::bail!(
-                    "expectedHash is required when proposing changes to an existing file"
-                );
+                anyhow::bail!("An existing file requires expectedHash. {MISSING_PROPOSAL_BASE}");
             }
             let proposal = workspace_mutations::create_file_mutation_proposal_at_root(
                 &store,
@@ -234,7 +316,10 @@ fn string_replacement(
     let base_hash = content_hash(&bytes);
     if let Some(expected) = arguments.get("expectedHash").and_then(Value::as_str) {
         if expected != base_hash {
-            anyhow::bail!("file changed on disk; re-read it before editing");
+            return Err(workspace_mutations::StaleEditBase(
+                "file changed on disk; re-read it before editing",
+            )
+            .into());
         }
     }
     let text =
@@ -407,25 +492,31 @@ fn assert_editor_document_version(
     let expected = expected
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("documentVersion must be text"))?;
-    let matches = with_ide_evidence(app, bound, |latest| {
-        Ok(editor_document_version_matches(latest, path, expected))
-    })?;
-    anyhow::ensure!(
-        matches,
-        "editor document version changed; review the current buffer and retry"
-    );
-    Ok(())
+    with_ide_evidence(app, bound, |latest| {
+        check_editor_document_version(latest, path, expected)
+    })
 }
 
-fn editor_document_version_matches(
+fn check_editor_document_version(
     context: &WorkspaceContextSnapshot,
     path: &str,
     expected: &str,
-) -> bool {
-    context.buffers.iter().any(|buffer| {
-        buffer.get("path").and_then(Value::as_str) == Some(path)
-            && buffer.get("documentVersion").and_then(Value::as_str) == Some(expected)
-    })
+) -> anyhow::Result<()> {
+    let mut versions = context
+        .buffers
+        .iter()
+        .filter(|buffer| buffer["path"].as_str() == Some(path))
+        .filter_map(|buffer| buffer["documentVersion"].as_str())
+        .peekable();
+    anyhow::ensure!(
+        versions.peek().is_some(),
+        "No live editor version is available for this path. For a disk edit, read the file with gyro_workspace_read, use its contentHash as expectedHash, and omit documentVersion. For a live-editor edit, read the current buffer first."
+    );
+    anyhow::ensure!(
+        versions.any(|version| version == expected),
+        "Editor document version changed. Read the current buffer with gyro_workspace_read_editor and use its documentVersion before retrying."
+    );
+    Ok(())
 }
 
 /// Surface the proposal to the chat that made it. The store keeps the durable
@@ -456,6 +547,8 @@ pub(super) fn emit_proposal_events(
 /// Tool schemas live here so `lib.rs` keeps a single delegation guard instead
 /// of one arm per capability.
 pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
+    const DOCUMENT_VERSION: &str =
+        "Optional live-editor guard. Use only a documentVersion returned by gyro_workspace_read_editor for this path. Omit for disk edits.";
     let (properties, required) = match id {
         CapabilityId::WorkspaceProposeEdit => (
             json!({
@@ -463,7 +556,7 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
                 "content": { "type": "string", "description": "Complete new file content, replacing the whole file." },
                 "createIfMissing": { "type": "boolean", "default": false, "description": "Required true to propose creating a missing file. Set only when the user's task calls for a new file at this exact path, not to work around a failed read of an existing file." },
                 "expectedHash": { "type": "string", "description": "Required for an existing file: contentHash from a prior read, rejected if the file changed since. Omit for a new file." },
-                "documentVersion": { "type": "string", "description": "Version returned by gyro_workspace_read_editor; reject if the live document changed." }
+                "documentVersion": { "type": "string", "description": DOCUMENT_VERSION }
             }),
             vec!["path", "content"],
         ),
@@ -501,7 +594,7 @@ pub(super) fn schema(id: CapabilityId) -> Option<(Value, Vec<&'static str>)> {
                     "type": "string",
                     "description": "Optional guard from a prior read. An immediate edit still applies when this hash is stale but oldString matches the current file. A reviewed edit fails until the file is read again."
                 },
-                "documentVersion": { "type": "string", "description": "Version returned by gyro_workspace_read_editor; reject if the live document changed." }
+                "documentVersion": { "type": "string", "description": DOCUMENT_VERSION }
             }),
             vec!["path", "oldString", "newString"],
         ),
@@ -517,6 +610,85 @@ mod tests {
         ide::debug::redact_json_strings,
         workspace_mutations::create_file_mutation_proposal_in_store,
     };
+
+    #[test]
+    fn edit_input_feedback_points_to_the_exact_bound_path_and_read_hash() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap().join("workspace");
+        let propose = |arguments: Value| {
+            edit_argument_error(&root, CapabilityId::WorkspaceProposeEdit, &arguments)
+        };
+        let edit =
+            |arguments: Value| edit_argument_error(&root, CapabilityId::WorkspaceEdit, &arguments);
+        let input = json!({"path": root.join("src/main.mjs"), "content": "new"});
+        let message = propose(input.clone()).unwrap();
+        assert!(message.contains("Retry with path \"src/main.mjs\""));
+        assert!(
+            message.contains("copy contentHash from the latest successful read to expectedHash")
+        );
+        assert!(!edit(input).unwrap().contains("expectedHash"));
+
+        for path in [
+            root.with_file_name("workspace-other").join("secret.rs"),
+            root.join("src/../secret.rs"),
+        ] {
+            let message = propose(json!({"path": path})).unwrap();
+            assert!(!message.contains("secret.rs"));
+            assert!(!message.contains("Retry with path"));
+            assert!(message.contains("without a leading slash"));
+            assert!(message
+                .contains("copy contentHash from the latest successful read to expectedHash"));
+        }
+        assert!(propose(json!({"path": "src/main.mjs"}))
+            .unwrap()
+            .contains("expectedHash"));
+        assert!(propose(json!({"path": "src/main.mjs", "expectedHash": "from-read"})).is_none());
+        assert!(propose(json!({"path": "src/new.mjs", "createIfMissing": true})).is_none());
+        assert!(edit(json!({"path": "src/main.mjs"})).is_none());
+
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/main.mjs"), "export const value = 0;\n").unwrap();
+        fs::write(root.join(".env"), "fixture\n").unwrap();
+        let extra_slash = edit(json!({"path": "/src/main.mjs"})).unwrap();
+        assert!(extra_slash.contains("retry the edit with path \"src/main.mjs\""));
+        assert!(!edit(json!({"path": "/.env"})).unwrap().contains(".env"));
+    }
+
+    #[test]
+    fn create_intent_without_a_hash_points_existing_files_to_exact_replacement() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::create_dir(workspace.path().join("src")).unwrap();
+        let target = workspace.path().join("src/main.mjs");
+        fs::write(&target, "export const value = 0;\n").unwrap();
+        let propose = |arguments: Value| {
+            edit_argument_error(
+                workspace.path(),
+                CapabilityId::WorkspaceProposeEdit,
+                &arguments,
+            )
+        };
+        let mut arguments =
+            json!({"path": "src/main.mjs", "content": "1", "createIfMissing": true});
+        let error = propose(arguments.clone()).unwrap();
+        assert!(error.contains("No proposal was created"));
+        assert!(error.contains("gyro_workspace_edit with oldString and newString"));
+        assert!(error.contains("contentHash from gyro_workspace_read as expectedHash"));
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "export const value = 0;\n"
+        );
+        arguments["path"] = "src\\main.mjs".into();
+        assert_eq!(propose(arguments.clone()).as_deref(), Some(error.as_str()));
+        arguments.as_object_mut().unwrap().remove("createIfMissing");
+        assert_eq!(propose(arguments.clone()).as_deref(), Some(error.as_str()));
+
+        arguments["createIfMissing"] = true.into();
+        arguments["path"] = "src/new.mjs".into();
+        assert!(propose(arguments.clone()).is_none());
+        arguments["path"] = "src/main.mjs".into();
+        arguments["expectedHash"] = "from-read".into();
+        assert!(propose(arguments).is_none());
+    }
     use gyro_core::{GyroPaths, SessionOrigin};
     use std::{fs, path::PathBuf};
 
@@ -817,21 +989,18 @@ mod tests {
     fn editor_document_version_rejects_changed_or_missing_buffers() {
         let mut context = WorkspaceContextSnapshot::empty("/tmp/workspace");
         context.buffers = vec![json!({"path":"src/main.rs", "documentVersion":"v2"})];
-        assert!(editor_document_version_matches(
-            &context,
-            "src/main.rs",
-            "v2"
-        ));
-        assert!(!editor_document_version_matches(
-            &context,
-            "src/main.rs",
-            "v1"
-        ));
-        assert!(!editor_document_version_matches(
-            &context,
-            "src/other.rs",
-            "v2"
-        ));
+        check_editor_document_version(&context, "src/main.rs", "v2").unwrap();
+        let stale = check_editor_document_version(&context, "src/main.rs", "v1")
+            .unwrap_err()
+            .to_string();
+        assert!(stale.contains("Editor document version changed"));
+        assert!(stale.contains("gyro_workspace_read_editor"));
+        let missing = check_editor_document_version(&context, "src/other.rs", "v2")
+            .unwrap_err()
+            .to_string();
+        assert!(missing.contains("No live editor version is available"));
+        assert!(missing.contains("use its contentHash as expectedHash"));
+        assert!(missing.contains("omit documentVersion"));
     }
 
     fn session_for(dir: &std::path::Path) -> (SessionStore, String) {

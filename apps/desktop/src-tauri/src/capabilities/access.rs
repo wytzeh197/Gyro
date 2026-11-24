@@ -567,6 +567,80 @@ pub(crate) fn capability_full_access_enabled(config: &GyroConfig) -> bool {
     config.full_access && !config.require_command_approval && !config.require_file_edit_approval
 }
 
+/// Approve for Me (file edits not reviewed) lets Gyro apply file changes for
+/// the providers whose edits Gyro applies itself. Plan and Council never do.
+/// File edits and the recoverable path changes below share this one rule.
+pub(crate) fn approve_for_me_applies_file_changes(
+    config: &GyroConfig,
+    provider_id: &str,
+    mode: CapabilityRunMode,
+) -> bool {
+    mode == CapabilityRunMode::Normal
+        && matches!(provider_id, "openai" | "anthropic")
+        && !config.require_file_edit_approval
+}
+
+/// Path changes Approve for Me allows alongside file edits: each stays inside
+/// the project and never overwrites an existing entry. Delete, undo (which can
+/// remove a file the person created) and Git commit keep asking.
+pub(crate) fn approve_for_me_covers_path_change(capability_id: CapabilityId) -> bool {
+    matches!(
+        capability_id,
+        CapabilityId::WorkspaceCreatePath
+            | CapabilityId::WorkspaceRenamePath
+            | CapabilityId::WorkspaceMovePath
+            | CapabilityId::WorkspaceDuplicatePath
+    )
+}
+
+#[cfg(test)]
+#[test]
+fn approve_for_me_allows_recoverable_path_changes_but_still_asks_for_the_rest() {
+    let mut config = GyroConfig::default();
+    config.full_access = false;
+    config.require_command_approval = false;
+    config.require_file_edit_approval = false;
+    for provider in ["openai", "anthropic"] {
+        assert!(approve_for_me_applies_file_changes(
+            &config,
+            provider,
+            CapabilityRunMode::Normal
+        ));
+        for mode in [CapabilityRunMode::Plan, CapabilityRunMode::Council] {
+            assert!(!approve_for_me_applies_file_changes(&config, provider, mode));
+        }
+    }
+    assert!(!approve_for_me_applies_file_changes(
+        &config,
+        "gemini",
+        CapabilityRunMode::Normal
+    ));
+    config.require_file_edit_approval = true;
+    assert!(!approve_for_me_applies_file_changes(
+        &config,
+        "anthropic",
+        CapabilityRunMode::Normal
+    ));
+
+    for id in [
+        CapabilityId::WorkspaceCreatePath,
+        CapabilityId::WorkspaceRenamePath,
+        CapabilityId::WorkspaceMovePath,
+        CapabilityId::WorkspaceDuplicatePath,
+    ] {
+        assert!(approve_for_me_covers_path_change(id), "{id}");
+    }
+    for id in [
+        CapabilityId::WorkspaceDeletePath,
+        CapabilityId::WorkspaceUndoPath,
+        CapabilityId::WorkspaceGitCommit,
+        CapabilityId::WorkspaceOpenFolder,
+        CapabilityId::WorkspaceRunCommand,
+    ] {
+        assert!(!approve_for_me_covers_path_change(id), "{id}");
+    }
+}
+
 pub(crate) fn capability_access_with_full_access(
     bound: &BoundProviderCapabilityContext,
     current: &ProjectCapabilityPolicy,

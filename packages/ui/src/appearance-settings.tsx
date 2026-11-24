@@ -1,5 +1,6 @@
 import { useState, type CSSProperties, type SyntheticEvent } from "react";
-import { Check, RotateCcw } from "lucide-react";
+import { Check, RotateCcw } from "./icons";
+import { themeSeed, type ThemeOverrides, type ThemePreferences } from "./theme/theme-engine";
 import type {
   InterfaceSize,
   MotionSpeed,
@@ -25,6 +26,8 @@ type AppearanceSettingsProps = {
   onInterfaceSizeChange?: (size: InterfaceSize) => void;
   onMotionSpeedChange?: (speed: MotionSpeed) => void;
   onAppearanceColorsChange?: (main: string, secondary: string) => void;
+  themePreferences?: ThemePreferences;
+  onThemePreferencesChange?: (patch: ThemePreferences) => void;
   saveStatus?: "saving" | "saved" | "error";
   onRetrySave?: () => void;
 };
@@ -42,10 +45,26 @@ export function AppearanceSettings({
   onInterfaceSizeChange,
   onMotionSpeedChange,
   onAppearanceColorsChange,
+  themePreferences = {},
+  onThemePreferencesChange,
   saveStatus,
   onRetrySave,
 }: AppearanceSettingsProps) {
   const [lastEditedSection, setLastEditedSection] = useState<string>();
+  const variant = themeMode === "system"
+    ? (typeof document !== "undefined" && document.documentElement.dataset.theme === "dark" ? "dark" : "light")
+    : themeMode;
+  const paletteActive = Boolean(themePreferences.themePreset || themePreferences.themeOverrides);
+  const palette = themeSeed(variant, { ...themePreferences, mainColor, secondaryColor });
+  const primary = paletteActive ? palette.accent : mainColor;
+  const secondary = paletteActive ? palette.semantic.attention : secondaryColor;
+  const updateColors = (patch: ThemeOverrides) => onThemePreferencesChange?.({
+    themeOverrides: { ...themePreferences.themeOverrides, ...patch },
+  });
+  const resetAccents = () => {
+    onAppearanceColorsChange?.("#ffffff", "#ffffff");
+    updateColors({ accent: undefined, attention: undefined });
+  };
   const rememberEditedSection = (event: SyntheticEvent) => {
     const target = event.target;
     if (!(target instanceof HTMLElement) || target.closest("button[aria-expanded]")) return;
@@ -163,6 +182,7 @@ export function AppearanceSettings({
             options={[
               { label: "Compact", value: "compact" },
               { label: "Comfortable", value: "comfortable" },
+              { label: "Spacious", value: "spacious" },
             ]}
             onChange={(value) => onDensityChange?.(value)}
           />
@@ -201,18 +221,18 @@ export function AppearanceSettings({
         </SettingsRow>
       </SettingsGroup>
       <SettingsGroup
-        attention={saveStatus === "error" && lastEditedSection === "colors"} id="colors" label="Accent colors" summary={`${mainColor} · ${secondaryColor}`}
-        description="Default white accents adapt to black in light mode. Choose a color for custom highlights."
+        attention={saveStatus === "error" && lastEditedSection === "colors"} id="colors" label="Accent colors" summary={`${primary} · ${secondary}`}
+        description="Choose colors for selection, focus, badges, and highlights."
         actions={
           <AppearanceReset
             label="Reset colors"
-            detail="Restore white highlights in dark mode and black highlights in light mode. Other appearance preferences stay as chosen."
+            detail="Restore the palette’s accent colors."
             disabled={
-              !onAppearanceColorsChange ||
-              (mainColor.toLowerCase() === "#ffffff" &&
-                secondaryColor.toLowerCase() === "#ffffff")
+              paletteActive
+                ? !themePreferences.themeOverrides?.accent && !themePreferences.themeOverrides?.attention && mainColor === "#ffffff" && secondaryColor === "#ffffff"
+                : !onAppearanceColorsChange || (mainColor === "#ffffff" && secondaryColor === "#ffffff")
             }
-            onClick={() => onAppearanceColorsChange?.("#ffffff", "#ffffff")}
+            onClick={resetAccents}
           />
         }
       >
@@ -221,10 +241,10 @@ export function AppearanceSettings({
           detail="Selection, focus, and primary action color."
         >
           <AppearanceColorControl
-            color={mainColor}
+            color={primary}
             label="Primary accent"
             onChange={(color) =>
-              onAppearanceColorsChange?.(color, secondaryColor)
+              paletteActive ? updateColors({ accent: color }) : onAppearanceColorsChange?.(color, secondaryColor)
             }
           />
         </SettingsRow>
@@ -233,9 +253,9 @@ export function AppearanceSettings({
           detail="Supporting icons, badges, and quiet highlights."
         >
           <AppearanceColorControl
-            color={secondaryColor}
+            color={secondary}
             label="Secondary accent"
-            onChange={(color) => onAppearanceColorsChange?.(mainColor, color)}
+            onChange={(color) => paletteActive ? updateColors({ attention: color }) : onAppearanceColorsChange?.(mainColor, color)}
           />
         </SettingsRow>
       </SettingsGroup>

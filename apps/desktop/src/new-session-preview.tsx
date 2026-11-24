@@ -35,9 +35,9 @@ function Preview() {
     document.documentElement.style.setProperty("--gyro-ui-scale", large ? "1.15" : "1");
     document.documentElement.style.setProperty("--preview-sidebar-width", narrow ? "210px" : "224px");
     const measure = () => {
-      const menu = document.querySelector<HTMLElement>(".gyro-sidebar-new-session-menu");
+      const menu = document.querySelector<HTMLElement>(".gyro-sidebar-new-session-popup");
       if (!menu) { setGeometry("Open New Session to inspect the menu."); return; }
-      const rows = Array.from(menu.querySelectorAll<HTMLElement>("button"));
+      const rows = Array.from(menu.querySelectorAll<HTMLElement>("[role=menuitem]"));
       const overlap = rows.some((row, index) => {
         const next = rows[index + 1];
         return next && row.getBoundingClientRect().bottom > next.getBoundingClientRect().top + 0.5;
@@ -59,7 +59,7 @@ function Preview() {
       :root .gyro-sidebar-persistent-header ~ .gyro-sidebar-actions,
       :root .gyro-sidebar-persistent-header ~ .gyro-sidebar-section,
       :root .gyro-sidebar-persistent-header ~ .gyro-sidebar-project-chat-list,
-      :root .gyro-sidebar-new-session-menu { animation: none; }
+      :root .gyro-sidebar-new-session-popup { transition: none; }
       /* Keep the desktop sidebar visible inside Gyro's narrow preview panel. */
       :root .gyro-app-shell.is-chat-shell {
         grid-template-columns: var(--preview-sidebar-width, 224px) minmax(0, 1fr) !important;

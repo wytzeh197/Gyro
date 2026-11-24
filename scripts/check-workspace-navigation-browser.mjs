@@ -97,7 +97,7 @@ try {
   failureSnapshot = async () => {
     await screenshot("failure.png");
     return evaluate(
-      `({dialog:document.querySelector('dialog')?.textContent,active:document.activeElement?.tagName,models:window.__workspaceFixture.monaco.editor.getModels().map(model=>model.uri.toString()),draft:{name:window.__workspaceFixture.getState().draft?.name,busy:window.__workspaceFixture.getState().draft?.busy,error:window.__workspaceFixture.getState().draft?.error},requests:window.__workspaceFixture.getState().requests,diffCount:document.querySelectorAll('dialog .monaco-diff-editor').length})`,
+      `({dialog:document.querySelector('.gyro-workspace-rename')?.textContent,active:document.activeElement?.tagName,models:window.__workspaceFixture.monaco.editor.getModels().map(model=>model.uri.toString()),draft:{name:window.__workspaceFixture.getState().draft?.name,busy:window.__workspaceFixture.getState().draft?.busy,error:window.__workspaceFixture.getState().draft?.error},requests:window.__workspaceFixture.getState().requests,diffCount:document.querySelectorAll('.gyro-workspace-rename .monaco-diff-editor').length})`,
     );
   };
   const click = (label) =>
@@ -124,8 +124,8 @@ try {
   const mainEditor = `window.__workspaceFixture.monaco.editor.getEditors().find(editor => editor.getDomNode()?.closest('.workspace-fixture-main'))`;
   const splitEditor = `window.__workspaceFixture.monaco.editor.getEditors().find(editor => editor.getDomNode()?.closest('.workspace-fixture-split'))`;
   const renameMenuLabel = `(()=>{const roots=[document,...[...document.querySelectorAll('.shadow-root-host')].map(host=>host.shadowRoot).filter(Boolean)];return roots.flatMap(root=>[...root.querySelectorAll('.action-label')]).find(item=>item.textContent==='Rename symbol');})()`;
-  const renameInputReady = `(()=>{const input=document.querySelector('dialog[open] input');return !!input && !input.disabled && document.activeElement===input;})()`;
-  const previewRendered = `[...document.querySelectorAll('dialog .monaco-diff-editor .view-lines')].some(lines=>lines.textContent.includes('message') && lines.textContent.includes('welcome'))`;
+  const renameInputReady = `(()=>{const input=document.querySelector('.gyro-workspace-rename input');return !!input && !input.disabled && document.activeElement===input;})()`;
+  const previewRendered = `[...document.querySelectorAll('.gyro-workspace-rename .monaco-diff-editor .view-lines')].some(lines=>lines.textContent.includes('message') && lines.textContent.includes('welcome'))`;
   const state = `window.__workspaceFixture.getState()`;
   const assertEditorLayout = async () => {
     const geometry = await evaluate(
@@ -360,7 +360,7 @@ try {
   await until(() => evaluate(renameInputReady), "context-menu rename callback");
   await key("Escape", 27);
   await until(
-    () => evaluate(`!document.querySelector('dialog')`),
+    () => evaluate(`!document.querySelector('.gyro-workspace-rename')`),
     "cancel context rename",
   );
   await symbol();
@@ -371,7 +371,7 @@ try {
   await until(
     () =>
       evaluate(
-        `!!document.querySelector('dialog.is-preview') && document.activeElement.textContent === 'Apply rename' && document.querySelectorAll('dialog .monaco-diff-editor').length === 1`,
+        `!!document.querySelector('.gyro-workspace-rename.is-preview') && document.activeElement.textContent === 'Apply rename' && document.querySelectorAll('.gyro-workspace-rename .monaco-diff-editor').length === 1`,
       ),
     "rename preview and keyboard focus",
   );
@@ -379,7 +379,7 @@ try {
   await screenshot("rename-dark.png");
   await key("Escape", 27);
   await until(
-    () => evaluate(`!document.querySelector('dialog')`),
+    () => evaluate(`!document.querySelector('.gyro-workspace-rename')`),
     "Escape cancels preview",
   );
   await until(
@@ -416,7 +416,7 @@ try {
     );
     assert.equal(
       await evaluate(
-        `[...document.querySelectorAll('dialog button')].find(button=>button.textContent==='Cancel').disabled`,
+        `[...document.querySelectorAll('.gyro-workspace-rename button')].find(button=>button.textContent==='Cancel').disabled`,
       ),
       false,
       "Cancel remains enabled during request",
@@ -426,7 +426,7 @@ try {
     await until(
       () =>
         evaluate(
-          `!document.querySelector('dialog') && !${state}.workbench.ide.buffers[window.__workspaceFixture.targetPath]`,
+          `!document.querySelector('.gyro-workspace-rename') && !${state}.workbench.ide.buffers[window.__workspaceFixture.targetPath]`,
         ),
       `${cancelAction} cancels pending rename and cleans temporary file`,
     );
@@ -478,7 +478,7 @@ try {
   await screenshot("rename-foreign-root-rejected.png");
   await key("Escape", 27);
   await until(
-    () => evaluate(`!document.querySelector('dialog')`),
+    () => evaluate(`!document.querySelector('.gyro-workspace-rename')`),
     "cancel foreign-root error",
   );
   await evaluate(`window.__workspaceFixture.openForeign()`);
@@ -502,7 +502,7 @@ try {
   await until(
     () =>
       evaluate(
-        `!!document.querySelector('dialog.is-preview') && document.activeElement.textContent==='Apply rename'`,
+        `!!document.querySelector('.gyro-workspace-rename.is-preview') && document.activeElement.textContent==='Apply rename'`,
       ),
     "local second-root rename preview",
   );
@@ -510,7 +510,7 @@ try {
   await until(
     () =>
       evaluate(
-        `!document.querySelector('dialog') && ${state}.files[window.__workspaceFixture.foreignPath].includes('function otherWelcome(')`,
+        `!document.querySelector('.gyro-workspace-rename') && ${state}.files[window.__workspaceFixture.foreignPath].includes('function otherWelcome(')`,
       ),
     "local second-root rename succeeds",
   );
@@ -556,7 +556,7 @@ try {
   await evaluate(`window.__workspaceFixture.restoreTargetDisk()`);
   await key("Escape", 27);
   await until(
-    () => evaluate(`!document.querySelector('dialog')`),
+    () => evaluate(`!document.querySelector('.gyro-workspace-rename')`),
     "cancel disk request race",
   );
   await symbol();
@@ -567,7 +567,7 @@ try {
   await until(
     () =>
       evaluate(
-        `!!document.querySelector('dialog.is-preview') && document.activeElement.textContent==='Apply rename'`,
+        `!!document.querySelector('.gyro-workspace-rename.is-preview') && document.activeElement.textContent==='Apply rename'`,
       ),
     "disk preview ready",
   );
@@ -591,7 +591,7 @@ try {
   await evaluate(`window.__workspaceFixture.restoreTargetDisk()`);
   await key("Escape", 27);
   await until(
-    () => evaluate(`!document.querySelector('dialog')`),
+    () => evaluate(`!document.querySelector('.gyro-workspace-rename')`),
     "cancel disk preview race",
   );
   await symbol();
@@ -602,7 +602,7 @@ try {
   await until(
     () =>
       evaluate(
-        `!!document.querySelector('dialog.is-preview') && document.activeElement.textContent==='Apply rename'`,
+        `!!document.querySelector('.gyro-workspace-rename.is-preview') && document.activeElement.textContent==='Apply rename'`,
       ),
     "stale preview ready",
   );
@@ -634,7 +634,7 @@ try {
   await screenshot("rename-stale-preview.png");
   await key("Escape", 27);
   await until(
-    () => evaluate(`!document.querySelector('dialog')`),
+    () => evaluate(`!document.querySelector('.gyro-workspace-rename')`),
     "cancel stale preview",
   );
   await click("Switch to light");
@@ -646,7 +646,7 @@ try {
   await until(
     () =>
       evaluate(
-        `!!document.querySelector('dialog.is-preview') && document.activeElement.textContent === 'Apply rename'`,
+        `!!document.querySelector('.gyro-workspace-rename.is-preview') && document.activeElement.textContent === 'Apply rename'`,
       ),
     "light preview",
   );
@@ -656,7 +656,7 @@ try {
   await until(
     () =>
       evaluate(
-        `!document.querySelector('dialog') && ${state}.files[window.__workspaceFixture.mainPath].includes('welcome(')`,
+        `!document.querySelector('.gyro-workspace-rename') && ${state}.files[window.__workspaceFixture.mainPath].includes('welcome(')`,
       ),
     "Enter applies preview",
   );
@@ -723,7 +723,7 @@ try {
   await until(
     () =>
       evaluate(
-        `!!document.querySelector('dialog.is-preview') && document.activeElement.textContent==='Apply rename'`,
+        `!!document.querySelector('.gyro-workspace-rename.is-preview') && document.activeElement.textContent==='Apply rename'`,
       ),
     "second rename preview",
   );
@@ -731,7 +731,7 @@ try {
   await until(
     () =>
       evaluate(
-        `!document.querySelector('dialog') && ${state}.files[window.__workspaceFixture.mainPath].includes('welcome(')`,
+        `!document.querySelector('.gyro-workspace-rename') && ${state}.files[window.__workspaceFixture.mainPath].includes('welcome(')`,
       ),
     "second rename applied",
   );

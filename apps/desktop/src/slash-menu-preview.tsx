@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChatSurface, createModelCatalogClient, providersForConfig, type ChatMode, type ComposerReviewer, type GyroConfig } from "@gyro-dev/ui";
 import "@gyro-dev/ui/styles.css";
+import { createChatModeSessionEvent } from "./session-context-events";
 import catalog from "../../../catalog/model-catalog.json";
 
 const reviewerPreview = new URLSearchParams(location.search).has("reviewer");
@@ -31,6 +32,7 @@ const config: GyroConfig = {
 
 function Fixture() {
   const [mode, setMode] = useState<ChatMode>("normal");
+  const [submittedMode, setSubmittedMode] = useState<ChatMode>();
   const [theme, setTheme] = useState("dark");
   const [draft, setDraft] = useState("/");
   const [reviewer, setReviewer] = useState<ComposerReviewer>();
@@ -75,7 +77,8 @@ function Fixture() {
           key={revision}
           supportsSecondOpinion={reviewerPreview}
           config={config}
-          events={[{
+          isComposerSending={submittedMode === "plan"}
+          events={[...(submittedMode ? [createChatModeSessionEvent("slash-preview", submittedMode, "fixture-turn")] : []), {
             id: "fixture-message",
             sessionId: "slash-preview",
             turnId: "fixture-turn",
@@ -99,6 +102,7 @@ function Fixture() {
             if (value === "set-chat-mode-normal") setMode("normal");
           }}
           onSend={(message, context) => {
+            setSubmittedMode(context?.mode ?? mode);
             setAction(`Sent ${message}${context?.secondOpinion ? " · Reviewer: " + context.secondOpinion.modelId : ""}`);
             setDraft("");
             setReviewer(undefined);

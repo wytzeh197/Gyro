@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ArrowLeft, Terminal, X } from "lucide-react";
+import { ArrowLeft, Terminal, X } from "./icons";
 import type { TerminalPane, TerminalPaneStatus } from "./types";
 import {
   beginTerminalSessionDrag,

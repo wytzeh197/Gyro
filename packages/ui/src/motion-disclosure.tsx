@@ -36,7 +36,7 @@ export function MotionDisclosure({ open, children }: { open: boolean; children: 
     root.style.opacity = opacity;
     root.getAnimations().forEach((animation) => animation.cancel());
     const factor = parseFloat(getComputedStyle(root).getPropertyValue("--gyro-motion-factor")) || 1;
-    const easing = getComputedStyle(root).getPropertyValue("--gyro-premium-ease").trim() || "ease-out";
+    const easing = getComputedStyle(root).getPropertyValue("--gyro-ease").trim() || "ease-out";
     const fraction = entering ? 1 : open ? 1 - Number(opacity) : Number(opacity);
     const duration = 130 * factor * fraction / (open ? 1 : surfaceExitRate(root));
     const animation = root.animate([

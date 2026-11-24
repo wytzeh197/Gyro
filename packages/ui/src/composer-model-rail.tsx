@@ -1,13 +1,12 @@
 import { forwardRef, useImperativeHandle, type ForwardedRef } from "react";
 import {
   Check,
-  CircleDashed,
   Copy,
   ExternalLink,
   Plus,
   Settings2,
   TriangleAlert,
-} from "lucide-react";
+} from "./icons";
 import {
   useContext,
   useEffect,
@@ -19,6 +18,7 @@ import {
 } from "react";
 import { groupModelsByClass } from "./model-classes";
 import { clippingBounds } from "./composer-popover-bounds";
+import { Spinner } from "./primitives/feedback";
 import {
   ProviderSignInContext,
   type ProviderSignIn,
@@ -192,7 +192,7 @@ function SignInProgress({
     return (
       <>
         <p className="gyro-model-rail-signin-status" role="status">
-          <CircleDashed aria-hidden="true" className="is-spinning" size={13} />
+          <Spinner decorative size="xs" />
           {signIn.phase === "installing"
             ? "Installing…"
             : "Checking for an existing sign-in…"}
@@ -205,7 +205,7 @@ function SignInProgress({
   return (
     <>
       <p className="gyro-model-rail-signin-status" role="status">
-        <CircleDashed aria-hidden="true" className="is-spinning" size={13} />
+        <Spinner decorative size="xs" />
         {signIn.deviceCode
           ? "Enter this code on the sign-in page"
           : signIn.acceptsCode

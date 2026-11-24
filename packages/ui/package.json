@@ -7,11 +7,14 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./icons": "./src/icons.ts",
     "./styles.css": "./src/styles-entry.css",
     "./installed-update.css": "./src/installed-update.css",
     "./context-usage": "./src/context-usage.ts",
     "./workspace-project": "./src/workspace-project.ts",
-    "./tooltips": "./src/gyro-tooltip.ts"
+    "./tooltips": "./src/gyro-tooltip.ts",
+    "./appearance-runtime": "./src/appearance-runtime.ts",
+    "./theme": "./src/theme/theme-engine.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -21,6 +24,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@base-ui/react": "1.9.0",
+    "@shikijs/core": "3.22.0",
+    "@shikijs/engine-oniguruma": "3.22.0",
+    "@shikijs/langs": "3.22.0",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

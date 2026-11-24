@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
-import { ChevronRight, LoaderCircle, ShieldCheck, X } from "lucide-react";
+import { ChevronRight, ShieldCheck, X } from "./icons";
+import { Button, IconButton, LiveStatusSpinner, Menu } from "./primitives";
 import "./check-work-status.css";
 
 export const CheckWorkContext = createContext<
@@ -24,14 +25,17 @@ export function CheckWorkStatus({ sessionId }: { sessionId?: string }) {
   const activities = useContext(CheckWorkActivityContext);
   const activity = sessionId ? activities[sessionId] : undefined;
   if (!activity) return null;
-  const Icon = activity.running ? LoaderCircle : ShieldCheck;
   return (
     <aside
       className="gyro-check-strip"
       data-running={activity.running}
       aria-label="Gyro Check status"
     >
-      <Icon className="gyro-check-strip-icon" size={16} aria-hidden="true" />
+      {activity.running ? (
+        <LiveStatusSpinner className="gyro-check-strip-icon" size="md" />
+      ) : (
+        <ShieldCheck className="gyro-check-strip-icon" size={16} aria-hidden="true" />
+      )}
       <div className="gyro-check-strip-copy" role="status">
         <div>
           <strong>Gyro Check</strong>
@@ -39,21 +43,22 @@ export function CheckWorkStatus({ sessionId }: { sessionId?: string }) {
         </div>
         <p title={activity.detail}>{activity.detail}</p>
       </div>
-      <button type="button" onClick={activity.open}>
-        Details <ChevronRight size={13} aria-hidden="true" />
-      </button>
+      <Button
+        variant="ghost"
+        size="xs"
+        onClick={activity.open}
+        trailing={<ChevronRight size={13} aria-hidden="true" />}
+      >
+        Details
+      </Button>
       {activity.running ? (
-        <button type="button" onClick={activity.stop}>
+        <Button variant="ghost" size="xs" onClick={activity.stop}>
           Stop
-        </button>
+        </Button>
       ) : (
-        <button
-          type="button"
-          onClick={activity.dismiss}
-          aria-label="Dismiss Check status"
-        >
+        <IconButton size="xs" onClick={activity.dismiss} label="Dismiss Check status">
           <X size={14} aria-hidden="true" />
-        </button>
+        </IconButton>
       )}
     </aside>
   );
@@ -71,17 +76,15 @@ export function CheckWorkMenuItem({
   const open = useContext(CheckWorkContext);
   if (!open) return null;
   return (
-    <button
+    <Menu.Item
       disabled={disabled}
+      icon={<ShieldCheck aria-hidden="true" size={14} />}
       onClick={() => {
         onClose();
         open(sessionId);
       }}
-      role="menuitem"
-      type="button"
     >
-      <ShieldCheck aria-hidden="true" size={14} />
       Check this work
-    </button>
+    </Menu.Item>
   );
 }

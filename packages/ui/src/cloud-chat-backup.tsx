@@ -1,6 +1,6 @@
+import { Button } from "./primitives/button";
 import { useEffect, useId, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { useDialogDismiss } from "./use-dialog-dismiss";
+import { Dialog } from "./primitives";
 import type { CloudServicesActions } from "./cloud-services-settings";
 import "./cloud-chat-backup.css";
 
@@ -30,7 +30,8 @@ export function CloudChatBackup({
   onDismiss: () => void;
 }) {
   const titleId = useId();
-  const { ref: dialogRef, dismiss } = useDialogDismiss(onDismiss);
+  const [open, setOpen] = useState(true);
+  const dismiss = () => setOpen(false);
   const requestRef = useRef(request);
   const availableRef = useRef(available);
   const [state, setState] = useState<ReviewState>({ status: "loading" });
@@ -43,9 +44,6 @@ export function CloudChatBackup({
     requestRef.current = request;
     availableRef.current = available;
   }, [request, available]);
-  useEffect(() => {
-    heading.current?.focus();
-  }, []);
   useEffect(() => {
     let cancelled = false;
     if (!availableRef.current) {
@@ -129,18 +127,20 @@ export function CloudChatBackup({
     }
   };
 
-  return createPortal(
-    <div
-      ref={dialogRef}
-      className="gyro-project-remove-overlay"
-      aria-modal="true"
-      aria-labelledby={titleId}
-      role="dialog"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) dismiss();
+  return (
+    <Dialog.Root
+      open={open}
+      onOpenChange={setOpen}
+      // The parent unmounts this review once the closing motion settles.
+      onOpenChangeComplete={(next) => {
+        if (!next) onDismiss();
       }}
     >
-      <section className="gyro-project-remove-card gyro-cloud-backup-review">
+      <Dialog.Content
+        className="gyro-cloud-backup-review"
+        aria-labelledby={titleId}
+        initialFocus={heading}
+      >
         <h2 id={titleId} ref={heading} tabIndex={-1}>
           Back up this chat
         </h2>
@@ -154,14 +154,14 @@ export function CloudChatBackup({
         {state.status === "error" ? (
           <>
             <p role="alert">{state.message}</p>
-            <button
+            <Button
               type="button"
-              className="gyro-secondary-button"
+              variant="outline"
               disabled={!available}
               onClick={() => setRevision((value) => value + 1)}
             >
               Try preview again
-            </button>
+            </Button>
           </>
         ) : null}
         {state.status === "ready" ? (
@@ -212,16 +212,16 @@ export function CloudChatBackup({
               />{" "}
               I reviewed what will be uploaded
             </label>
-            <button
+            <Button
               type="button"
-              className="gyro-primary-button"
+              size="md"
               disabled={
                 !available || !reviewed || uploading || backgroundUpload
               }
               onClick={() => void upload()}
             >
               {uploading || backgroundUpload ? "Backing up…" : "Back up chat"}
-            </button>
+            </Button>
           </>
         ) : null}
         {state.status === "uploaded" ? (
@@ -243,15 +243,14 @@ export function CloudChatBackup({
             uploads in Cloud before trying again.
           </p>
         ) : null}
-        <button
+        <Button
           type="button"
-          className="gyro-secondary-button"
+          variant="outline"
           onClick={dismiss}
         >
           Close
-        </button>
-      </section>
-    </div>,
-    document.body,
+        </Button>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

@@ -1,11 +1,12 @@
 import React from "react";
 import { isTauri } from "@tauri-apps/api/core";
-import { syncNativeAppearance } from "./native-appearance";
+import { syncNativeAppearance, syncNativeMaterial } from "./native-appearance";
+import { applyAppearancePreferences } from "@gyro-dev/ui/appearance-runtime";
 import ReactDOM from "react-dom/client";
 import { EarlyShell } from "./early-shell";
 import { AppFailure } from "./app-failure";
 import { resolveBootSurface } from "./surface-boundary";
-import { readStoredAppearance } from "./ui-storage";
+import { readInitialAppearance } from "./ui-storage";
 import "./early-shell.css";
 import "./theme.css";
 
@@ -16,11 +17,8 @@ const bootSurface = resolveBootSurface({
 });
 const isMenuBarSurface = bootSurface === "menu-bar";
 document.documentElement.dataset.surface = bootSurface;
-// The macOS main window owns a native Sidebar material; embedded pages and
-// auxiliary windows retain their normal opaque backgrounds.
-if (bootSurface === "main" && isTauri() && navigator.platform.includes("Mac")) {
-  document.documentElement.dataset.nativeMaterial = "sidebar";
-}
+const storedAppearance = readInitialAppearance();
+syncNativeMaterial(storedAppearance.windowMaterial);
 
 const systemTheme = () =>
   window.matchMedia?.("(prefers-color-scheme: dark)").matches
@@ -30,7 +28,7 @@ const systemTheme = () =>
 const initialTheme = (() => {
   try {
     const preference =
-      readStoredAppearance().theme ?? localStorage.getItem("gyro.theme");
+      storedAppearance.theme ?? localStorage.getItem("gyro.theme");
     return preference === "light" || preference === "dark"
       ? preference
       : systemTheme();
@@ -40,10 +38,11 @@ const initialTheme = (() => {
 })();
 
 document.documentElement.dataset.theme = initialTheme;
-syncNativeAppearance(initialTheme);
+const themeColor = applyAppearancePreferences(document.documentElement, storedAppearance, initialTheme);
+syncNativeAppearance(storedAppearance.theme ?? initialTheme);
 document
   .querySelector('meta[name="theme-color"]')
-  ?.setAttribute("content", initialTheme === "light" ? "#f9f8f7" : "#1e1e1d");
+  ?.setAttribute("content", themeColor ?? (initialTheme === "light" ? "#f9f8f7" : "#1e1e1d"));
 
 class AppErrorBoundary extends React.Component<
   { children: React.ReactNode },

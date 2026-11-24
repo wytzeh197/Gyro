@@ -1,8 +1,8 @@
 /* Quiet, neutral tour surfaces. Blue is reserved for the primary action. */
 .gyro-tour {
-  --gyro-tour-accent: var(--gyro-blue);
-  --gyro-tour-on-accent: #06111f;
-  --gyro-tour-dimmer: rgba(0, 0, 0, 0.48);
+  --gyro-tour-accent: var(--gyro-accent);
+  --gyro-tour-on-accent: var(--gyro-primary-text);
+  --gyro-tour-dimmer: var(--gyro-scrim);
   color: var(--gyro-text);
   font-family: inherit;
   inset: 0;
@@ -11,12 +11,7 @@
      to the highlighted control. */
   pointer-events: none;
   position: fixed;
-  z-index: 12000;
-}
-
-:root[data-theme="light"] .gyro-tour {
-  --gyro-tour-on-accent: #ffffff;
-  --gyro-tour-dimmer: rgba(0, 0, 0, 0.28);
+  z-index: var(--gyro-z-tour);
 }
 
 .gyro-tour[data-has-anchor="false"] {
@@ -33,24 +28,22 @@
   display: none;
 }
 
-/* Keep the actual control visible through a neutral cut-out, without a glow. */
 .gyro-tour-spotlight {
   border-radius: var(--gyro-radius-xl);
   box-shadow:
-    0 0 0 1px var(--gyro-border-strong),
+    0 0 0 2px var(--gyro-tour-accent),
+    0 0 20px color-mix(in srgb, var(--gyro-tour-accent) 20%, transparent),
     0 0 0 9999px var(--gyro-tour-dimmer);
   pointer-events: none;
   position: absolute;
 }
 
 .gyro-tour-card {
-  animation: gyro-tour-arrive 160ms ease-out;
+  animation: gyro-tour-arrive var(--gyro-duration-200) var(--gyro-ease-out);
   background: var(--gyro-surface);
   border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-lg);
-  box-shadow:
-    0 16px 48px rgba(0, 0, 0, 0.24),
-    0 2px 8px rgba(0, 0, 0, 0.12);
+  border-radius: var(--gyro-space-section);
+  box-shadow: var(--gyro-shadow-dialog);
   max-height: calc(100% - 24px);
   max-width: calc(100% - 24px);
   outline: none;
@@ -65,6 +58,9 @@
 .gyro-tour-card[data-positioned="true"] {
   visibility: visible;
 }
+
+.gyro-tour-card > .gyro-scene { margin-bottom: var(--gyro-space-standard); }
+.gyro-tour-card > .gyro-scene--providers { block-size: 4rem; }
 
 .gyro-tour-progress {
   align-items: center;
@@ -190,9 +186,11 @@
 @keyframes gyro-tour-arrive {
   from {
     opacity: 0;
+    scale: .98;
   }
   to {
     opacity: 1;
+    scale: 1;
   }
 }
 

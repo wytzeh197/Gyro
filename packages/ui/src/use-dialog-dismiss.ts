@@ -56,7 +56,7 @@ export function useDialogDismiss<T extends HTMLElement = HTMLDivElement>(
     const duration =
       parseFloat(cssDuration) * (cssDuration.endsWith("ms") ? 1 : 1000);
     const easing = getComputedStyle(root)
-      .getPropertyValue("--gyro-premium-ease")
+      .getPropertyValue("--gyro-ease")
       .trim();
     const opacity = getComputedStyle(root).opacity;
     const fade = root.animate([{ opacity }, { opacity: 0 }], {

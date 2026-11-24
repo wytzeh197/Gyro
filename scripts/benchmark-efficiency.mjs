@@ -1,12 +1,12 @@
 // Explicit generation entry; never starts a paid run without a bounded spec.
-import { readFile, mkdtemp, writeFile, realpath } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { parseArgs } from "node:util";
 import {
   captureRunSources, assertSameSources, captureRunManifest,
 } from "./efficiency-run-manifest.mjs";
+import { createBenchmarkRoot } from "./provider-benchmark-layout.mjs";
 const { values } = parseArgs({
   options: {
     spec: { type: "string" },
@@ -31,9 +31,7 @@ if (
   throw Error(
     "Provide selected providers and explicit finite execution limits",
   );
-const root = await realpath(
-  await mkdtemp(join(tmpdir(), "gyro-efficiency-benchmark-")),
-);
+const root = await createBenchmarkRoot("gyro-efficiency-benchmark-");
 const specPath = join(root, "spec.json");
 await writeFile(specPath, JSON.stringify(spec, null, 2) + "\n", {
   mode: 0o600,

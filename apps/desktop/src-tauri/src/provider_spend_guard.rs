@@ -1,10 +1,10 @@
 //! Apply the user's existing spend limits consistently across provider runners.
 
 use crate::{
-    providers::chat_types::ProviderChatRequest,
+    providers::{chat_types::ProviderChatRequest, streaming::provider_stop_message},
     state::{
         managers::ProviderCancellationManager,
-        provider_run::{stop_provider_run, ProviderStopReason},
+        provider_run::{stop_provider_run, ProviderRunControl, ProviderStopReason},
     },
     stores::open_store,
 };
@@ -48,47 +48,28 @@ impl TurnSpendGuard {
         request: &ProviderChatRequest,
         requests: u32,
     ) {
-        if self.provider_budget.is_none()
-            || (requests == self.observed_requests
-                && self.refreshed_at.elapsed() < Duration::from_secs(1))
-        {
-            return;
-        }
-        let Some((session, turn)) = Uuid::parse_str(&request.session_id).ok().zip(
-            request
-                .turn_id
-                .as_deref()
-                .and_then(|turn| Uuid::parse_str(turn).ok()),
-        ) else {
+        let Some((settled, _)) = self.provider_budget.as_mut() else {
             return;
         };
         let since =
             chrono::Utc::now() - chrono::Duration::hours(i64::from(self.budget_window_hours));
-        if let Ok(other) =
-            store.provider_usage_outside_turn_since(&request.provider_id, since, session, turn)
-        {
-            if let Some((spent, _)) = self.provider_budget.as_mut() {
-                *spent = other.total_tokens;
-            }
+        if let Ok(totals) = store.provider_usage_totals_since(&request.provider_id, since) {
+            *settled = totals.total_tokens;
             self.refreshed_at = Instant::now();
             self.observed_requests = requests;
         }
     }
 
-    fn stop_reason(&self, tokens: UsageTokens) -> Option<ProviderStopReason> {
-        let spent = gyro_core::call_ceiling_tokens(
-            Some(tokens.input_tokens),
-            Some(tokens.cached_input_tokens),
-            Some(tokens.output_tokens),
-        );
+    fn stop_reason(&self, spent: u64, current_total: u64) -> Option<ProviderStopReason> {
         if self.ceiling > 0 && spent > self.ceiling {
             return Some(ProviderStopReason::CallTokenCeiling {
                 spent,
                 ceiling: self.ceiling,
             });
         }
-        if let Some((before_turn, limit)) = self.provider_budget {
-            let used = before_turn.saturating_add(tokens.total_tokens);
+        // Earlier stages of this turn are already in the rolling ledger.
+        if let Some((settled, limit)) = self.provider_budget {
+            let used = settled.saturating_add(current_total);
             if used >= limit {
                 return Some(ProviderStopReason::ProviderTokenBudget { used, limit });
             }
@@ -97,34 +78,74 @@ impl TurnSpendGuard {
     }
 }
 
-/// Resolve once before generation, retaining the baseline through retries and
-/// delegation continuations. Ledger writes at the end of earlier continuations
-/// must not cause their tokens to be counted twice against the rolling budget.
-pub(super) fn bind(app: &tauri::AppHandle, request: &ProviderChatRequest, store: &SessionStore) {
+fn new_tokens(tokens: UsageTokens) -> u64 {
+    gyro_core::call_ceiling_tokens(
+        Some(tokens.input_tokens),
+        Some(tokens.cached_input_tokens),
+        Some(tokens.output_tokens),
+    )
+}
+
+fn goal_stop_reason(control: &ProviderRunControl, spent: u64) -> Option<ProviderStopReason> {
+    let (before, limit) = (*control.goal_token_budget.lock().ok()?)?;
+    let used = before.saturating_add(spent);
+    (used >= limit).then_some(ProviderStopReason::GoalTokenBudget { used, limit })
+}
+
+/// Refresh the committed spend before each provider stage, including a
+/// summary, its answer, and any later synthesis on the same turn.
+pub(super) fn prepare_call(
+    app: &tauri::AppHandle,
+    request: &ProviderChatRequest,
+    store: &SessionStore,
+) -> anyhow::Result<()> {
     let control = app
         .state::<ProviderCancellationManager>()
         .flags
         .lock()
         .ok()
         .and_then(|flags| flags.get(&request.session_id).cloned());
-    let Some(control) = control else { return };
-    let Ok(mut state) = control.spend_guard.lock() else {
-        return;
+    let Some(control) = control else {
+        return Ok(());
     };
-    if state.is_some() {
-        return;
-    }
-    let guard = GyroPaths::for_current_user()
+    let prior = Uuid::parse_str(&request.session_id)
         .ok()
-        .and_then(|paths| GyroConfig::load(&paths).ok())
-        .map(|config| config.usage_guard)
-        .unwrap_or_default();
-    let budget = guard
-        .budgets
-        .iter()
-        .find(|budget| budget.provider_id == request.provider_id && budget.max_tokens > 0)
-        .and_then(|budget| store.budget_state(budget, chrono::Utc::now()).ok());
-    *state = Some(TurnSpendGuard::new(&guard, budget));
+        .zip(
+            request
+                .turn_id
+                .as_deref()
+                .and_then(|turn| Uuid::parse_str(turn).ok()),
+        )
+        .and_then(|(session, turn)| store.direct_turn_usage_tokens(session, turn).ok().flatten());
+    if let Ok(mut offset) = control.usage_offset.lock() {
+        *offset = prior;
+    }
+    let spent = prior.map_or(0, new_tokens);
+    let ceiling_stop = control.spend_guard.lock().ok().and_then(|mut state| {
+        if let Some(guard) = state.as_mut() {
+            guard.refresh_budget(store, request, 0);
+        } else {
+            let config = GyroPaths::for_current_user()
+                .ok()
+                .and_then(|paths| GyroConfig::load(&paths).ok())
+                .map(|config| config.usage_guard)
+                .unwrap_or_default();
+            let budget = config
+                .budgets
+                .iter()
+                .find(|budget| budget.provider_id == request.provider_id && budget.max_tokens > 0)
+                .and_then(|budget| store.budget_state(budget, chrono::Utc::now()).ok());
+            *state = Some(TurnSpendGuard::new(&config, budget));
+        }
+        state.as_ref()?.stop_reason(spent, 0)
+    });
+    if let Some(reason) = goal_stop_reason(&control, spent).or(ceiling_stop) {
+        stop_provider_run(app, &request.session_id, reason);
+    }
+    if control.cancellation.is_cancelled() {
+        anyhow::bail!(provider_stop_message(app, &request.session_id));
+    }
+    Ok(())
 }
 
 pub(super) fn observe(
@@ -143,16 +164,9 @@ pub(super) fn observe(
     if control.cancellation.is_cancelled() {
         return;
     }
-    let goal_stop = control.goal_token_budget.lock().ok().and_then(|budget| {
-        let (before, limit) = (*budget)?;
-        let used = before.saturating_add(gyro_core::call_ceiling_tokens(
-            Some(tokens.input_tokens),
-            Some(tokens.cached_input_tokens),
-            Some(tokens.output_tokens),
-        ));
-        (used >= limit).then_some(ProviderStopReason::GoalTokenBudget { used, limit })
-    });
-    if let Some(reason) = goal_stop {
+    let prior = control.usage_offset.lock().ok().and_then(|offset| *offset);
+    let spent = new_tokens(tokens).saturating_add(prior.map_or(0, new_tokens));
+    if let Some(reason) = goal_stop_reason(&control, spent) {
         stop_provider_run(app, &request.session_id, reason);
         return;
     }
@@ -166,7 +180,7 @@ pub(super) fn observe(
                 guard.refresh_budget(&store, request, requests);
             }
         }
-        guard.stop_reason(tokens)
+        guard.stop_reason(spent, tokens.total_tokens)
     });
     if let Some(reason) = reason {
         stop_provider_run(app, &request.session_id, reason);
@@ -186,6 +200,10 @@ mod tests {
     };
     use gyro_core::{ProviderSessionBinding, SessionOrigin, UsageEntry, UsageOrigin, UsageOutcome};
 
+    fn active_stop(guard: &TurnSpendGuard, tokens: UsageTokens) -> Option<ProviderStopReason> {
+        guard.stop_reason(new_tokens(tokens), tokens.total_tokens)
+    }
+
     #[test]
     fn multi_request_api_turn_stops_before_another_generation() {
         let config = gyro_core::UsageGuardConfig {
@@ -198,7 +216,7 @@ mod tests {
         for _ in 0..3 {
             if gyro_core::provider_observation::snapshot()
                 .and_then(|summary| summary.tokens)
-                .and_then(|tokens| guard.stop_reason(tokens))
+                .and_then(|tokens| active_stop(&guard, tokens))
                 .is_some()
             {
                 break;
@@ -211,7 +229,8 @@ mod tests {
         }
         assert_eq!(generations, 2);
         assert_eq!(
-            guard.stop_reason(
+            active_stop(
+                &guard,
                 gyro_core::provider_observation::snapshot()
                     .unwrap()
                     .tokens
@@ -233,11 +252,13 @@ mod tests {
         let guard = TurnSpendGuard::new(&config, None);
         let tokens = UsageTokens::measured(Some(10_000), Some(9_950), Some(50), None, None);
         for _ in 0..4 {
-            assert_eq!(guard.stop_reason(tokens), None);
+            assert_eq!(active_stop(&guard, tokens), None);
         }
-        assert!(guard
-            .stop_reason(tokens.combine(UsageTokens::measured(Some(1), None, Some(0), None, None)))
-            .is_some());
+        assert!(active_stop(
+            &guard,
+            tokens.combine(UsageTokens::measured(Some(1), None, Some(0), None, None))
+        )
+        .is_some());
     }
 
     #[test]
@@ -257,10 +278,10 @@ mod tests {
             Some(budget.clone()),
         );
         let first = UsageTokens::measured(Some(20), Some(10), Some(20), None, None);
-        assert_eq!(guard.stop_reason(first), None);
+        assert_eq!(active_stop(&guard, first), None);
         let total = first.combine(UsageTokens::measured(Some(40), None, Some(20), None, None));
         assert_eq!(
-            guard.stop_reason(total),
+            active_stop(&guard, total),
             Some(ProviderStopReason::ProviderTokenBudget {
                 used: 1_000,
                 limit: 1_000
@@ -271,7 +292,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            TurnSpendGuard::new(&disabled, Some(budget)).stop_reason(total),
+            active_stop(&TurnSpendGuard::new(&disabled, Some(budget)), total),
             None
         );
     }
@@ -284,13 +305,10 @@ mod tests {
         };
         let guard = TurnSpendGuard::new(&config, None);
         assert_eq!(
-            guard.stop_reason(UsageTokens::measured(
-                Some(3_000_000),
-                None,
-                Some(1_000_000),
-                None,
-                None
-            )),
+            active_stop(
+                &guard,
+                UsageTokens::measured(Some(3_000_000), None, Some(1_000_000), None, None)
+            ),
             None
         );
     }
@@ -365,7 +383,7 @@ mod tests {
     }
 
     #[test]
-    fn rolling_budget_refresh_counts_other_chats_without_rebilling_own_continuations() {
+    fn settled_compaction_counts_toward_turn_goal_and_rolling_limits_once() {
         let temp = tempfile::tempdir().unwrap();
         let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("data"))).unwrap();
         let own = store
@@ -379,7 +397,7 @@ mod tests {
             "sessionId": own.id, "turnId": turn, "providerId": "openrouter", "message": "work"
         }))
         .unwrap();
-        let record = |session_id, turn_id, provider: &str, input| {
+        let record = |session_id, turn_id, provider: &str, origin, input| {
             store
                 .record_usage(&UsageEntry {
                     session_id,
@@ -388,7 +406,7 @@ mod tests {
                     provider_id: provider.into(),
                     model_id: None,
                     reasoning_effort: None,
-                    origin: UsageOrigin::Chat,
+                    origin,
                     outcome: UsageOutcome::Done,
                     tokens: UsageTokens::measured(Some(input), None, Some(0), None, None),
                     wall_ms: 0,
@@ -396,7 +414,13 @@ mod tests {
                 })
                 .unwrap();
         };
-        record(other.id, Uuid::new_v4(), "openrouter", 900);
+        record(
+            other.id,
+            Uuid::new_v4(),
+            "openrouter",
+            UsageOrigin::Chat,
+            900,
+        );
         let budget: gyro_core::UsageBudget = serde_json::from_value(serde_json::json!({
             "providerId":"openrouter", "maxTokens":1000
         }))
@@ -405,18 +429,58 @@ mod tests {
             &gyro_core::UsageGuardConfig::default(),
             Some(store.budget_state(&budget, chrono::Utc::now()).unwrap()),
         );
-        record(own.id, turn, "openrouter", 40);
-        record(other.id, Uuid::new_v4(), "mistral", 5000);
-        let live = UsageTokens::measured(Some(80), None, Some(0), None, None);
+        record(
+            own.id,
+            turn,
+            "openrouter",
+            UsageOrigin::ContextCompaction,
+            40,
+        );
+        record(other.id, Uuid::new_v4(), "mistral", UsageOrigin::Chat, 5000);
+        let settled = store
+            .direct_turn_usage_tokens(own.id, turn)
+            .unwrap()
+            .unwrap();
+        let live = UsageTokens::measured(Some(50), None, Some(0), None, None);
+        let spent = new_tokens(settled) + new_tokens(live);
         guard.refresh_budget(&store, &request, 1);
-        assert_eq!(guard.stop_reason(live), None);
-        record(other.id, Uuid::new_v4(), "openrouter", 30);
+        assert_eq!(guard.stop_reason(spent, live.total_tokens), None);
+        record(
+            other.id,
+            Uuid::new_v4(),
+            "openrouter",
+            UsageOrigin::Chat,
+            30,
+        );
         guard.refresh_budget(&store, &request, 2);
         assert_eq!(
-            guard.stop_reason(live),
+            guard.stop_reason(spent, live.total_tokens),
             Some(ProviderStopReason::ProviderTokenBudget {
-                used: 1010,
+                used: 1020,
                 limit: 1000
+            })
+        );
+
+        let control = ProviderRunControl::default();
+        *control.goal_token_budget.lock().unwrap() = Some((60, 150));
+        assert_eq!(goal_stop_reason(&control, new_tokens(live)), None);
+        assert_eq!(
+            goal_stop_reason(&control, spent),
+            Some(ProviderStopReason::GoalTokenBudget {
+                used: 150,
+                limit: 150
+            })
+        );
+        let config = gyro_core::UsageGuardConfig {
+            max_tokens_per_call: 39,
+            ..Default::default()
+        };
+        let call_guard = TurnSpendGuard::new(&config, None);
+        assert_eq!(
+            call_guard.stop_reason(new_tokens(settled), 0),
+            Some(ProviderStopReason::CallTokenCeiling {
+                spent: 40,
+                ceiling: 39,
             })
         );
     }

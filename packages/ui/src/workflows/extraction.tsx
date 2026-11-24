@@ -1,3 +1,4 @@
+import { Button } from "../primitives/button";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   WorkflowDefinition,
@@ -261,8 +262,8 @@ export function WorkflowExtractionPanel({
                   Extract an unproven draft from this source
                 </label>
               ) : null}
-              <button
-                className="gyro-primary-button"
+              <Button
+                size="sm"
                 disabled={
                   !providerId ||
                   !modelId.trim() ||
@@ -272,7 +273,7 @@ export function WorkflowExtractionPanel({
                 onClick={() => void act("start")}
               >
                 Create draft · uses selected provider
-              </button>
+              </Button>
             </fieldset>
           ) : null}
           {["queued", "running"].includes(draft.status) ? (
@@ -282,12 +283,12 @@ export function WorkflowExtractionPanel({
           ) : null}
           {draft.error ? <p role="alert">{draft.error}</p> : null}
           {draft.status === "ready" && draft.definition ? (
-            <button
-              className="gyro-primary-button"
+            <Button
+              size="sm"
               onClick={() => onEdit(draft.definition!)}
             >
               Edit workflow draft
-            </button>
+            </Button>
           ) : null}
           <div className="gyro-workflow-actions">
             <button onClick={() => void inspect("input")}>

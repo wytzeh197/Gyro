@@ -10,6 +10,111 @@ const SEMANTIC_CODE_TOOLS: [CapabilityId; 5] = [
 ];
 
 #[test]
+fn absolute_inspection_paths_use_only_the_bound_workspace_root() {
+    use crate::capability_workspace_helpers::{
+        relative_workspace_inspection_path, OutsideWorkspaceInspectionPath,
+    };
+    use serde_json::json;
+
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap().join("workspace");
+    let other = root.with_file_name("workspace-other");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::create_dir(&other).unwrap();
+    for id in [
+        CapabilityId::WorkspaceRead,
+        CapabilityId::WorkspaceReadRange,
+        CapabilityId::WorkspaceReadEditor,
+    ] {
+        assert_eq!(
+            relative_workspace_inspection_path(
+                &root,
+                id,
+                &json!({"path": root.join("src/main.rs")})
+            )
+            .unwrap(),
+            Some("src/main.rs".into())
+        );
+        for path in [&root, std::path::Path::new(".")] {
+            let error = relative_workspace_inspection_path(&root, id, &json!({"path": path}))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("workspace-relative path of the file"));
+            assert!(error.contains("gyro_workspace_list with path \".\""));
+        }
+        for path in [&root.join("src/../secret"), &other.join("shared.rs")] {
+            assert!(relative_workspace_inspection_path(&root, id, &json!({"path": path})).is_err());
+        }
+        let hint =
+            relative_workspace_inspection_path(&root, id, &json!({"path":"/apps/src/main.rs"}))
+                .unwrap_err();
+        assert!(hint.is::<OutsideWorkspaceInspectionPath>());
+        assert!(hint.to_string().contains("retry with \"apps/src/main.rs\""));
+        let traversal =
+            relative_workspace_inspection_path(&root, id, &json!({"path":"/apps/../secret"}))
+                .unwrap_err();
+        assert!(!traversal.is::<OutsideWorkspaceInspectionPath>());
+        assert!(!traversal.to_string().contains("retry with"));
+    }
+    for id in [CapabilityId::WorkspaceList, CapabilityId::WorkspaceSearch] {
+        assert_eq!(
+            relative_workspace_inspection_path(&root, id, &json!({"path": root})).unwrap(),
+            Some(".".into())
+        );
+    }
+    assert_eq!(
+        relative_workspace_inspection_path(
+            &root,
+            CapabilityId::WorkspaceEdit,
+            &json!({"path": root.join("src/main.rs")})
+        )
+        .unwrap(),
+        None
+    );
+    assert_eq!(
+        relative_workspace_inspection_path(
+            &root,
+            CapabilityId::WorkspaceRead,
+            &json!({"path": "src/main.rs"})
+        )
+        .unwrap(),
+        None
+    );
+
+    #[cfg(unix)]
+    {
+        let resolve = |path| {
+            relative_workspace_inspection_path(
+                &root,
+                CapabilityId::WorkspaceRead,
+                &json!({"path": path}),
+            )
+            .unwrap()
+            .unwrap()
+        };
+        std::fs::write(root.join(".env"), "fixture only").unwrap();
+        std::os::unix::fs::symlink(root.join(".env"), root.join("visible.txt")).unwrap();
+        assert_eq!(
+            capability_permission_classes(
+                &root,
+                CapabilityId::WorkspaceRead,
+                &json!({"path": resolve(root.join("visible.txt"))})
+            )
+            .unwrap(),
+            vec![CapabilityClass::WorkspaceSensitiveRead]
+        );
+        std::fs::write(other.join("shared.rs"), "fixture only").unwrap();
+        std::os::unix::fs::symlink(other.join("shared.rs"), root.join("escape.rs")).unwrap();
+        assert!(capability_permission_classes(
+            &root,
+            CapabilityId::WorkspaceRead,
+            &json!({"path": resolve(root.join("escape.rs"))})
+        )
+        .is_err());
+    }
+}
+
+#[test]
 fn semantic_permission_revocation_during_another_approval_prevents_dispatch() {
     let request = anthropic_provider_request();
     let mut bound = bound_capability_context(&request);

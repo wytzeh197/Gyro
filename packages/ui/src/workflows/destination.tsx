@@ -1,3 +1,4 @@
+import { Button, IconButton } from "../primitives/button";
 import {
   CalendarClock,
   ChevronDown,
@@ -7,7 +8,7 @@ import {
   Plus,
   RefreshCw,
   Workflow,
-} from "lucide-react";
+} from "../icons";
 import { WorkflowLibraryPanel } from "./library";
 import {
   useCallback,
@@ -437,8 +438,9 @@ export function WorkflowDestination({
                       <MessageSquare size={14} aria-hidden="true" />
                       Create from chat
                     </button>
-                    <button
-                      className="gyro-primary-button"
+                    <Button
+                      size="sm"
+                      leading={<Plus size={14} aria-hidden="true" />}
                       disabled={busy}
                       onClick={() =>
                         setEditor({
@@ -449,8 +451,8 @@ export function WorkflowDestination({
                         })
                       }
                     >
-                      <Plus size={14} aria-hidden="true" /> New workflow
-                    </button>
+                      New workflow
+                    </Button>
                   </div>
                 ) : null}
               </header>
@@ -493,18 +495,18 @@ export function WorkflowDestination({
                   </span>
                 </label>
                 {showingLibrary ? (
-                  <button
-                    className="gyro-workflow-icon-button"
+                  <IconButton
+                    size="sm"
                     onClick={() => {
                       setError("");
                       void refresh();
                       void refreshLibrary();
                     }}
-                    aria-label="Refresh workflows"
+                    label="Refresh workflows"
                     title="Refresh workflows"
                   >
                     <RefreshCw size={14} aria-hidden="true" />
-                  </button>
+                  </IconButton>
                 ) : null}
               </div>
               {!project ? (

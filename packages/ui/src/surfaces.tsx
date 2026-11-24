@@ -75,8 +75,11 @@ import {
   MoreVertical,
   Palette,
   PanelBottom,
+  PanelBottomClosed,
   PanelLeft,
+  PanelLeftClosed,
   PanelRight,
+  PanelRightClosed,
   Paperclip,
   Pause,
   PauseCircle,
@@ -105,8 +108,10 @@ import {
   Video,
   X,
   XCircle,
-  createLucideIcon,
-} from "lucide-react";
+  AutoApproveIcon,
+  ChatSwitcherIcon,
+  ComposerSendIcon,
+} from "./icons";
 import { branchCommitDetail, recentBranches } from "./branch-recency";
 import { deviceKind } from "./device-kind";
 import {
@@ -131,7 +136,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
-import { AppPreviewPanel, useAppPreviewMenu } from "./app-preview-panel";
+import { AppPreviewPanel, useApplePreviewSetup, useAppPreviewMenu } from "./app-preview-panel";
 import { AppearanceSettings } from "./appearance-settings";
 import {
   parseAssistantResponseHeading,
@@ -355,7 +360,11 @@ import {
   useCompanionMotion,
   useCompanionPresence,
 } from "./use-companion-motion";
-import { useDialogDismiss } from "./use-dialog-dismiss";
+import { Button, Dialog, IconButton, Keycap, Menu, Popover, Spinner, ToastSurface } from "./primitives";
+import { WorkbenchConfirmation } from "./workbench-confirmation";
+import { ChatCodeBlock } from "./chat-code-block";
+import { observeGlassOverlays } from "./glass-overlay-cutout";
+import { WorkbenchScene } from "./workbench-scenes";
 import { useNetworkOnline } from "./use-network-online";
 import { workspaceFileBadge } from "./workspace-file-icons";
 import { Folder, FolderOpen, Folders } from "./workspace-folder-icons";
@@ -397,7 +406,6 @@ export {
 
 import { createPortal, flushSync } from "react-dom";
 import gyroLogoTransparentLight from "./assets/gyro-logo-white.svg";
-import gyroLogoTransparentDark from "./assets/gyro-logo.svg";
 import {
   ChatArtifacts,
   chatArtifactsFromEvent,
@@ -471,6 +479,7 @@ import { resolveCleanMachinePath } from "./clean-machine-path";
 import {
   composerLimitWindows,
   estimateComposerContextUsage,
+  formatLimitReset,
   isManualCompaction,
   manualCompactionMode,
   manualCompactionResultText,
@@ -716,16 +725,6 @@ import type { BrowserScreenshotHandler } from "./types";
 import { BrowserAnnotationControls } from "./browser-annotation-controls";
 import { ChatEnvironmentCard, type ChatEnvironmentRemote } from "./chat-environment-card";
 const CommandIcon = Command;
-const AutoApproveIcon = createLucideIcon("AutoApprove", [
-  [
-    "path",
-    {
-      d: "M10.8 2.8Q12 2.3 13.2 2.8L19.2 5.1Q21 5.8 21 7.8V12.5C21 18.2 17.3 21.5 12 21.5S3 18.2 3 12.5V7.8Q3 5.8 4.8 5.1Z",
-      key: "outline",
-    },
-  ],
-  ["path", { d: "m8 9 2 3-2 3M13 15h3", key: "terminal" }],
-]);
 const workspaceShellIcons: Record<WorkspaceShellIcon, IconComponent> = {
   ai: Sparkles,
   browser: Globe2,
@@ -776,33 +775,6 @@ function restingSidebarWidthFor(viewportWidth: number) {
  * `triggerRef` when the button that opens the surface sits outside that
  * subtree, so pressing the trigger toggles instead of dismiss-then-reopen.
  */
-/**
- * Chat switcher glyph: two left-aligned rules, the upper one longer. Reads as
- * "a list of chats" without borrowing the hamburger's meaning.
- */
-function ChatSwitcherIcon({ size = 15 }: { size?: number }) {
-  return (
-    <svg
-      aria-hidden="true"
-      fill="none"
-      height={size}
-      viewBox="0 0 16 16"
-      width={size}
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <rect fill="currentColor" height="1.8" rx="0.9" width="12" x="2" y="5" />
-      <rect
-        fill="currentColor"
-        height="1.8"
-        rx="0.9"
-        width="7.5"
-        x="2"
-        y="9.2"
-      />
-    </svg>
-  );
-}
-
 function ChatSwitcher({
   chatSwitcher,
 }: {
@@ -810,14 +782,13 @@ function ChatSwitcher({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  // The embedded chat column uses a full-height drawer for recents.
+  const [host, setHost] = useState<HTMLElement | null>(null);
   const panelRef = useOutsidePointerDismiss<HTMLDivElement>(
-    isOpen,
+    isOpen && host !== null,
     () => setIsOpen(false),
     triggerRef,
   );
-  // The list is portaled onto the workspace chat so it can fill that column.
-  // A menu anchored to the trigger cannot: the trigger sits in a 24px corner.
-  const [host, setHost] = useState<HTMLElement | null>(null);
   const menuId = useId();
 
   useLayoutEffect(() => {
@@ -831,14 +802,47 @@ function ChatSwitcher({
   }, []);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !host) return;
     const frame = requestAnimationFrame(() => {
       panelRef.current
         ?.querySelector<HTMLElement>('[role="menuitem"]')
         ?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [isOpen]);
+  }, [host, isOpen, panelRef]);
+
+  if (!host) {
+    return (
+      <div className="gyro-chat-switcher">
+        <Menu.Root open={isOpen} onOpenChange={setIsOpen}>
+          <Menu.Trigger
+            render={<IconButton label="Recent chats" variant="chrome" size="xs" className="gyro-chat-switcher-trigger" ref={triggerRef} />}
+            title="Recent chats"
+          >
+            <ChatSwitcherIcon aria-hidden="true" size={15} />
+          </Menu.Trigger>
+          <Menu.Content aria-label="Chats" minWidth={220}>
+            <Menu.Item icon={<Plus size={13} />} onClick={chatSwitcher.onNewChat}>New chat</Menu.Item>
+            {chatSwitcher.chats.length ? (
+              <Menu.Group>
+                <Menu.GroupLabel>Recent</Menu.GroupLabel>
+                {chatSwitcher.chats.map((chat) => (
+                  <Menu.Item
+                    key={chat.id}
+                    aria-current={chat.id === chatSwitcher.activeChatId ? "page" : undefined}
+                    title={chat.title}
+                    icon={<MessageSquare size={13} />}
+                    shortcut={chat.meta}
+                    onClick={() => chatSwitcher.onSelect(chat.id)}
+                  >{chat.title}</Menu.Item>
+                ))}
+              </Menu.Group>
+            ) : <Menu.Item disabled>No other chats in this project</Menu.Item>}
+          </Menu.Content>
+        </Menu.Root>
+      </div>
+    );
+  }
 
   const close = () => setIsOpen(false);
   const menu =
@@ -912,59 +916,6 @@ function ChatSwitcher({
           </div>
         </div>
       </div>
-    ) : isOpen ? (
-      <div
-        className="gyro-chat-switcher-menu"
-        id={menuId}
-        ref={panelRef}
-        role="menu"
-      >
-        <button
-          className="gyro-chat-switcher-item is-action"
-          onClick={() => {
-            close();
-            chatSwitcher.onNewChat();
-          }}
-          role="menuitem"
-          type="button"
-        >
-          <Plus size={13} />
-          New chat
-        </button>
-        {chatSwitcher.chats.length > 0 ? (
-          <>
-            <span className="gyro-chat-switcher-label">Recent</span>
-            {chatSwitcher.chats.map((chat) => (
-              <button
-                aria-current={
-                  chat.id === chatSwitcher.activeChatId ? "true" : undefined
-                }
-                className={
-                  chat.id === chatSwitcher.activeChatId
-                    ? "gyro-chat-switcher-item is-active"
-                    : "gyro-chat-switcher-item"
-                }
-                key={chat.id}
-                onClick={() => {
-                  close();
-                  chatSwitcher.onSelect(chat.id);
-                }}
-                role="menuitem"
-                title={chat.title}
-                type="button"
-              >
-                <MessageSquare size={13} />
-                <span>{chat.title}</span>
-                {chat.meta ? <small>{chat.meta}</small> : null}
-              </button>
-            ))}
-          </>
-        ) : (
-          <div className="gyro-chat-switcher-empty">
-            No other chats in this project
-          </div>
-        )}
-      </div>
     ) : null;
 
   return (
@@ -980,7 +931,7 @@ function ChatSwitcher({
         title="Recent chats"
         type="button"
       >
-        <ChatSwitcherIcon />
+        <ChatSwitcherIcon aria-hidden="true" size={15} />
       </button>
       <SurfacePresence portal={host} descendants>{menu}</SurfacePresence>
     </div>
@@ -1722,8 +1673,10 @@ function WorkspaceActivityRail({
         ? `${view.label} — ${badgeDescription}`
         : view.label;
     return (
-      <button
-        aria-label={railLabel}
+      <IconButton
+        label={railLabel}
+        variant="chrome"
+        size="sm"
         aria-pressed={isActive && !isSidebarHidden}
         className={isActive && !isSidebarHidden ? "is-active" : ""}
         disabled={isDisabled}
@@ -1755,7 +1708,7 @@ function WorkspaceActivityRail({
             {activityBadgeLabel(badgeCount)}
           </span>
         ) : null}
-      </button>
+      </IconButton>
     );
   };
   const primaryViews = workspaceViewContainers.filter(
@@ -1879,7 +1832,8 @@ export function CliUpdateBanner({
       : cliUpdateNoticeHeadline(available);
 
   return (
-    <div
+    <ToastSurface
+      tone={isFailed ? "danger" : "info"}
       aria-busy={isBusy}
       aria-label={
         isFailed ? failureHeadline : cliUpdateNoticeMessage(available)
@@ -1894,7 +1848,7 @@ export function CliUpdateBanner({
         {isFailed ? (
           <TriangleAlert size={13} />
         ) : phase === "updating" ? (
-          <RefreshCw className="gyro-cli-update-banner-spinner" size={13} />
+          <Spinner decorative size="xs" />
         ) : (
           <Download size={13} />
         )}
@@ -1905,24 +1859,24 @@ export function CliUpdateBanner({
           <small>{failure.message.split("\n")[0]}</small>
         ) : null}
       </span>
-      <button
-        className="gyro-cli-update-banner-action"
+      <Button
+        size="xs"
         disabled={isBusy || !onUpdate}
         onClick={() => onUpdate?.()}
         type="button"
       >
         {actionLabel}
-      </button>
-      <button
-        aria-label="Dismiss CLI update notice"
-        className="gyro-cli-update-banner-dismiss"
+      </Button>
+      <IconButton
+        size="xs"
+        label="Dismiss CLI update notice"
         disabled={isBusy}
         onClick={() => onDismiss?.()}
         type="button"
       >
-        <X size={13} />
-      </button>
-    </div>
+        <X aria-hidden="true" size={13} />
+      </IconButton>
+    </ToastSurface>
   );
 }
 
@@ -1941,7 +1895,8 @@ function FailureNotice({
 }) {
   const [retrying, setRetrying] = useState(false);
   return (
-    <div
+    <ToastSurface
+      tone="danger"
       className="gyro-cli-update-banner gyro-failure-notice"
       data-phase="failed"
       role="alert"
@@ -1955,8 +1910,8 @@ function FailureNotice({
         {notification.detail ? <small>{notification.detail}</small> : null}
       </span>
       {onRetry ? (
-        <button
-          className="gyro-cli-update-banner-action"
+        <Button
+          size="xs"
           disabled={retrying}
           onClick={() => {
             setRetrying(true);
@@ -1965,17 +1920,17 @@ function FailureNotice({
           type="button"
         >
           {retrying ? "Retrying…" : "Retry"}
-        </button>
+        </Button>
       ) : null}
-      <button
-        aria-label={`Dismiss ${notification.title}`}
-        className="gyro-cli-update-banner-dismiss"
+      <IconButton
+        size="xs"
+        label={`Dismiss ${notification.title}`}
         onClick={() => onDismiss?.(notification.id)}
         type="button"
       >
-        <X size={13} />
-      </button>
-    </div>
+        <X aria-hidden="true" size={13} />
+      </IconButton>
+    </ToastSurface>
   );
 }
 
@@ -1989,7 +1944,8 @@ function ProviderReadinessBanner({
   onAction?: () => void;
 }) {
   return (
-    <div
+    <ToastSurface
+      tone="warning"
       aria-live="polite"
       className="gyro-cli-update-banner gyro-provider-readiness-banner"
       data-phase="blocked"
@@ -2002,16 +1958,16 @@ function ProviderReadinessBanner({
         <strong>{message}</strong>
       </span>
       {actionLabel ? (
-        <button
-          className="gyro-cli-update-banner-action"
+        <Button
+          size="xs"
           disabled={!onAction}
           onClick={() => onAction?.()}
           type="button"
         >
           {actionLabel}
-        </button>
+        </Button>
       ) : null}
-    </div>
+    </ToastSurface>
   );
 }
 
@@ -2346,10 +2302,6 @@ export function AppChrome({
   }, [noticeLane]);
   const [isWorkspacePreparationOpen, setIsWorkspacePreparationOpen] =
     useState(false);
-  const workspacePreparationRef = useOutsidePointerDismiss<HTMLDivElement>(
-    isWorkspacePreparationOpen,
-    () => setIsWorkspacePreparationOpen(false),
-  );
   const sidebarMinimumWidth = useCallback(
     () =>
       isIdeSurface && ide?.activeView === "ai"
@@ -2370,6 +2322,10 @@ export function AppChrome({
   const [isIdeSidebarCustomized, setIsIdeSidebarCustomized] = useState(false);
   const [isIdeSidebarResizing, setIsIdeSidebarResizing] = useState(false);
   const appShellRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const shell = appShellRef.current;
+    return shell ? observeGlassOverlays(shell) : undefined;
+  }, []);
   // The Sessions sidebar (every view but code, Settings included so the rail
   // never jumps when Settings opens) keeps its own saved width, apart from the
   // code view's, whose panels need other minimums.
@@ -2710,6 +2666,10 @@ export function AppChrome({
           ? "is-thread-layout"
           : ""
       } ${isIdeSurface ? "is-workspace-chrome-active" : ""} ${
+        activeDestination === "workspace" && activeWorkspaceLayout === "terminal-grid"
+          ? "is-terminal-grid-layout"
+          : ""
+      } ${
         isSidebarHidden ? "is-sidebar-hidden" : ""
       } ${isIdeSidebarResizing ? "is-ide-sidebar-resizing" : ""} ${
         isChatSidebarResizable && chatSidebarResize.isResizing
@@ -2737,7 +2697,7 @@ export function AppChrome({
           title="Open navigation"
           type="button"
         >
-          <PanelLeft size={17} strokeWidth={1.6} />
+          <PanelLeftClosed size={17} strokeWidth={1.6} />
         </button>
         {!isIdeSurface && activeDestination === "workspace" ? (
           <button
@@ -2799,7 +2759,7 @@ export function AppChrome({
               title="Show sidebar"
               type="button"
             >
-              <PanelLeft size={16} strokeWidth={1.5} />
+              <PanelLeftClosed size={16} strokeWidth={1.5} />
             </button>
             {/* With the sidebar hidden, its New Session button goes with it;
                 starting a chat should not require bringing the sidebar back. */}
@@ -2824,7 +2784,6 @@ export function AppChrome({
             />
           ) : null}
           <WorkspacePreparationControl
-            controlRef={workspacePreparationRef}
             isOpen={isWorkspacePreparationOpen}
             onClose={() => setIsWorkspacePreparationOpen(false)}
             onRetry={onRetryWorkspacePreparation}
@@ -3170,7 +3129,6 @@ export function AppChrome({
                   />
                 )}
                 <WorkspacePreparationControl
-                  controlRef={workspacePreparationRef}
                   isOpen={isWorkspacePreparationOpen}
                   onClose={() => setIsWorkspacePreparationOpen(false)}
                   onRetry={onRetryWorkspacePreparation}
@@ -3222,14 +3180,6 @@ export function AppChrome({
         </aside>
       )}
       <main className="gyro-main" tabIndex={-1}>
-        {/* The curve where the content pane meets the sidebar; see the
-            "Sidebar seam" block in styles.css. Decorative only. */}
-        {!isSidebarHidden ? (
-          <>
-            <span aria-hidden="true" className="gyro-seam-corner is-top" />
-            <span aria-hidden="true" className="gyro-seam-corner is-bottom" />
-          </>
-        ) : null}
         {failureNotices.length > 0 ||
         (!remoteActive &&
           activeDestination !== "settings" &&
@@ -3311,24 +3261,6 @@ const workspacePreparationStages = [
   { id: "tests", label: "Discover tests" },
 ] as const;
 
-function clampWorkspacePreparationPopover(popover: HTMLElement) {
-  popover.style.transform = "";
-  const margin = 8;
-  const rect = popover.getBoundingClientRect();
-  let dx = 0;
-  let dy = 0;
-  if (rect.left < margin) dx = margin - rect.left;
-  if (rect.right + dx > window.innerWidth - margin) {
-    dx -= rect.right + dx - (window.innerWidth - margin);
-  }
-  if (rect.top < margin) dy = margin - rect.top;
-  if (rect.bottom + dy > window.innerHeight - margin) {
-    dy -= rect.bottom + dy - (window.innerHeight - margin);
-  }
-  popover.style.transform =
-    dx || dy ? `translate(${Math.round(dx)}px, ${Math.round(dy)}px)` : "";
-}
-
 export function WorkspacePreparationControl({
   progress,
   isOpen,
@@ -3342,9 +3274,8 @@ export function WorkspacePreparationControl({
   onToggle: () => void;
   onClose: () => void;
   onRetry?: () => void;
-  controlRef: RefObject<HTMLDivElement | null>;
+  controlRef?: RefObject<HTMLDivElement>;
 }) {
-  const popoverRef = useRef<HTMLElement | null>(null);
   const percent = progress
     ? Math.round(
         (Math.min(progress.completedSteps, progress.totalSteps) /
@@ -3352,19 +3283,6 @@ export function WorkspacePreparationControl({
           100,
       )
     : 0;
-
-  useLayoutEffect(() => {
-    if (!isOpen || !progress) return;
-    const popover = popoverRef.current;
-    if (!popover) return;
-    const place = () => clampWorkspacePreparationPopover(popover);
-    place();
-    window.addEventListener("resize", place);
-    return () => {
-      window.removeEventListener("resize", place);
-      popover.style.transform = "";
-    };
-  }, [isOpen, percent, progress, progress?.message, progress?.status]);
 
   if (!progress) return null;
   const failedPhases = new Set(progress.errors.map((error) => error.phase));
@@ -3376,14 +3294,12 @@ export function WorkspacePreparationControl({
   );
 
   return (
-    <div className="gyro-workspace-preparation" ref={controlRef as never}>
-      <button
-        aria-expanded={isOpen}
-        aria-haspopup="dialog"
+    <div className="gyro-workspace-preparation" ref={controlRef}>
+      <Popover.Root open={isOpen} onOpenChange={(open) => open ? onToggle() : onClose()}>
+      <Popover.Trigger
         aria-label={`${message}, ${completionLabel}`}
         className="gyro-workspace-preparation-button"
         data-status={progress.status}
-        onClick={onToggle}
         title={`${message} · ${completionLabel}`}
         type="button"
       >
@@ -3402,14 +3318,14 @@ export function WorkspacePreparationControl({
         <span>
           {progress.status === "preparing" ? `${percent}%` : preparationStatusLabel(progress)}
         </span>
-      </button>
-      <SurfacePresence>{isOpen ? (
-        <section
+      </Popover.Trigger>
+        <Popover.Content
           aria-label="Workspace preparation details"
           className="gyro-workspace-preparation-popover"
           data-status={progress.status}
-          ref={popoverRef as never}
-          role="dialog"
+          align="start"
+          side="top"
+          sideOffset={8}
         >
           <header>
             <div>
@@ -3418,13 +3334,9 @@ export function WorkspacePreparationControl({
                 {workspaceName(progress.workspacePath)} · {completionLabel}
               </span>
             </div>
-            <button
-              aria-label="Close preparation details"
-              onClick={onClose}
-              type="button"
-            >
-              <X size={13} />
-            </button>
+            <Popover.Close render={<IconButton label="Close preparation details" size="xs" variant="chrome" />}>
+              <X aria-hidden="true" size={13} />
+            </Popover.Close>
           </header>
           <div
             aria-label="Workspace preparation progress"
@@ -3475,18 +3387,18 @@ export function WorkspacePreparationControl({
             <p role="status">{progress.errors.map((error) => error.message).join(" · ")}</p>
           ) : null}
           {progress.status === "degraded" || progress.status === "failed" ? (
-            <button
-              className="gyro-primary-button"
+            <Button
+              size="sm"
               onClick={onRetry}
               disabled={progress.gitRetrying}
               type="button"
             >
               <RefreshCw size={12} />
               {progress.gitRetrying ? "Checking Git…" : hasOnlyGitWarnings(progress) ? "Retry Git" : "Retry preparation"}
-            </button>
+            </Button>
           ) : null}
-        </section>
-      ) : null}</SurfacePresence>
+        </Popover.Content>
+      </Popover.Root>
     </div>
   );
 }
@@ -4870,6 +4782,8 @@ type ChatSurfaceProps = {
    * split keeps the image that landed on it.
    */
   paneKey?: string;
+  sourceDiffTarget?: { turnId: string; draft: boolean };
+  onReturnToSourceDiff?: () => void;
   sessionTitle?: string;
   sessionSummary?: string;
   sessionModel?: {
@@ -5060,7 +4974,7 @@ type ChatSurfaceProps = {
   onCouncilAction?: (
     action: CouncilActionRequest,
   ) => void | Promise<string | void>;
-  onSend: (message: string, context?: { secondOpinion?: ComposerReviewer }) => void;
+  onSend: (message: string, context?: { mode?: "plan"; secondOpinion?: ComposerReviewer }) => void;
   /** Share completed question requests with navigation before send finishes. */
   questionState?: {
     resolvedId?: string;
@@ -5168,49 +5082,21 @@ function ChatStartWorkspaceLabel({
   name: string;
   path: string;
 }) {
-  const tooltipId = useId();
-  const [isOpen, setIsOpen] = useState(false);
-  const [isPinned, setIsPinned] = useState(false);
-  const dismiss = () => {
-    setIsOpen(false);
-    setIsPinned(false);
-  };
-  const ref = useOutsidePointerDismiss<HTMLSpanElement>(isOpen, dismiss);
-
   return (
-    <span
-      className="gyro-chat-start-workspace"
-      ref={ref}
-      onMouseEnter={() => setIsOpen(true)}
-      onMouseLeave={() => {
-        if (!isPinned) setIsOpen(false);
-      }}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) dismiss();
-      }}
-    >
-      <button
-        type="button"
-        className="gyro-chat-start-workspace-name"
-        aria-describedby={isOpen ? tooltipId : undefined}
-        aria-expanded={isOpen}
-        onClick={() => {
-          setIsPinned(!isPinned);
-          setIsOpen(!isPinned);
-        }}
-        onFocus={() => setIsOpen(true)}
-      >
-        {name}
-      </button>
-      {isOpen ? (
-        <span
+    <span className="gyro-chat-start-workspace">
+      <Popover.Root>
+        <Popover.Trigger openOnHover className="gyro-chat-start-workspace-name">
+          {name}
+        </Popover.Trigger>
+        <Popover.Content
           className="gyro-chat-start-workspace-popup"
-          role="tooltip"
-          id={tooltipId}
+          aria-label="Project path"
+          align="end"
+          initialFocus={false}
         >
-          <span>{path}</span>
-        </span>
-      ) : null}
+          {path}
+        </Popover.Content>
+      </Popover.Root>
     </span>
   );
 }
@@ -5220,6 +5106,8 @@ export function ChatSurface({
   draft = "",
   draftResetToken = 0,
   paneKey = NEW_CHAT_DRAFT_KEY,
+  sourceDiffTarget,
+  onReturnToSourceDiff,
   sessionTitle,
   sessionSummary,
   sessionModel,
@@ -5520,9 +5408,19 @@ export function ChatSurface({
       return;
     }
     const reviewer = inlineDraft.reviewCommand?.reviewer;
-    if (reviewer) onSend(localDraft.trimEnd(), { secondOpinion: reviewer });
-    else onSend(localDraft);
+    const plan = (!chatMode || chatMode === "normal") && inlineDraft.commands.some(
+      ({ start, end }) => inlineDraft.display.slice(start, end) === "/plan",
+    );
+    if (plan || reviewer) {
+      onSend(localDraft.trimEnd(), {
+        mode: plan ? "plan" : undefined,
+        secondOpinion: reviewer,
+      });
+    } else {
+      onSend(localDraft);
+    }
   }, [
+    chatMode,
     closeGoalComposer,
     composerBlockedReason,
     inlineDraft.reviewCommand,
@@ -5858,6 +5756,7 @@ export function ChatSurface({
     isTranscriptAwayFromBottom,
     requestEarlierMessages,
     scrollTranscriptToBottom,
+    revealTranscriptTurn,
     onTranscriptScroll,
     onTranscriptWheel,
     onTranscriptTouchStart,
@@ -5871,6 +5770,25 @@ export function ChatSurface({
     onLoadEarlier,
     liveChangesTarget,
   });
+  const revealedSourceDiff = useRef<typeof sourceDiffTarget>();
+  useEffect(() => {
+    if (!sourceDiffTarget || revealedSourceDiff.current === sourceDiffTarget)
+      return;
+    const frame = requestAnimationFrame(() => {
+      if (!revealTranscriptTurn(sourceDiffTarget.turnId)) return;
+      revealedSourceDiff.current = sourceDiffTarget;
+      if (sourceDiffTarget.draft) {
+        transcriptRef.current
+          ?.closest(".gyro-chat-thread-canvas")
+          ?.querySelector<HTMLTextAreaElement>(
+            'textarea[data-tour="composer.input"]',
+          )
+          ?.focus({ preventScroll: true });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [sourceDiffTarget, transcriptEvents, transcriptRef, revealTranscriptTurn]);
+
   const contextModel = useMemo(() => {
     // Prefer the chat's own model over the global picker state so split panes
     // keep independent context windows when each thread uses a different model.
@@ -5986,6 +5904,12 @@ export function ChatSurface({
   const activeStatusEvent = activeTurnId
     ? turns.findLast((turn) => turn.id === activeTurnId)?.statusEvent
     : undefined;
+  const isPlanning = activeStatusEvent && eventPayloadRecord(activeStatusEvent)?.chatMode === "plan"
+    || Boolean(activeTurnId && transcriptEvents.some(
+      (event) => event.kind === "chat-mode-changed" &&
+        turnKeyFromEvent(event) === activeTurnId &&
+        eventPayloadRecord(event)?.mode === "plan",
+    ));
   const activeProviderStatus = activeStatusEvent
     ? providerStatusFromEvent(activeStatusEvent)
     : undefined;
@@ -6743,8 +6667,15 @@ export function ChatSurface({
         onDragOverCapture={handleMediaDragOver}
         onDropCapture={handleMediaDrop}
       >
-        {isTiled ? (
-          <div className="gyro-chat-thread-topbar">
+        <div
+          className={
+            isTiled
+              ? "gyro-chat-thread-topbar"
+              : "gyro-chat-thread-topbar gyro-chat-empty-drag-region"
+          }
+          data-tauri-drag-region={isTiled ? undefined : ""}
+        >
+          {isTiled ? (
             <div className="gyro-chat-thread-identity">
               {chatSwitcher ? (
                 <ChatSwitcher chatSwitcher={chatSwitcher} />
@@ -6758,26 +6689,22 @@ export function ChatSurface({
                 New chat
               </strong>
             </div>
+          ) : null}
+          {isTiled || (!isCompanionPanel && onReopenCompanionDock) ? (
             <div className="gyro-thread-topbar-actions">
               <ChatSurfaceControls
-                onSaveWorkflow={saveWorkflowFromChat}
-                isDockOpen={false}
+                isDockOpen={isCompanionPanel}
                 isPlanOpen={false}
                 isToolPanelOpen={false}
                 onCloseChat={onCloseChat}
+                onToggleDock={onReopenCompanionDock}
                 planItemCount={0}
+                showClose={isTiled}
                 showOverflow={false}
-                showPanel={false}
               />
             </div>
-          </div>
-        ) : (
-          <div
-            aria-label="New chat"
-            className="gyro-chat-empty-drag-region"
-            data-tauri-drag-region
-          />
-        )}
+          ) : null}
+        </div>
         {chatSwitcher && !isTiled ? (
           <div className="gyro-chat-start-switcher">
             <ChatSwitcher chatSwitcher={chatSwitcher} />
@@ -6790,21 +6717,7 @@ export function ChatSurface({
           style={{ width: "min(860px, 100%)" }}
         >
           <div className="gyro-chat-start-intro">
-            {
-              <span className="gyro-brand-logo">
-                <img
-                  alt="Gyro"
-                  className="is-light"
-                  src={gyroLogoTransparentDark}
-                />
-                <img
-                  alt=""
-                  aria-hidden="true"
-                  className="is-dark"
-                  src={gyroLogoTransparentLight}
-                />
-              </span>
-            }
+            <span className="gyro-brand-logo gyro-brand-mark" role="img" aria-label="Gyro" />
             <h1>
               {startProjectLabel ? (
                 <>
@@ -6852,6 +6765,8 @@ export function ChatSurface({
             overlay={councilScopeDock}
             attachments={attachments}
             chatMode={chatMode}
+            isPlanning={isPlanning}
+            supportsInlinePlan={!composerAnswerRef.current}
             config={config}
             draftKey={paneKey}
             constrainToParent={Boolean(
@@ -6945,6 +6860,17 @@ export function ChatSurface({
     >
       <div className="gyro-chat-thread-topbar">
         <div className="gyro-chat-thread-identity">
+          {onReturnToSourceDiff ? (
+            <button
+              className="gyro-chat-surface-button"
+              type="button"
+              title="Back to diff"
+              aria-label="Back to diff"
+              onClick={onReturnToSourceDiff}
+            >
+              <ArrowLeft size={15} aria-hidden="true" />
+            </button>
+          ) : null}
           {chatSwitcher ? <ChatSwitcher chatSwitcher={chatSwitcher} /> : null}
           <Folder
             aria-hidden="true"
@@ -7144,6 +7070,8 @@ export function ChatSurface({
             }
             attachments={attachments}
             chatMode={chatMode}
+            isPlanning={isPlanning}
+            supportsInlinePlan={!composerAnswerRef.current}
             config={config}
             draftKey={paneKey}
             constrainToParent={Boolean(
@@ -7323,12 +7251,6 @@ function ChatMessageQueue({
 }) {
   const [menuMessageId, setMenuMessageId] = useState<string>();
   const [isExpanded, setIsExpanded] = useState(false);
-  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useOutsidePointerDismiss<HTMLDivElement>(
-    menuMessageId !== undefined,
-    () => setMenuMessageId(undefined),
-    menuTriggerRef,
-  );
   const foldAt = 2;
   const canFold = messages.length > foldAt + 1;
   const shown = canFold && !isExpanded ? messages.slice(0, foldAt) : messages;
@@ -7383,55 +7305,19 @@ function ChatMessageQueue({
                 )}
                 {message.hasFailed ? "Retry" : "Steer"}
               </button>
-              <button
-                aria-expanded={menuMessageId === message.id}
-                aria-haspopup="menu"
-                aria-label="Queued message options"
-                disabled={message.isDispatching}
-                onClick={() =>
-                  setMenuMessageId((current) =>
-                    current === message.id ? undefined : message.id,
-                  )
-                }
-                ref={menuMessageId === message.id ? menuTriggerRef : undefined}
-                title={message.isDispatching ? "Message is sending" : "More"}
-                type="button"
-              >
-                <MoreHorizontal size={15} />
-              </button>
+              <Menu.Root open={menuMessageId === message.id} onOpenChange={(open) =>
+                setMenuMessageId((current) => open ? message.id : current === message.id ? undefined : current)
+              }>
+                <Menu.Trigger render={<IconButton label="Queued message options" size="xs" variant="chrome" />}
+                  disabled={message.isDispatching} title={message.isDispatching ? "Message is sending" : "More"}>
+                  <MoreHorizontal aria-hidden="true" size={15} />
+                </Menu.Trigger>
+                <Menu.Content aria-label={`Options for queue position ${index + 1}`} side="top" align="end">
+                  <Menu.Item icon={<Edit3 size={13} />} onClick={() => onEditMessage?.(message.id)}>Edit</Menu.Item>
+                  <Menu.Item icon={<Trash2 size={13} />} tone="danger" onClick={() => onRemoveMessage?.(message.id)}>Delete</Menu.Item>
+                </Menu.Content>
+              </Menu.Root>
             </div>
-            <SurfacePresence>{menuMessageId === message.id ? (
-              <div
-                aria-label={`Options for queue position ${index + 1}`}
-                className="gyro-chat-message-queue-menu is-up"
-                ref={menuRef}
-                role="menu"
-              >
-                <button
-                  onClick={() => {
-                    setMenuMessageId(undefined);
-                    onEditMessage?.(message.id);
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  <Edit3 size={13} />
-                  <span>Edit</span>
-                </button>
-                <button
-                  className="is-danger"
-                  onClick={() => {
-                    setMenuMessageId(undefined);
-                    onRemoveMessage?.(message.id);
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  <Trash2 size={13} />
-                  <span>Delete</span>
-                </button>
-              </div>
-            ) : null}</SurfacePresence>
           </article>
         ))}
         {canFold ? (
@@ -7485,7 +7371,6 @@ function ChatSurfaceControls({
   showEnvironment = false,
   showEnvironmentInOverflow = true,
   showOverflow = true,
-  showPanel = true,
   showToolPanel = false,
   showToolPanelInOverflow = true,
 }: {
@@ -7507,15 +7392,10 @@ function ChatSurfaceControls({
   showEnvironment?: boolean;
   showEnvironmentInOverflow?: boolean;
   showOverflow?: boolean;
-  showPanel?: boolean;
   showToolPanel?: boolean;
   showToolPanelInOverflow?: boolean;
 }) {
-  const [openMenu, setOpenMenu] = useState<"overflow">();
-  const menuRef = useOutsidePointerDismiss<HTMLDivElement>(
-    openMenu !== undefined,
-    () => setOpenMenu(undefined),
-  );
+  const overflowAnchor = useRef<HTMLDivElement>(null);
   // Peripheral awareness: the surface holding the model's latest work gets a
   // dot, so it can be found without anything moving on its own.
   const drawerHasModelActivity = Boolean(
@@ -7532,15 +7412,12 @@ function ChatSurfaceControls({
     (showEnvironmentInOverflow && !isDockOpen && onToggleEnvironmentRail),
   );
 
-  useEffect(() => {
-    if (!showOverflow || !hasOverflowActions) setOpenMenu(undefined);
-  }, [showOverflow, hasOverflowActions]);
+  const BottomDrawerIcon = isToolPanelOpen ? PanelBottom : PanelBottomClosed;
 
   return (
     <div
       className="gyro-chat-surface-controls"
       aria-label="Chat surfaces"
-      ref={menuRef}
     >
       {showEnvironment && onToggleEnvironmentRail ? (
         <button
@@ -7573,152 +7450,80 @@ function ChatSurfaceControls({
           title={isToolPanelOpen ? "Hide bottom drawer" : "Show bottom drawer"}
           type="button"
         >
-          <PanelBottom size={16} />
+          <BottomDrawerIcon size={16} aria-hidden="true" />
         </button>
       ) : null}
-      {showPanel && !isDockOpen && onToggleDock ? (
+      {!isDockOpen && onToggleDock ? (
         <button
-          aria-label={isDockOpen ? "Hide companion" : "Show companion"}
-          aria-pressed={isDockOpen}
+          aria-label="Show companion"
+          aria-expanded={false}
           data-tour="panel.launcher"
-          className={["gyro-chat-surface-button", isDockOpen ? "is-active" : ""]
-            .filter(Boolean)
-            .join(" ")}
+          className="gyro-chat-surface-button"
           onClick={onToggleDock}
-          title={isDockOpen ? "Hide companion" : "Show companion"}
+          title="Show companion"
           type="button"
         >
-          <PanelRight size={16} />
+          <PanelRightClosed size={16} />
         </button>
       ) : null}
       {showOverflow && hasOverflowActions ? (
-        <div className="gyro-chat-surface-menu-anchor">
-          <button
-            aria-expanded={openMenu === "overflow"}
-            aria-haspopup="menu"
-            aria-label="More chat surfaces"
-            className={[
-              "gyro-chat-surface-button",
-              drawerHasModelActivity ? "has-model-activity" : "",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            onClick={() =>
-              setOpenMenu((current) =>
-                current === "overflow" ? undefined : "overflow",
-              )
-            }
-            title="More"
-            type="button"
-          >
-            <MoreHorizontal size={16} />
-            {drawerHasModelActivity ? (
-              <span aria-hidden="true" className="gyro-model-activity-dot" />
-            ) : null}
-          </button>
-          <SurfacePresence>{openMenu === "overflow" ? (
-            <div className="gyro-chat-companion-menu is-header" role="menu">
-              {onSaveWorkflow?<button role="menuitem" type="button" onClick={()=>{setOpenMenu(undefined);onSaveWorkflow();}}><ScrollText size={14}/><span>Save as workflow</span></button>:null}
-              {showPlanInOverflow ? (
-                <button
-                  aria-label={`Plan checklist, ${planCompletedCount} of ${planItemCount} steps complete`}
-                  aria-pressed={isPlanOpen}
-                  onClick={() => {
-                    setOpenMenu(undefined);
-                    onTogglePlanPanel?.();
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  <ListChecks size={14} />
-                  <span>Plan</span>
-                  <small>
-                    {planCompletedCount}/{planItemCount}
-                  </small>
-                </button>
-              ) : null}
-              {compactOverflowActions ? (
-                <>
-                  {onToggleEnvironmentRail ? (
-                    <button
-                      aria-pressed={isEnvironmentOpen === true}
-                      className="gyro-chat-header-compact-action"
-                      onClick={() => {
-                        setOpenMenu(undefined);
-                        onToggleEnvironmentRail();
-                      }}
-                      role="menuitem"
-                      type="button"
-                    >
-                      <SlidersHorizontal size={14} />
-                      <span>Environment</span>
-                    </button>
-                  ) : null}
-                  {!isDockOpen && onToggleToolPanel ? (
-                    <button
-                      aria-pressed={isToolPanelOpen}
-                      className="gyro-chat-header-compact-action"
-                      onClick={() => {
-                        setOpenMenu(undefined);
-                        onToggleToolPanel();
-                      }}
-                      role="menuitem"
-                      type="button"
-                    >
-                      <PanelBottom size={14} />
-                      <span>Bottom drawer</span>
-                    </button>
-                  ) : null}
-                  {!isDockOpen && onToggleDock ? (
-                    <button
-                      className="gyro-chat-header-compact-action"
-                      onClick={() => {
-                        setOpenMenu(undefined);
-                        onToggleDock();
-                      }}
-                      role="menuitem"
-                      type="button"
-                    >
-                      <PanelRight size={14} />
-                      <span>Show companion</span>
-                    </button>
-                  ) : null}
-                </>
-              ) : null}
-              {showToolPanelInOverflow && onToggleToolPanel ? (
-                <button
-                  aria-pressed={isToolPanelOpen}
-                  onClick={() => {
-                    setOpenMenu(undefined);
-                    onToggleToolPanel?.();
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  <PanelBottom size={14} />
-                  <span>Bottom drawer</span>
-                  {drawerHasModelActivity ? (
-                    <small>{modelFocus?.paneTab}</small>
-                  ) : null}
-                </button>
-              ) : null}
-              {showEnvironmentInOverflow &&
-              !isDockOpen &&
-              onToggleEnvironmentRail ? (
-                <button
-                  onClick={() => {
-                    setOpenMenu(undefined);
-                    onToggleEnvironmentRail();
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  <HardDrive size={14} />
-                  <span>Environment</span>
-                </button>
-              ) : null}
-            </div>
-          ) : null}</SurfacePresence>
+        <div className="gyro-chat-surface-menu-anchor" ref={overflowAnchor}>
+          <Menu.Root>
+            <Menu.Trigger
+              render={<IconButton
+                label="More chat surfaces"
+                className={`gyro-chat-surface-button${drawerHasModelActivity ? " has-model-activity" : ""}`}
+                variant="chrome"
+                size="sm"
+              />}
+              title="More"
+            >
+              <MoreHorizontal aria-hidden="true" size={16} />
+              {drawerHasModelActivity ? <span aria-hidden="true" className="gyro-model-activity-dot" /> : null}
+            </Menu.Trigger>
+            <Menu.Content
+              align="end"
+              aria-label="Chat surfaces"
+              className="gyro-chat-overflow-menu"
+              portalContainer={overflowAnchor}
+            >
+              {onSaveWorkflow ? <Menu.Item icon={<ScrollText size={14} />} onClick={onSaveWorkflow}>Save as workflow</Menu.Item> : null}
+              {showPlanInOverflow ? <Menu.CheckboxItem
+                aria-label={`Plan checklist, ${planCompletedCount} of ${planItemCount} steps complete`}
+                checked={isPlanOpen}
+                shortcut={`${planCompletedCount}/${planItemCount}`}
+                closeOnClick
+                onCheckedChange={() => onTogglePlanPanel?.()}
+              >Plan</Menu.CheckboxItem> : null}
+              {compactOverflowActions && onToggleEnvironmentRail ? <Menu.CheckboxItem
+                checked={isEnvironmentOpen === true}
+                className="gyro-chat-header-compact-action"
+                closeOnClick
+                onCheckedChange={onToggleEnvironmentRail}
+              >Environment</Menu.CheckboxItem> : null}
+              {compactOverflowActions && !isDockOpen && onToggleToolPanel ? <Menu.CheckboxItem
+                checked={isToolPanelOpen}
+                className="gyro-chat-header-compact-action"
+                closeOnClick
+                onCheckedChange={onToggleToolPanel}
+              >Bottom drawer</Menu.CheckboxItem> : null}
+              {compactOverflowActions && !isDockOpen && onToggleDock ? <Menu.Item
+                className="gyro-chat-header-compact-action"
+                icon={<PanelRightClosed size={14} />}
+                onClick={onToggleDock}
+              >Show companion</Menu.Item> : null}
+              {showToolPanelInOverflow && onToggleToolPanel ? <Menu.CheckboxItem
+                checked={isToolPanelOpen}
+                closeOnClick
+                onCheckedChange={onToggleToolPanel}
+                shortcut={drawerHasModelActivity ? modelFocus?.paneTab : undefined}
+              >Bottom drawer</Menu.CheckboxItem> : null}
+              {showEnvironmentInOverflow && !isDockOpen && onToggleEnvironmentRail ? <Menu.Item
+                icon={<HardDrive size={14} />}
+                onClick={onToggleEnvironmentRail}
+              >Environment</Menu.Item> : null}
+            </Menu.Content>
+          </Menu.Root>
         </div>
       ) : null}
       {showClose && onCloseChat ? (
@@ -8825,7 +8630,11 @@ function ChatCompanionDock({
               title="Toggle bottom drawer"
               type="button"
             >
-              <PanelBottom size={14} />
+              {isToolPanelOpen ? (
+                <PanelBottom size={14} aria-hidden="true" />
+              ) : (
+                <PanelBottomClosed size={14} aria-hidden="true" />
+              )}
             </button>
           ) : null}
           {onShowEnvironment ? (
@@ -9439,7 +9248,7 @@ function ChatContextSection({
             {
               action: "set-workspace-mode:local",
               active: workspaceMode === "local",
-              icon: Laptop,
+              icon: FolderOpen,
               kind: "workspace-mode",
               label: workspaceModePopoverLabel("local"),
               tooltip: workspaceModeTechnicalHint("local"),
@@ -9486,7 +9295,7 @@ function ChatContextSection({
             ],
             [
               "workspace-mode",
-              Laptop,
+              FolderOpen,
               modeChipLabel,
               "Workspace mode",
               modeChipLabel,
@@ -12099,7 +11908,11 @@ export function IdeStatusBar({
             title={isPanelOpen ? "Hide panel (⌘J)" : "Show panel (⌘J)"}
             type="button"
           >
-            <PanelBottom size={13} aria-hidden="true" />
+            {isPanelOpen ? (
+              <PanelBottom size={13} aria-hidden="true" />
+            ) : (
+              <PanelBottomClosed size={13} aria-hidden="true" />
+            )}
           </button>
         ) : null}
       </div>
@@ -12397,7 +12210,7 @@ function EditorGroupPane({
             title="Split editor"
             type="button"
           >
-            <PanelRight size={14} />
+            <PanelRightClosed size={14} aria-hidden="true" />
           </button>
           <button
             aria-label="Save file"
@@ -12453,7 +12266,7 @@ function EditorGroupPane({
                     runMenuAction(() => onSplitEditorGroup?.("right"))
                   }
                 >
-                  <PanelRight size={14} /> Split right
+                  <PanelRightClosed size={14} /> Split right
                 </button>
                 <button
                   role="menuitem"
@@ -12462,7 +12275,7 @@ function EditorGroupPane({
                     runMenuAction(() => onSplitEditorGroup?.("down"))
                   }
                 >
-                  <PanelBottom size={14} /> Split down
+                  <PanelBottomClosed size={14} /> Split down
                 </button>
               </>
             ) : (
@@ -12842,9 +12655,6 @@ function TerminalDiffControl({
   sourceControl?: SourceControlState;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const menuRef = useOutsidePointerDismiss<HTMLDivElement>(isOpen, () =>
-    setIsOpen(false),
-  );
   if (!isLoading && !sourceControl?.available) {
     return null;
   }
@@ -12860,10 +12670,9 @@ function TerminalDiffControl({
     sourceControl.deletions === 0;
   const files = sourceControl?.files.slice(0, 6) ?? [];
   return (
-    <div className="gyro-terminal-diff-control" ref={menuRef}>
-      <button
-        aria-expanded={isOpen}
-        aria-haspopup="dialog"
+    <div className="gyro-terminal-diff-control">
+      <Popover.Root open={isOpen && Boolean(sourceControl)} onOpenChange={setIsOpen}>
+      <Popover.Trigger disabled={!sourceControl}
         aria-label={
           (isLoading && !sourceControl) || countsLoading
             ? "Checking Git changes"
@@ -12880,7 +12689,6 @@ function TerminalDiffControl({
               ? "is-clean"
               : "has-changes"
         }
-        onClick={() => setIsOpen((current) => !current)}
         title={sourceControl?.branch ?? "Git changes"}
         type="button"
       >
@@ -12902,12 +12710,11 @@ function TerminalDiffControl({
             </>
           )}
         </span>
-      </button>
-      <SurfacePresence>{isOpen && sourceControl ? (
-        <section
+      </Popover.Trigger>
+      {sourceControl ? (
+        <Popover.Content align="end" sideOffset={7}
           aria-label="Terminal workspace changes"
           className="gyro-terminal-diff-popover"
-          role="dialog"
         >
           <header>
             <div>
@@ -12981,8 +12788,9 @@ function TerminalDiffControl({
               <ArrowRight size={13} />
             </button>
           </footer>
-        </section>
-      ) : null}</SurfacePresence>
+        </Popover.Content>
+      ) : null}
+      </Popover.Root>
     </div>
   );
 }
@@ -13057,131 +12865,42 @@ function TerminalActionsMenu({
   onMoveToEnd?: (paneId: string) => void;
   onSetLayout?: (paneId: string, layout: TerminalPaneLayout) => void;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
-  const menuRef = useOutsidePointerDismiss<HTMLDivElement>(isOpen, () =>
-    setIsOpen(false),
-  );
-
-  const runAction = (action: () => void) => {
-    action();
-    setIsOpen(false);
-  };
-
   return (
-    <div className="gyro-terminal-actions" ref={menuRef}>
-      <button
-        aria-expanded={isOpen}
-        aria-haspopup="menu"
-        aria-label="More terminal actions"
-        disabled={!paneId}
-        onClick={(event) => {
-          const rect = event.currentTarget.getBoundingClientRect();
-          const above = rect.top > window.innerHeight - rect.bottom;
-          setMenuStyle({
-            position: "fixed",
-            right: Math.max(8, window.innerWidth - rect.right),
-            top: above ? "auto" : rect.bottom + 6,
-            bottom: above ? window.innerHeight - rect.top + 6 : "auto",
-            maxHeight: Math.max(
-              80,
-              (above ? rect.top : window.innerHeight - rect.bottom) - 14,
-            ),
-          });
-          setIsOpen((current) => !current);
-        }}
-        title="Terminal actions"
-        type="button"
-      >
-        <MoreHorizontal size={15} />
-      </button>
-      <SurfacePresence>{isOpen && paneId ? (
-        <div
-          className="gyro-terminal-actions-menu"
-          role="menu"
-          style={menuStyle}
+    <div className="gyro-terminal-actions">
+      <Menu.Root>
+        <Menu.Trigger
+          render={<IconButton label="More terminal actions" size="sm" variant="chrome" />}
+          disabled={!paneId}
+          title="Terminal actions"
         >
-          {extraActions.map(({ label, icon: Icon, onClick, disabled }) => (
-            <button
-              key={label}
-              role="menuitem"
-              type="button"
-              disabled={disabled}
-              onClick={() => runAction(onClick)}
-            >
-              <Icon size={14} />
-              {label}
-            </button>
-          ))}
-          {extraActions.length ? (
-            <div className="gyro-terminal-actions-separator" role="separator" />
-          ) : null}
-          <button
-            onClick={() =>
-              runAction(() =>
-                onSetLayout?.(paneId, paneIsWide ? "compact" : "wide"),
-              )
-            }
-            role="menuitem"
-            type="button"
-          >
-            {paneIsWide ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-            {paneIsWide ? "Fit to grid" : "Expand row"}
-          </button>
-          <button
-            disabled={!canMoveToStart}
-            onClick={() => runAction(() => onMoveToStart?.(paneId))}
-            role="menuitem"
-            type="button"
-          >
-            <ArrowLeft size={14} />
-            Move first
-          </button>
-          <button
-            disabled={!canMoveToEnd}
-            onClick={() => runAction(() => onMoveToEnd?.(paneId))}
-            role="menuitem"
-            type="button"
-          >
-            <ArrowRight size={14} />
-            Move last
-          </button>
-          <div className="gyro-terminal-actions-separator" role="separator" />
-          <button
-            onClick={() => runAction(() => onRename?.(paneId))}
-            role="menuitem"
-            type="button"
-          >
-            <FileText size={14} />
-            Rename
-          </button>
-          <button
-            onClick={() => runAction(() => onRefresh?.())}
-            role="menuitem"
-            type="button"
-          >
-            <RefreshCw size={14} />
-            Refresh output
-          </button>
-          <button
-            onClick={() => runAction(() => onRestart?.(paneId))}
-            role="menuitem"
-            type="button"
-          >
-            <RefreshCw size={14} />
-            Restart
-          </button>
-          <button
-            className="is-danger"
-            onClick={() => runAction(() => onClose?.(paneId))}
-            role="menuitem"
-            type="button"
-          >
-            <X size={14} />
-            Close pane
-          </button>
-        </div>
-      ) : null}</SurfacePresence>
+          <MoreHorizontal aria-hidden="true" size={15} />
+        </Menu.Trigger>
+        {paneId ? (
+          <Menu.Content aria-label="Terminal actions" align="end" side="top" minWidth={180}>
+            {extraActions.map(({ label, icon: Icon, onClick, disabled }) => (
+              <Menu.Item key={label} disabled={disabled} icon={<Icon size={14} />} onClick={onClick}>
+                {label}
+              </Menu.Item>
+            ))}
+            {extraActions.length ? <Menu.Separator /> : null}
+            <Menu.Item
+              icon={paneIsWide ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              onClick={() => onSetLayout?.(paneId, paneIsWide ? "compact" : "wide")}
+            >{paneIsWide ? "Fit to grid" : "Expand row"}</Menu.Item>
+            <Menu.Item disabled={!canMoveToStart} icon={<ArrowLeft size={14} />} onClick={() => onMoveToStart?.(paneId)}>
+              Move first
+            </Menu.Item>
+            <Menu.Item disabled={!canMoveToEnd} icon={<ArrowRight size={14} />} onClick={() => onMoveToEnd?.(paneId)}>
+              Move last
+            </Menu.Item>
+            <Menu.Separator />
+            <Menu.Item icon={<FileText size={14} />} onClick={() => onRename?.(paneId)}>Rename</Menu.Item>
+            <Menu.Item icon={<RefreshCw size={14} />} onClick={onRefresh}>Refresh output</Menu.Item>
+            <Menu.Item icon={<RefreshCw size={14} />} onClick={() => onRestart?.(paneId)}>Restart</Menu.Item>
+            <Menu.Item icon={<X size={14} />} tone="danger" onClick={() => onClose?.(paneId)}>Close pane</Menu.Item>
+          </Menu.Content>
+        ) : null}
+      </Menu.Root>
     </div>
   );
 }
@@ -16795,6 +16514,18 @@ export function BrowserPreviewSurface(
       key={runtime.key}
       runtime={runtime}
       onHideWeb={() => props.onHostBoundsChange?.(null)}
+      onSendAnnotation={props.onScreenshot ? async (capture, region, comment) => {
+        const result = await props.onScreenshot?.("annotate-native-send", {
+          captureId: capture.screenshot.filename, comment,
+          region: {
+            x: region.x / capture.screenshot.width, y: region.y / capture.screenshot.height,
+            width: region.width / capture.screenshot.width, height: region.height / capture.screenshot.height,
+          },
+          nativeCapture: { targetTitle: capture.target.title, capturedAt: capture.screenshot.createdAt, region },
+        });
+        if (result && typeof result === "object" && result.sent) return {};
+        return { error: (result && typeof result === "object" && result.error) || "The app annotation was not sent." };
+      } : undefined}
     >
       <WebBrowserPreviewSurface {...props} />
     </AppPreviewPanel>
@@ -16845,6 +16576,7 @@ function WebBrowserPreviewSurface({
   onStopAgent?: () => void;
 }) {
   const runtimeMenu = useAppPreviewMenu();
+  const openApplePreviewSetup = useApplePreviewSetup();
   const preview =
     browserPreview ??
     ({
@@ -17294,6 +17026,16 @@ function WebBrowserPreviewSurface({
                 >
                   Search or enter a URL <ArrowUpRight size={13} aria-hidden="true" />
                 </button>
+                {openApplePreviewSetup && (
+                  <button
+                    className="gyro-browser-start-button"
+                    data-apple-preview-entry
+                    onClick={openApplePreviewSetup}
+                    type="button"
+                  >
+                    Set up Apple previews
+                  </button>
+                )}
               </div>
             ) : useNativeHost ? (
               <div
@@ -17775,7 +17517,7 @@ const legacyGlobalSearchActions: GlobalSearchAction[] = [
     destination: "workspace",
     layout: "terminal-grid",
     toolTab: "terminal",
-    icon: PanelRight,
+    icon: PanelRightClosed,
     shortcut: { mac: "⌘\\", other: "Ctrl \\" },
   },
   {
@@ -17917,6 +17659,7 @@ export function CommandPaletteOverlay({
   onSelectFile,
   symbols,
   onSelectSymbol,
+  additionalActions,
 }: {
   onClose: () => void;
   onSelectDestination: (destination: AppDestination) => void;
@@ -17940,17 +17683,17 @@ export function CommandPaletteOverlay({
   /** The active editor's symbols, listed when the query starts with `@`. */
   symbols?: DocumentSymbolsState;
   onSelectSymbol?: RevealDocumentSymbol;
+  additionalActions?: readonly GlobalSearchAction[];
 }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
-  const returnFocusRef = useRef<HTMLElement | null>(null);
   const optionRefs = useRef(new Map<string, HTMLButtonElement>());
   const platformShortcut = (shortcut?: GlobalSearchAction["shortcut"]) =>
     shortcut ? (isMacPlatform() ? shortcut.mac : shortcut.other) : undefined;
   const actionEntries = useMemo(
     () =>
-      globalSearchActions.map<GlobalSearchEntry>((action, index) => ({
+      [...globalSearchActions, ...(additionalActions ?? [])].map<GlobalSearchEntry>((action, index) => ({
         id: `action:${action.id}`,
         label: action.label,
         detail: action.meta,
@@ -17974,7 +17717,7 @@ export function CommandPaletteOverlay({
               ? "Trust this workspace to run commands"
               : undefined,
       })),
-    [hasWorkspace, recents, workspaceTrusted],
+    [additionalActions, hasWorkspace, recents, workspaceTrusted],
   );
   const sessionEntries = useMemo<GlobalSearchEntry[]>(() => {
     const pinned = new Set(pinnedSessionIds);
@@ -18172,9 +17915,6 @@ export function CommandPaletteOverlay({
 
   useEffect(() => {
     dismissOpenMenus();
-    returnFocusRef.current = document.activeElement as HTMLElement | null;
-    window.requestAnimationFrame(() => inputRef.current?.focus());
-    return () => returnFocusRef.current?.focus();
   }, []);
   useEffect(() => setSelectedIndex(0), [query]);
   useEffect(() => {
@@ -18224,17 +17964,11 @@ export function CommandPaletteOverlay({
   };
 
   return (
-    <div
-      aria-modal="true"
-      className="gyro-command-overlay"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onClose();
-        }
-      }}
-      role="dialog"
-    >
-      <div
+    <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <Dialog.Content
+        viewportClassName="gyro-command-overlay"
+        size="lg"
+        initialFocus={inputRef}
         aria-label={
           mode === "commands"
             ? "Command Palette"
@@ -18285,9 +18019,6 @@ export function CommandPaletteOverlay({
               } else if (event.key === "Enter") {
                 event.preventDefault();
                 activateEntry(activeEntry);
-              } else if (event.key === "Escape") {
-                event.preventDefault();
-                onClose();
               }
             }}
             placeholder={
@@ -18301,7 +18032,7 @@ export function CommandPaletteOverlay({
             role="combobox"
             value={query}
           />
-          <kbd>{primaryGlobalSearchShortcut(mode)}</kbd>
+          <Keycap>{primaryGlobalSearchShortcut(mode)}</Keycap>
         </header>
         <div
           aria-label="Search results"
@@ -18406,8 +18137,8 @@ export function CommandPaletteOverlay({
             <kbd>↑↓</kbd> navigate <kbd>↵</kbd> open <kbd>esc</kbd> close
           </span>
         </footer>
-      </div>
-    </div>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 
@@ -18439,7 +18170,7 @@ export function ModelStandardPromptOverlay({
   const titleId = useId();
   const detailId = useId();
   return (
-    <section
+    <ToastSurface
       aria-busy={isSaving || undefined}
       aria-describedby={detailId}
       aria-labelledby={titleId}
@@ -18452,15 +18183,17 @@ export function ModelStandardPromptOverlay({
       }}
       role="region"
     >
-      <button
-        aria-label="Dismiss model default suggestion"
+      <IconButton
+        label="Dismiss model default suggestion"
+        variant="chrome"
+        size="sm"
         className="gyro-model-default-close"
         disabled={isSaving}
         onClick={onDismiss}
         type="button"
       >
         <X aria-hidden="true" size={14} />
-      </button>
+      </IconButton>
       <div className="gyro-model-default-provider">
         <ProviderLogo providerId={providerId} label={providerLabel} />
         <span>{providerLabel}</span>
@@ -18477,32 +18210,37 @@ export function ModelStandardPromptOverlay({
         </p>
       ) : null}
       <div className="gyro-model-default-actions">
-        <button
+        <Button
+          variant="outline"
+          size="sm"
           className="gyro-model-default-later"
           disabled={isSaving}
           onClick={onDismiss}
           type="button"
         >
           Not now
-        </button>
-        <button
+        </Button>
+        <Button
+          size="sm"
           className="gyro-model-default-accept"
           disabled={isSaving}
           onClick={onAccept}
           type="button"
         >
           {isSaving ? "Saving…" : "Make default"}
-        </button>
+        </Button>
       </div>
-      <button
+      <Button
+        variant="ghost"
+        size="sm"
         className="gyro-model-default-never"
         disabled={isSaving}
         onClick={onNeverSuggest}
         type="button"
       >
         Don’t suggest this model again
-      </button>
-    </section>
+      </Button>
+    </ToastSurface>
   );
 }
 
@@ -18521,55 +18259,28 @@ export function ProjectRemoveConfirmOverlay({
   onKeep,
   onRemove,
 }: ProjectRemoveConfirmOverlayProps) {
-  const { ref: dialogRef, dismiss } = useDialogDismiss(onKeep);
   const sessionCopy =
     sessionCount > 0
       ? `${sessionCount} chat${sessionCount === 1 ? "" : "s"} will be hidden in the app.`
       : "This project will be hidden from the app.";
   return (
-    <div
-      ref={dialogRef}
-      aria-modal="true"
-      className="gyro-project-remove-overlay"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) {
-          dismiss();
-        }
-      }}
-      role="dialog"
-    >
-      <section
-        aria-label={`Remove ${projectLabel} from Gyro app`}
-        className="gyro-project-remove-card"
-      >
-        <h2>Remove from Gyro app?</h2>
-        <p>
-          Remove <strong>{projectLabel}</strong> from the Gyro app.{" "}
-          {sessionCopy}
-        </p>
-        <p className="gyro-project-remove-note">
-          Nothing will be deleted from your Mac.
-        </p>
-        {projectPath ? <code>{projectPath}</code> : null}
-        <div className="gyro-project-remove-actions">
-          <button
-            autoFocus
-            className="gyro-project-remove-keep"
-            onClick={dismiss}
-            type="button"
-          >
-            Keep
-          </button>
-          <button
-            className="gyro-project-remove-confirm"
-            onClick={onRemove}
-            type="button"
-          >
-            Remove from app
-          </button>
-        </div>
-      </section>
-    </div>
+    <WorkbenchConfirmation
+      title="Remove from Gyro app?"
+      icon={<Trash2 size={16} aria-hidden="true" />}
+      description={
+        <>Remove <strong>{projectLabel}</strong> from the Gyro app. {sessionCopy}</>
+      }
+      detail={
+        <>
+          <p>Nothing will be deleted from your Mac.</p>
+          {projectPath ? <code>{projectPath}</code> : null}
+        </>
+      }
+      cancelLabel="Keep"
+      confirmLabel="Remove from app"
+      onCancel={onKeep}
+      onConfirm={onRemove}
+    />
   );
 }
 
@@ -18584,52 +18295,17 @@ export function TerminalTerminateConfirmOverlay({
   onCancel,
   onTerminate,
 }: TerminalTerminateConfirmOverlayProps) {
-  const { ref: dialogRef, dismiss } = useDialogDismiss(onCancel);
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        dismiss();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [dismiss]);
-
   return (
-    <div
-      ref={dialogRef}
-      aria-modal="true"
-      className="gyro-terminal-terminate-overlay"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) {
-          dismiss();
-        }
-      }}
-      role="alertdialog"
-    >
-      <section
-        aria-label={`Terminate ${terminalLabel}`}
-        className="gyro-terminal-terminate-card"
-      >
-        <div className="gyro-terminal-terminate-heading">
-          <Terminal size={16} />
-          <h2>Terminate terminal?</h2>
-        </div>
-        <p>
-          <strong>{terminalLabel}</strong> is still running. Its process will
-          stop and the pane will close.
-        </p>
-        <div className="gyro-terminal-terminate-actions">
-          <button autoFocus onClick={dismiss} type="button">
-            Cancel
-          </button>
-          <button className="is-danger" onClick={onTerminate} type="button">
-            Terminate
-          </button>
-        </div>
-      </section>
-    </div>
+    <WorkbenchConfirmation
+      title="Terminate terminal?"
+      icon={<Terminal size={16} aria-hidden="true" />}
+      description={
+        <><strong>{terminalLabel}</strong> is still running. Its process will stop and the pane will close.</>
+      }
+      confirmLabel="Terminate"
+      onCancel={onCancel}
+      onConfirm={onTerminate}
+    />
   );
 }
 
@@ -18654,61 +18330,22 @@ export function ChatCloseConfirmOverlay({
   onKeepRunning,
   onStopAndClose,
 }: ChatCloseConfirmOverlayProps) {
-  const { ref: dialogRef, dismiss } = useDialogDismiss(onCancel);
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        dismiss();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [dismiss]);
-
   return (
-    <div
-      ref={dialogRef}
-      aria-modal="true"
-      className="gyro-terminal-terminate-overlay"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) {
-          dismiss();
-        }
-      }}
-      role="alertdialog"
-    >
-      <section
-        aria-label={`Close ${chatLabel}`}
-        className="gyro-terminal-terminate-card gyro-chat-close-card"
-      >
-        <div className="gyro-terminal-terminate-heading">
-          <MessageSquare size={16} />
-          <h2>Stop this chat?</h2>
-        </div>
-        <p>
+    <WorkbenchConfirmation
+      title="Stop this chat?"
+      icon={<MessageSquare size={16} aria-hidden="true" />}
+      description={
+        <>
           <strong>{chatLabel}</strong> still has work running
           {hasModelTerminal ? " and a model-owned terminal" : ""}. Closing the
           pane without stopping leaves it using power in the background.
-        </p>
-        <div className="gyro-terminal-terminate-actions gyro-chat-close-actions">
-          <button onClick={dismiss} type="button">
-            Cancel
-          </button>
-          <button onClick={onKeepRunning} type="button">
-            Keep running
-          </button>
-          <button
-            autoFocus
-            className="is-danger"
-            onClick={onStopAndClose}
-            type="button"
-          >
-            Stop and close
-          </button>
-        </div>
-      </section>
-    </div>
+        </>
+      }
+      confirmLabel="Stop and close"
+      secondaryAction={{ label: "Keep running", run: onKeepRunning }}
+      onCancel={onCancel}
+      onConfirm={onStopAndClose}
+    />
   );
 }
 
@@ -19509,7 +19146,6 @@ export function SettingsSurface({
   const hasProviderUsageWindows =
     providerUsage?.status === "available" && providerUsage.windows.length > 0;
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
-  const resetDialogRef = useRef<HTMLElement>(null);
   const [copyStatus, setCopyStatus] = useState("");
   const copySettingsPath = async (path: string) => {
     try {
@@ -19521,36 +19157,6 @@ export function SettingsSurface({
       );
     }
   };
-  useEffect(() => {
-    if (!isResetConfirmOpen) return;
-    const previous = document.activeElement as HTMLElement | null;
-    const dialog = resetDialogRef.current;
-    dialog?.querySelector<HTMLButtonElement>("button")?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setIsResetConfirmOpen(false);
-      }
-      if (event.key === "Tab") {
-        const buttons = dialog?.querySelectorAll<HTMLButtonElement>("button");
-        if (!buttons?.length) return;
-        const first = buttons[0];
-        const last = buttons[buttons.length - 1];
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last?.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first?.focus();
-        }
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      previous?.focus();
-    };
-  }, [isResetConfirmOpen]);
 
   const isCheckingUpdate = updateState?.status === "checking";
   const automaticUpdateChecks = config.automaticUpdateChecks !== false;
@@ -20007,6 +19613,8 @@ export function SettingsSurface({
                 mainColor={mainColor}
                 secondaryColor={secondaryColor}
                 onAppearanceColorsChange={onAppearanceColorsChange}
+                themePreferences={preferences}
+                onThemePreferencesChange={onSettingsPreferencesChange}
               />
             </SettingsSection>
           ) : null}
@@ -20206,6 +19814,7 @@ export function SettingsSurface({
                 description="Choose a provider, add an API key, or connect local models."
                 defaultOpen
               >
+                {needsProviderSetup ? <WorkbenchScene kind="providers" /> : null}
                 <nav
                   className="gyro-provider-setup-methods"
                   aria-label="Connection methods"
@@ -20304,28 +19913,118 @@ export function SettingsSurface({
               <UsageSettingsPages
                 providerControl={
                   usageProvider ? (
-                    <label className="gyro-usage-provider-select">
-                      <span>Provider</span>
-                      <SettingsSelect
-                        aria-label="Usage provider"
-                        value={usageProvider.id}
-                        onChange={(event) =>
-                          onUsageProviderChange?.(event.target.value as ProviderId)
-                        }
-                      >
-                        {providerConfigs.map((provider) => (
-                          <option key={provider.id} value={provider.id}>
-                            {provider.displayName} ·{" "}
-                            {providerConnectionLabel(
-                              provider,
+                    <div className="gyro-usage-provider-card">
+                      <ProviderLogo
+                        providerId={usageProvider.id}
+                        label={usageProvider.displayName}
+                      />
+                      <div className="gyro-usage-provider-identity">
+                        <div className="gyro-usage-provider-name">
+                          <strong>{usageProvider.displayName}</strong>
+                          {(() => {
+                            const connection = providerConnectionLabel(
+                              usageProvider,
                               providerStatuses?.find(
-                                (status) => status.id === provider.id,
+                                (status) => status.id === usageProvider.id,
                               ),
-                            )}
-                          </option>
-                        ))}
-                      </SettingsSelect>
-                    </label>
+                            );
+                            return (
+                              <span
+                                className={`gyro-usage-provider-badge${connection.startsWith("verified") ? " is-verified" : ""}`}
+                              >
+                                {connection.startsWith("verified") ? (
+                                  <Check aria-hidden="true" size={11} />
+                                ) : null}
+                                {connection.charAt(0).toUpperCase() +
+                                  connection.slice(1)}
+                              </span>
+                            );
+                          })()}
+                        </div>
+                        <span className="gyro-usage-provider-status">
+                          {providerUsage?.status === "available" &&
+                          providerUsage.windows.length > 0
+                            ? providerUsage.fetchedAt
+                              ? `Updated ${new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date(providerUsage.fetchedAt))}${providerUsage.stale ? " · stale" : ""}`
+                              : "Allowance remaining in each plan window"
+                            : providerUsage?.status === "loading"
+                              ? "Checking with the provider…"
+                              : usageProvider.id === "openai" ||
+                                  usageProvider.id === "anthropic" ||
+                                  usageProvider.id === "xai" ||
+                                  usageProvider.id === "kimi"
+                                ? usageProvider.id === "xai"
+                                  ? "Refresh to load Grok Build weekly credit usage"
+                                  : "Plan windows appear after the first chat or refresh"
+                                : "This provider does not report plan windows. View recorded usage in Tokens."}
+                        </span>
+                      </div>
+                      <div className="gyro-usage-provider-actions">
+                        <button
+                          aria-label="Refresh provider usage"
+                          className="gyro-usage-icon-button"
+                          disabled={providerUsage?.status === "loading"}
+                          onClick={() =>
+                            onRefreshProviderUsage?.(usageProvider.id)
+                          }
+                          title="Refresh provider usage"
+                          type="button"
+                        >
+                          <RefreshCw
+                            className={
+                              providerUsage?.status === "loading"
+                                ? "is-spinning"
+                                : ""
+                            }
+                            size={13}
+                          />
+                        </button>
+                        {providerConfigs.length > 1 ? (
+                          // The native select keeps the system menu and keyboard
+                          // behaviour; it sits invisibly over the visible button.
+                          <label className="gyro-usage-provider-select">
+                            <span aria-hidden="true">
+                              Switch provider
+                              <ChevronDown size={12} />
+                            </span>
+                            <select
+                              aria-label="Usage provider"
+                              value={usageProvider.id}
+                              onChange={(event) =>
+                                onUsageProviderChange?.(
+                                  event.target.value as ProviderId,
+                                )
+                              }
+                            >
+                              {providerConfigs.map((provider) => (
+                                <option key={provider.id} value={provider.id}>
+                                  {provider.displayName} ·{" "}
+                                  {providerConnectionLabel(
+                                    provider,
+                                    providerStatuses?.find(
+                                      (status) => status.id === provider.id,
+                                    ),
+                                  )}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null
+                }
+                usageActions={
+                  hasProviderUsageWindows ? (
+                    <SettingsSegmented
+                      label="Usage visualization"
+                      value={usageVisualization}
+                      options={[
+                        { label: "Bars", value: "bars" },
+                        { label: "Wheels", value: "wheels" },
+                      ]}
+                      onChange={(value) => onUsageVisualizationChange?.(value)}
+                    />
                   ) : null
                 }
                 usage={
@@ -20338,63 +20037,6 @@ export function SettingsSurface({
                     >
                       {usageProvider ? (
                         <div className="gyro-usage-dashboard">
-                          <div className="gyro-usage-toolbar">
-                            <div>
-                              <strong>{usageProvider.displayName}</strong>
-                              <span>
-                                {providerUsage?.status === "available" &&
-                                providerUsage.windows.length > 0
-                                  ? providerUsage.fetchedAt
-                                    ? `Updated ${new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date(providerUsage.fetchedAt))}${providerUsage.stale ? " · stale" : ""} · allowance remaining`
-                                    : "Allowance remaining in each plan window"
-                                  : providerUsage?.status === "loading"
-                                    ? "Checking with the provider…"
-                                    : usageProvider.id === "openai" ||
-                                        usageProvider.id === "anthropic" ||
-                                        usageProvider.id === "xai" ||
-                                        usageProvider.id === "kimi"
-                                      ? usageProvider.id === "xai"
-                                        ? "Refresh to load Grok Build weekly credit usage"
-                                        : "Plan windows appear after the first chat or refresh"
-                                      : "This provider does not report plan windows. View recorded usage in Tokens."}
-                              </span>
-                            </div>
-                            <div className="gyro-usage-toolbar-actions">
-                              {hasProviderUsageWindows ? (
-                                <SettingsSegmented
-                                  label="Usage visualization"
-                                  value={usageVisualization}
-                                  options={[
-                                    { label: "Bars", value: "bars" },
-                                    { label: "Wheels", value: "wheels" },
-                                  ]}
-                                  onChange={(value) =>
-                                    onUsageVisualizationChange?.(value)
-                                  }
-                                />
-                              ) : null}
-                              <button
-                                aria-label="Refresh provider usage"
-                                className="gyro-secondary-button"
-                                disabled={providerUsage?.status === "loading"}
-                                onClick={() =>
-                                  onRefreshProviderUsage?.(usageProvider.id)
-                                }
-                                title="Refresh provider usage"
-                                type="button"
-                              >
-                                <RefreshCw
-                                  className={
-                                    providerUsage?.status === "loading"
-                                      ? "is-spinning"
-                                      : ""
-                                  }
-                                  size={14}
-                                />
-                                Refresh
-                              </button>
-                            </div>
-                          </div>
                           {providerUsage?.status === "available" &&
                           providerUsage.stale &&
                           providerUsage.error ? (
@@ -20480,30 +20122,81 @@ export function SettingsSurface({
                       label="Warnings & run controls"
                       collapsible={false}
                     >
-                      <SettingsRow
-                        label="Daily pace warning"
-                        detail="Warn when today’s usage reaches about one seventh (14%) of the weekly allowance."
-                      >
-                        <SettingsSwitch
-                          checked={dailyPaceWarning}
-                          label="Daily pace warning"
-                          onChange={(enabled) => onDailyPaceWarningChange?.(enabled)}
-                        />
-                      </SettingsRow>
-                      <SettingsRow
-                        label="Pause provider runs"
-                        detail={
-                          usageSafety?.pause.active
-                            ? usagePauseDetail(usageSafety)
-                            : "Hold every provider run until you resume. Automations included."
-                        }
-                      >
-                        <SettingsSwitch
-                          checked={Boolean(usageSafety?.pause.active)}
-                          label="Pause provider runs"
-                          onChange={(checked) => onUsagePauseChange?.(checked)}
-                        />
-                      </SettingsRow>
+                      <div className="gyro-usage-controls">
+                        <div
+                          className="gyro-usage-control"
+                          data-setting-key={settingsSearchKey("Daily pace warning")}
+                        >
+                          <div className="gyro-usage-control-head">
+                            <span className="gyro-usage-control-icon">
+                              <Activity aria-hidden="true" size={13} />
+                            </span>
+                            <strong>Daily pace warning</strong>
+                            <SettingsSwitch
+                              checked={dailyPaceWarning}
+                              label="Daily pace warning"
+                              onChange={(enabled) =>
+                                onDailyPaceWarningChange?.(enabled)
+                              }
+                            />
+                          </div>
+                          <p>
+                            Warn when today’s usage reaches about one seventh
+                            (14%) of the weekly allowance.
+                          </p>
+                          <span
+                            className={`gyro-usage-control-status${dailyPaceWarning ? " is-on" : ""}`}
+                          >
+                            {dailyPaceWarning ? "On" : "Off"}
+                          </span>
+                        </div>
+                        <div
+                          className={`gyro-usage-control${usageSafety?.pause.active ? " is-paused" : ""}`}
+                          data-setting-key={settingsSearchKey("Pause provider runs")}
+                        >
+                          <div className="gyro-usage-control-head">
+                            <span className="gyro-usage-control-icon is-danger">
+                              <PauseCircle aria-hidden="true" size={13} />
+                            </span>
+                            <strong>Pause provider runs</strong>
+                            {/* A switch in behaviour, a deliberate button in look:
+                                stopping every run should never be a stray flick. */}
+                            <button
+                              aria-checked={Boolean(usageSafety?.pause.active)}
+                              aria-label="Pause provider runs"
+                              className={`gyro-usage-pause-button${usageSafety?.pause.active ? " is-active" : ""}`}
+                              onClick={() =>
+                                onUsagePauseChange?.(!usageSafety?.pause.active)
+                              }
+                              role="switch"
+                              type="button"
+                            >
+                              {usageSafety?.pause.active ? (
+                                <>
+                                  <Play aria-hidden="true" size={12} />
+                                  Resume runs
+                                </>
+                              ) : (
+                                <>
+                                  <Pause aria-hidden="true" size={12} />
+                                  Pause all
+                                </>
+                              )}
+                            </button>
+                          </div>
+                          <p>
+                            Hold every provider run until you resume. Automations
+                            included.
+                          </p>
+                          <span
+                            className={`gyro-usage-control-status${usageSafety?.pause.active ? " is-paused" : " is-on"}`}
+                          >
+                            {usageSafety?.pause.active
+                              ? usagePauseDetail(usageSafety) || "Paused"
+                              : "Runs active"}
+                          </span>
+                        </div>
+                      </div>
                       <p className="gyro-usage-footnote">
                         Billing and plan limits are managed by your provider.
                       </p>
@@ -21076,48 +20769,18 @@ export function SettingsSurface({
             </SettingsSection>
           ) : null}
         </section>
-        <SurfacePresence descendants>{isResetConfirmOpen ? (
-          <div
-            className="gyro-settings-confirm-overlay"
-            role="presentation"
-            onPointerDown={(event) => {
-              if (event.target === event.currentTarget)
-                setIsResetConfirmOpen(false);
+        {isResetConfirmOpen ? (
+          <WorkbenchConfirmation
+            title="Reset UI state?"
+            description="This clears layout and presentation preferences. Workspace files, sessions, and provider credentials stay untouched."
+            confirmLabel="Reset UI state"
+            onCancel={() => setIsResetConfirmOpen(false)}
+            onConfirm={() => {
+              setIsResetConfirmOpen(false);
+              onResetUiState?.();
             }}
-          >
-            <section
-              aria-label="Reset UI state"
-              aria-modal="true"
-              ref={resetDialogRef}
-              role="alertdialog"
-            >
-              <h2>Reset UI state?</h2>
-              <p>
-                This clears layout and presentation preferences. Workspace
-                files, sessions, and provider credentials stay untouched.
-              </p>
-              <div>
-                <button
-                  className="gyro-secondary-button"
-                  onClick={() => setIsResetConfirmOpen(false)}
-                  type="button"
-                >
-                  Cancel
-                </button>
-                <button
-                  className="gyro-danger-button"
-                  onClick={() => {
-                    setIsResetConfirmOpen(false);
-                    onResetUiState?.();
-                  }}
-                  type="button"
-                >
-                  Reset UI state
-                </button>
-              </div>
-            </section>
-          </div>
-        ) : null}</SurfacePresence>
+          />
+        ) : null}
       </div>
     </SettingsDisclosureProvider>
   );
@@ -21185,7 +20848,7 @@ function WorkspaceKeyboardSettings({
             clears it; the reset button restores its default.
           </p>
         </div>
-        <kbd>{isMacPlatform() ? "⌘" : "Ctrl"}</kbd>
+        <Keycap>{isMacPlatform() ? "⌘" : "Ctrl"}</Keycap>
       </header>
       {bindingError ? <p role="alert">{bindingError}</p> : null}
       <div>
@@ -21400,6 +21063,28 @@ function ComposerLimitRow({ window }: { window: ComposerLimitWindow }) {
 }
 
 const PLAN_USAGE_NOTICE_STORAGE_KEY = "gyro.plan-usage-notices.v1";
+const USAGE_ALERT_DISMISS_STORAGE_KEY = "gyro.usage-alert-dismissed.v1";
+
+function localDayStamp(now = new Date()) {
+  return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+}
+
+function loadDismissedUsageAlert(): { day: string; key: string } | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    const value = window.localStorage.getItem(USAGE_ALERT_DISMISS_STORAGE_KEY);
+    const parsed = value ? JSON.parse(value) : undefined;
+    return parsed &&
+      typeof parsed.day === "string" &&
+      typeof parsed.key === "string"
+      ? { day: parsed.day, key: parsed.key }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+/** Below this the composer meter carries the warning on its own. */
+const PLAN_USAGE_BANNER_THRESHOLD = 95;
 
 function usageNoticeKey(notice: PlanUsageNotice) {
   return [
@@ -21423,38 +21108,33 @@ function loadShownPlanUsageNotices() {
   }
 }
 
-/** A progressive, once-per-window notice for provider-reported plan usage. */
+/**
+ * A once-per-window banner for a plan that is about to stop.
+ *
+ * Earlier levels (80%, 90%) and the daily pace warning live on the composer's
+ * usage meter instead: a banner that also fired at 80% taught people to
+ * dismiss it before it mattered.
+ */
 function PlanUsageNotification({
-  dailyPaceWarning = true,
   onHandoff,
-  paused = false,
   providerId,
-  providerLedger,
   providers,
   windows,
 }: {
-  dailyPaceWarning?: boolean;
   onHandoff: (providerId: ProviderId) => void;
-  paused?: boolean;
   providerId: ProviderId;
-  providerLedger?: ProviderLedgerSummary;
   providers: Array<{ id: ProviderId; label: string }>;
   windows: ProviderUsageState["windows"];
 }) {
   const [shown, setShown] = useState(loadShownPlanUsageNotices);
   const [notice, setNotice] = useState<PlanUsageNotice>();
-  const candidates = useMemo(() => {
-    const plan = planUsageNotices(providerId, windows);
-    const daily = dailyPaceNotice(providerId, {
-      enabled: dailyPaceWarning,
-      ledger: providerLedger,
-      paused,
-      windows,
-    });
-    return daily
-      ? [...plan, daily].sort((left, right) => right.threshold - left.threshold)
-      : plan;
-  }, [dailyPaceWarning, paused, providerId, providerLedger, windows]);
+  const candidates = useMemo(
+    () =>
+      planUsageNotices(providerId, windows).filter(
+        (candidate) => candidate.threshold >= PLAN_USAGE_BANNER_THRESHOLD,
+      ),
+    [providerId, windows],
+  );
 
   useEffect(() => {
     const next = candidates.find(
@@ -21478,41 +21158,23 @@ function PlanUsageNotification({
   }, [candidates, shown]);
 
   if (!notice) return null;
-  const isDailyPace = notice.threshold === DAILY_PACE_NOTICE_PERCENT;
-  const handoffTarget =
-    !isDailyPace && notice.threshold >= 95 ? providers[0] : undefined;
-  const tone =
-    notice.threshold >= 95
-      ? "critical"
-      : notice.threshold >= 80
-        ? "warning"
-        : "info";
-  const title = isDailyPace
-    ? "Daily pace warning"
-    : notice.threshold >= 95
-      ? "Plan limit nearly reached"
-      : notice.threshold >= 90
-        ? "Plan limit is close"
-        : notice.threshold >= 80
-          ? "Plan allowance is running low"
-          : "Half of this plan window is left";
-  const detail = isDailyPace
-    ? notice.windowId === "day"
-      ? `Today’s activity is above an even weekly pace (~${DAILY_PACE_NOTICE_PERCENT}% per day).`
-      : `${notice.windowLabel} has ${remainingUsage(notice.percent).percentLabel} left and is more than a day ahead of an even weekly pace (~${DAILY_PACE_NOTICE_PERCENT}% per day).`
-    : `${notice.windowLabel} has ${remainingUsage(notice.percent).percentLabel} left.${
-        notice.threshold >= 90 ? " Consider wrapping up this window." : ""
-      }`;
+  const handoffTarget = providers[0];
+  const resetsLabel = formatLimitReset(
+    windows.find((window) => window.id === notice.windowId)?.resetsAt,
+  );
+  const detail = `${notice.windowLabel} has ${remainingUsage(notice.percent).percentLabel} left.${
+    resetsLabel ? ` ${resetsLabel}.` : ""
+  }`;
 
   return (
     <section
       aria-live="polite"
-      className={`gyro-plan-usage-notice is-${tone}`}
+      className="gyro-plan-usage-notice is-critical"
       role="status"
     >
       <TriangleAlert aria-hidden="true" size={17} />
       <div>
-        <strong>{title}</strong>
+        <strong>Plan limit nearly reached</strong>
         <span>{detail}</span>
       </div>
       <div className="gyro-plan-usage-notice-actions">
@@ -22434,7 +22096,7 @@ function providerApprovalDetails(providerId: ProviderId | undefined) {
     case "cursor":
       return {
         gated: "Ask before Cursor's commands and file edits",
-        auto: "Cursor works in its sandbox, and Gyro approves its tool requests without prompts.",
+        auto: "Cursor works in its sandbox without prompts. Anything that needs to leave the sandbox still asks.",
       };
     case "antigravity":
       return {
@@ -22444,7 +22106,7 @@ function providerApprovalDetails(providerId: ProviderId | undefined) {
     case "opencode":
       return {
         gated: "Ask before OpenCode's commands and file edits",
-        auto: "Gyro approves OpenCode's permission requests without prompts.",
+        auto: "OpenCode edits and reads the project without prompts. Shell commands, web access, and paths outside the project still ask.",
       };
     default:
       // Ollama, DeepSeek, Mistral, OpenRouter, and custom providers have no
@@ -22521,6 +22183,8 @@ let composerWantsFocus = false;
 function Composer({
   attachments = [],
   chatMode = "normal",
+  isPlanning = false,
+  supportsInlinePlan = false,
   draftKey = NEW_CHAT_DRAFT_KEY,
   constrainToParent = false,
   draft: plainDraft,
@@ -22585,6 +22249,8 @@ function Composer({
 }: {
   attachments?: ChatAttachment[];
   chatMode?: ChatMode;
+  isPlanning?: boolean;
+  supportsInlinePlan?: boolean;
   /**
    * Which draft this composer edits, so a drop routed from the window reaches
    * the chat it landed on rather than whichever one happens to be focused.
@@ -23051,6 +22717,74 @@ function Composer({
     contextSource === "empty" ? "Context: waiting for provider measurement" : contextUsage?.label,
     usageRingWindow ? `Plan usage: ${usageRingWindow.percentLabel} used (${usageRingWindow.label})${providerUsage?.stale ? " · last known reading" : ""}` : "Plan usage not reported",
   ].filter(Boolean).join(". ");
+  // The meter speaks up on its own once a plan window runs low: "5% left" in
+  // amber or red beside the ring, with the reset in its tooltip. Only the last
+  // stretch (95%+) also raises a banner.
+  const lowUsageWindow = [...limitWindows]
+    .filter((window) => window.severity !== "normal")
+    .sort(
+      (a, b) =>
+        (b.status === "exhausted" ? 101 : (b.percent ?? 0)) -
+        (a.status === "exhausted" ? 101 : (a.percent ?? 0)),
+    )[0];
+  const paceNotice =
+    lowUsageWindow || !effectiveProviderId
+      ? undefined
+      : dailyPaceNotice(effectiveProviderId, {
+          enabled: dailyPaceWarning,
+          ledger: providerLedger,
+          paused: Boolean(usageSafety?.pause.active),
+          windows: providerUsage?.windows ?? [],
+        });
+  const usageAlert = lowUsageWindow
+    ? {
+        label:
+          lowUsageWindow.status === "exhausted" ||
+          lowUsageWindow.remainingPercent === 0
+            ? "Limit reached"
+            : `${lowUsageWindow.remainingPercentLabel} left`,
+        tone: lowUsageWindow.severity,
+        detail: `${lowUsageWindow.label}${
+          lowUsageWindow.resetsLabel ? ` · ${lowUsageWindow.resetsLabel}` : ""
+        }`,
+      }
+    : paceNotice
+      ? {
+          label: "Ahead of pace",
+          tone: "pace" as const,
+          detail: `${paceNotice.windowLabel} is running more than a day ahead of an even weekly pace (~${DAILY_PACE_NOTICE_PERCENT}% per day).`,
+        }
+      : undefined;
+  const usageAlertKey = usageAlert
+    ? `${usageProviderId ?? "none"}:${usageAlert.tone}:${usageAlert.label}`
+    : undefined;
+  const [dismissedUsageAlert, setDismissedUsageAlert] = useState(
+    loadDismissedUsageAlert,
+  );
+  // Hiding the pill keeps the ring and its tooltip. A new label ("3% left"
+  // after "5% left") or a new day brings the pill back.
+  const usageAlertCollapsed = Boolean(
+    usageAlertKey &&
+      dismissedUsageAlert?.key === usageAlertKey &&
+      dismissedUsageAlert.day === localDayStamp(),
+  );
+  const visibleUsageAlert = usageAlertCollapsed ? undefined : usageAlert;
+  const dismissUsageAlert = useCallback(() => {
+    if (!usageAlertKey) return;
+    const next = { day: localDayStamp(), key: usageAlertKey };
+    setDismissedUsageAlert(next);
+    try {
+      window.localStorage.setItem(
+        USAGE_ALERT_DISMISS_STORAGE_KEY,
+        JSON.stringify(next),
+      );
+    } catch {
+      // The pill stays hidden for this open window even without storage.
+    }
+  }, [usageAlertKey]);
+  const contextMeterAriaLabel = usageAlert
+    ? `${contextMeterLabel}. ${usageAlert.label}: ${usageAlert.detail}`
+    : contextMeterLabel;
   const refreshContextMeterUsage = useCallback(() => {
     if (!usageProviderId || !providerSupportsUsage(usageProviderId)) return;
     const fetchedMs = usageFetchedAt ? Date.parse(usageFetchedAt) : NaN;
@@ -23392,7 +23126,7 @@ function Composer({
           label: "Normal mode",
         }
       : {
-          action: "set-chat-mode-plan",
+          available: supportsInlinePlan,
           command: "/plan",
           description: "Plan before making changes",
           hint: "Gyro works out the steps and shows them to you first. Nothing on your computer changes until you agree.",
@@ -24179,13 +23913,10 @@ function Composer({
       selectedProvider.authMode !== "env" ? (
         <PlanUsageNotification
           key={effectiveProviderId}
-          dailyPaceWarning={dailyPaceWarning}
           onHandoff={(providerId) =>
             onComposerAction?.(`handoff-provider:${providerId}`)
           }
-          paused={Boolean(usageSafety?.pause.active)}
           providerId={effectiveProviderId}
-          providerLedger={providerLedger}
           providers={handoffProviders}
           windows={providerUsage?.windows ?? []}
         />
@@ -24592,6 +24323,12 @@ function Composer({
         ) : null}
         {surfaceControls}
         {/* Plan and Goal are exclusive selections for the next message. */}
+        {isPlanning && chatMode !== "plan" ? (
+          <span className="gyro-composer-chip is-plan" role="status">
+            <ListChecks aria-hidden="true" size={13} />
+            <span className="gyro-composer-label">Plan</span>
+          </span>
+        ) : null}
         {chatMode === "plan" ? (
           <button
             aria-label={
@@ -24679,7 +24416,11 @@ function Composer({
         <div className="gyro-composer-spacer" />
         {contextUsage ? (
           <div
-            className="gyro-composer-context-meter"
+            className={`gyro-composer-context-meter${
+              visibleUsageAlert
+                ? ` has-usage-alert is-usage-${visibleUsageAlert.tone}`
+                : ""
+            }`}
             // Opening the meter asks for the plan's current level; the account
             // poll coalesces repeat hovers into one request.
             onFocus={refreshContextMeterUsage}
@@ -24687,8 +24428,8 @@ function Composer({
           >
             <div
               aria-describedby={`${popoverBaseId}-context-usage-tooltip`}
-              aria-label={contextMeterLabel}
-              aria-valuetext={contextMeterLabel}
+              aria-label={contextMeterAriaLabel}
+              aria-valuetext={contextMeterAriaLabel}
               aria-valuemax={100}
               aria-valuemin={0}
               aria-valuenow={
@@ -24715,7 +24456,7 @@ function Composer({
                 {contextMeterArcs.map((arc) => (
                   <circle
                     key={arc.kind}
-                    className={arc.kind === "context" ? "gyro-composer-context-progress" : "gyro-composer-usage-progress"}
+                    className={arc.kind === "context" ? "gyro-composer-context-progress" : `gyro-composer-usage-progress is-${usageRingWindow?.severity ?? "normal"}`}
                     cx="9"
                     cy="9"
                     pathLength="100"
@@ -24727,6 +24468,23 @@ function Composer({
                 ))}
               </svg>
             </div>
+            {visibleUsageAlert ? (
+              <span className="gyro-composer-usage-alert">
+                <span aria-hidden="true">{visibleUsageAlert.label}</span>
+                <button
+                  aria-label={`Hide "${visibleUsageAlert.label}"`}
+                  className="gyro-composer-usage-alert-dismiss"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    dismissUsageAlert();
+                  }}
+                  title="Hide until it changes"
+                  type="button"
+                >
+                  <X aria-hidden="true" size={9} strokeWidth={2.5} />
+                </button>
+              </span>
+            ) : null}
             <div
               className="gyro-composer-context-tooltip"
               id={`${popoverBaseId}-context-usage-tooltip`}
@@ -24810,6 +24568,11 @@ function Composer({
                   {quotaNotice ? (
                     <small role="status">{quotaNotice}</small>
                   ) : null}
+                  {usageAlert?.tone === "pace" ? (
+                    <small className="gyro-composer-usage-pace">
+                      {usageAlert.detail}
+                    </small>
+                  ) : null}
                   {providerUsage?.stale ? (
                     <small title={providerUsage.error}>
                       {staleUsageLabel(providerUsage.fetchedAt, Date.now())}
@@ -24861,7 +24624,7 @@ function Composer({
             {displayProvider ? (
               <ProviderLogo providerId={displayProvider.id} />
             ) : null}
-            <span className="gyro-composer-label">{modelChipLabel}</span>
+            <span className="gyro-composer-label gyro-composer-trigger-label" key={modelChipLabel}>{modelChipLabel}</span>
             <ChevronDown aria-hidden="true" size={13} />
           </button>
           <SurfacePresence>{activePopover === "provider" && isModelRailPane ? (
@@ -24993,8 +24756,10 @@ function Composer({
           />
         ) : null}
         {canStop ? (
-          <button
-            aria-label={isStopping ? "Stopping response" : "Stop response"}
+          <IconButton
+            label={isStopping ? "Stopping response" : "Stop response"}
+            shape="capsule"
+            variant="destructive-outline"
             className="gyro-send-button is-stop"
             disabled={isStopping}
             onClick={(event) => {
@@ -25013,14 +24778,16 @@ function Composer({
             type="button"
           >
             <Square aria-hidden="true" fill="currentColor" size={10} strokeWidth={0} />
-          </button>
+          </IconButton>
         ) : null}
         {canStop && isStopping ? (
           <span className="gyro-composer-stop-status" role="status">Stopping…</span>
         ) : null}
         {(!canStop || plainDraft.trim().length > 0 || isGoalComposerActive) ? (
-          <button
-            aria-label={
+          <IconButton
+            shape="capsule"
+            variant="prominent"
+            label={
               isGoalComposerActive
                 ? startsGoalSession ? "Set goal and send" : "Save goal"
                 : isTraceDraft ? "Set up trace" : isSending ? "Queue message" : "Send message"
@@ -25043,22 +24810,9 @@ function Composer({
             {isGoalComposerActive && !startsGoalSession ? (
             <Check size={17} />
           ) : (
-            <svg
-              aria-hidden="true"
-              className="gyro-send-arrow"
-              fill="none"
-              viewBox="0 0 30 30"
-            >
-              <path
-                d="M15 21.4V8.6M9.6 14.5 15 8.6 20.4 14.5"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2.15"
-              />
-            </svg>
+            <ComposerSendIcon aria-hidden="true" className="gyro-send-arrow" />
           )}
-          </button>
+          </IconButton>
         ) : null}
       </div>
     </div>
@@ -25328,7 +25082,7 @@ const ChatEvent = memo(function ChatEvent({
             onOpenBrowserUrl={onOpenBrowserUrl}
           />
         ) : isUser ? (
-          <div className="gyro-user-message-bubble">
+          <div className="gyro-user-message-bubble" data-just-sent={Math.abs(Date.now() - Date.parse(event.createdAt)) < 500 || undefined}>
             <TranscriptAttachments event={event} />
             <p>{event.message}</p>
           </div>
@@ -27043,6 +26797,7 @@ type AssistantResponseTableAlign = "left" | "center" | "right" | null;
 
 type AssistantResponseBlock =
   | { kind: "code"; content: string; language?: string }
+  | { kind: "quote"; lines: string[] }
   | { kind: "commands"; items: string[] }
   | AssistantResponseHeading
   | { kind: "list"; items: string[] }
@@ -27509,6 +27264,13 @@ function AssistantResponseBlockView({
       </Heading>
     );
   }
+  if (block.kind === "quote") {
+    return <blockquote className="gyro-response-quote">
+      {block.lines.join("\n").split(/\n\s*\n/).filter(Boolean).map((paragraph, index) =>
+        <p key={index}>{inline(paragraph.replaceAll("\n", " "))}</p>,
+      )}
+    </blockquote>;
+  }
   if (block.kind === "list") {
     // A bullet holding only an image would be empty once the image moves below.
     const items = imageHint?.imagesBelow
@@ -27557,6 +27319,7 @@ function AssistantResponseBlockView({
   }
   if (block.kind === "table") {
     return (
+      <div className="gyro-response-table-card">
       <div
         className="gyro-response-table-wrap"
         tabIndex={0}
@@ -27593,23 +27356,21 @@ function AssistantResponseBlockView({
           </tbody>
         </table>
       </div>
+      <MessageCopyButton
+        className="gyro-response-table-copy"
+        label="Copy table"
+        message={[block.header, ...block.rows].map((row) => row.join("\t")).join("\n")}
+      />
+      </div>
     );
   }
   if (block.kind === "code") {
     return (
-      <div className="gyro-response-code">
-        <div className="gyro-response-code-heading">
-          <span>{block.language || "Code"}</span>
-          <MessageCopyButton label="Copy code" message={block.content} />
-        </div>
-        <pre
-          className="gyro-response-code-block"
-          tabIndex={0}
-          aria-label={block.language ? `${block.language} code` : "Code block"}
-        >
-          <code>{block.content}</code>
-        </pre>
-      </div>
+      <ChatCodeBlock
+        code={block.content}
+        language={block.language}
+        copyAction={<MessageCopyButton label="Copy code" message={block.content} />}
+      />
     );
   }
   if (imageHint?.imagesBelow && isOnlyReplyImages(block.content)) return null;
@@ -27623,6 +27384,8 @@ function assistantResponseBlockTexts(blocks: AssistantResponseBlock[]) {
       case "paragraph":
       case "heading":
         return [block.content];
+      case "quote":
+        return block.lines;
       case "list":
       case "ordered-list":
         return block.items;
@@ -27829,6 +27592,18 @@ function assistantResponseBlocks(message: string): AssistantResponseBlock[] {
     }
     if (isInCodeBlock) {
       codeLines.push(line);
+      continue;
+    }
+    if (/^>(?:\s|$)/.test(trimmed)) {
+      flushOpenBlocks();
+      const lines = [trimmed.replace(/^>\s?/, "")];
+      while (lineIndex + 1 < contentLines.length) {
+        const next = contentLines[lineIndex + 1]!.trim();
+        if (!/^>(?:\s|$)/.test(next)) break;
+        lines.push(next.replace(/^>\s?/, ""));
+        lineIndex += 1;
+      }
+      blocks.push({ kind: "quote", lines });
       continue;
     }
     if (trimmed === "") {
@@ -28052,11 +27827,7 @@ function replyLinkNode(
   );
 }
 
-/**
- * The host mark drawn inline before a reply link's label. Filled with
- * `currentColor`, so it follows the link's blue and brightens on hover without
- * a second colour rule.
- */
+/** The host mark uses its monochrome ink alongside the reply link. */
 function ReplyLinkGlyph({ mark }: { mark: ReplyLinkMark }) {
   if (mark !== "github") return null;
   return (

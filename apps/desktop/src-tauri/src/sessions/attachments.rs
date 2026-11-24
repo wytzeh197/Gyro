@@ -8,7 +8,7 @@ use crate::{
     chat_images,
     providers::{
         binding::session_execution_workspace,
-        chat_types::{PrepareChatAttachmentRequest, PreparedChatAttachment},
+        chat_types::{ChatAttachmentRequest, PrepareChatAttachmentRequest, PreparedChatAttachment},
     },
     session_browser,
     sessions::commands::{attachment_session_lock, remove_attachment_storage_entry},
@@ -370,6 +370,9 @@ pub(crate) fn prepare_chat_attachment_blocking(
             }
             let bytes = if is_terminal_output {
                 redact_terminal_output(&bytes)
+            } else if request.kind == "browser-snapshot" && safe_session != "new"
+                && source.is_some() {
+                migrate_draft_app_annotation(bytes, &attachments_root, &safe_session)?
             } else {
                 bytes
             };
@@ -432,6 +435,74 @@ pub(crate) fn prepare_chat_attachment_blocking(
         stale: false,
         preview_text,
     })
+}
+
+/// A persisted app annotation must refer to an image owned by the new chat.
+fn migrate_draft_app_annotation(bytes: Vec<u8>, root: &Path, session: &str) -> Result<Vec<u8>, String> {
+    let Ok(mut snapshot) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return Ok(bytes);
+    };
+    if snapshot["schema"] != "gyro.app-preview-annotation.v1" {
+        return Ok(bytes);
+    }
+    let mut image: ChatAttachmentRequest =
+        serde_json::from_value(snapshot["attachedImage"].clone()).map_err(to_string)?;
+    let draft = root.join("new").canonicalize().map_err(to_string)?;
+    let source = PathBuf::from(&image.path).canonicalize().map_err(to_string)?;
+    if !source.starts_with(&draft) || image.kind != "image" {
+        return Err("The annotation image does not belong to this draft".into());
+    }
+    let (png, _) = read_bounded_regular_file(&source, MAX_CHAT_IMAGE_BYTES as usize, "annotation image")
+        .map_err(to_string)?;
+    let digest = format!("{:x}", Sha256::digest(&png));
+    if image.content_hash.as_deref() != Some(digest.as_str()) || image.size != png.len() as u64 {
+        return Err("The annotation image changed before the chat was created".into());
+    }
+    let (mime, extension) = validated_chat_media_type(&image.name, false, &png)?;
+    if mime != "image/png" || extension != "png" {
+        return Err("App annotation images must be PNGs".into());
+    }
+    let dir = root.join(session);
+    ensure_private_attachment_directory(&dir)?;
+    let destination = dir.join(format!("{digest}.png"));
+    ensure_attachment_storage_quota(&dir, &destination, image.size)?;
+    write_private_attachment(&destination, &png, &digest)?;
+    image.path = destination.display().to_string();
+    image.preview_url = None;
+    snapshot["attachedImage"] = serde_json::to_value(image).map_err(to_string)?;
+    serde_json::to_vec(&snapshot).map_err(to_string)
+}
+
+#[cfg(test)]
+mod app_annotation_tests {
+    use super::*;
+    use base64::Engine as _;
+
+    #[test]
+    fn draft_app_annotation_keeps_an_integrity_checked_image_in_the_new_chat() {
+        let dir = tempfile::tempdir().unwrap();
+        let draft = dir.path().join("new");
+        ensure_private_attachment_directory(&draft).unwrap();
+        let path = draft.join("annotation.png");
+        let png = base64::engine::general_purpose::STANDARD.decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRk8AAAAASUVORK5CYII=",
+        ).unwrap();
+        fs::write(&path, &png).unwrap();
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "schema": "gyro.app-preview-annotation.v1",
+            "attachedImage": {
+                "id": "annotated-image", "kind": "image", "name": "annotation.png",
+                "path": path, "size": png.len(), "contentHash": format!("{:x}", Sha256::digest(&png)),
+            },
+        })).unwrap();
+        let promoted = migrate_draft_app_annotation(bytes.clone(), dir.path(), "chat").unwrap();
+        let snapshot: serde_json::Value = serde_json::from_slice(&promoted).unwrap();
+        let new_path = Path::new(snapshot["attachedImage"]["path"].as_str().unwrap());
+        assert!(new_path.starts_with(dir.path().join("chat")));
+        assert_eq!(fs::read(new_path).unwrap(), png);
+        fs::write(path, b"altered").unwrap();
+        assert!(migrate_draft_app_annotation(bytes, dir.path(), "chat").is_err());
+    }
 }
 
 /// Terminal output is whatever a program printed, which can include the tokens

@@ -1,3 +1,5 @@
+import { Input } from "./primitives/controls";
+import { Button } from "./primitives/button";
 import { useState } from "react";
 import type { EfficiencyConfig, EfficiencyRoute } from "./types";
 import { SettingsRow, SettingsSwitch } from "./settings-controls";
@@ -54,17 +56,17 @@ export function EfficiencyRoutingSettings({
               label={r.phase}
               detail={`${r.provider} / ${r.model}`}
             >
-              <button
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 disabled={disabled || busy || !onRoute}
                 onClick={() => void route(r.phase, false)}
               >
                 Apply to current chat
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 disabled={disabled}
                 onClick={() =>
                   save({
@@ -73,7 +75,7 @@ export function EfficiencyRoutingSettings({
                 }
               >
                 Remove
-              </button>
+              </Button>
             </SettingsRow>
           ))}
           {policy.escalation ? (
@@ -81,14 +83,14 @@ export function EfficiencyRoutingSettings({
               label="Escalation"
               detail={`${policy.escalation.provider} / ${policy.escalation.model}`}
             >
-              <button
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 disabled={disabled || busy || !onRoute}
                 onClick={() => void route("escalation", true)}
               >
                 Escalate current chat once
-              </button>
+              </Button>
             </SettingsRow>
           ) : null}
           {(["phase", "provider", "model"] as const).map((key) => (
@@ -97,7 +99,7 @@ export function EfficiencyRoutingSettings({
               label={`Route ${key}`}
               detail="Use a configured provider and model."
             >
-              <input
+              <Input
                 className="gyro-efficiency-input"
                 aria-label={`Route ${key}`}
                 value={draft[key]}
@@ -110,9 +112,9 @@ export function EfficiencyRoutingSettings({
             label="Save route"
             detail="Phase names are unique. Targets are checked against enabled models before a handoff."
           >
-            <button
+            <Button
               type="button"
-              className="gyro-secondary-button"
+              variant="outline"
               disabled={
                 disabled ||
                 !draft.phase.trim() ||
@@ -135,10 +137,10 @@ export function EfficiencyRoutingSettings({
               }}
             >
               Add phase
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="gyro-secondary-button"
+              variant="outline"
               disabled={
                 disabled || !draft.provider.trim() || !draft.model.trim()
               }
@@ -153,7 +155,7 @@ export function EfficiencyRoutingSettings({
               }
             >
               Set escalation target
-            </button>
+            </Button>
           </SettingsRow>
         </>
       ) : null}

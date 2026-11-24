@@ -44,7 +44,7 @@ export function LiveTerminalPaneBody({
   pane: TerminalPane;
   theme: ResolvedTheme;
 }) {
-  const { scale, reduceMotion } = useAppearance();
+  const { scale, reduceMotion, codeFont } = useAppearance();
   const appearanceRef = useRef({ scale, reduceMotion });
   appearanceRef.current = { scale, reduceMotion };
   /** Whether this pane held the keyboard on the previous render. */
@@ -310,6 +310,7 @@ export function LiveTerminalPaneBody({
     pane.outputCursor?.generation,
     scale,
     reduceMotion,
+    codeFont,
   ]);
 
   useEffect(() => {

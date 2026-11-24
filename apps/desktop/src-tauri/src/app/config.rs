@@ -45,10 +45,16 @@ pub(crate) struct WarmDesktopShellReport {
 }
 
 #[tauri::command]
-pub(crate) async fn warm_desktop_shell() -> Result<WarmDesktopShellReport, String> {
-    tauri::async_runtime::spawn_blocking(warm_desktop_shell_blocking)
+pub(crate) async fn warm_desktop_shell(
+    window: tauri::WebviewWindow,
+) -> Result<WarmDesktopShellReport, String> {
+    let report = tauri::async_runtime::spawn_blocking(warm_desktop_shell_blocking)
         .await
-        .map_err(|error| format!("desktop shell warm worker failed: {error}"))?
+        .map_err(|error| format!("desktop shell warm worker failed: {error}"))??;
+    if window.label() == "main" {
+        super::install_reporting::after_launch(window);
+    }
+    Ok(report)
 }
 
 pub(crate) fn warm_desktop_shell_blocking() -> Result<WarmDesktopShellReport, String> {

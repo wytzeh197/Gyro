@@ -20,9 +20,9 @@ Approve for Me by provider:
 | Grok | `auto` mode in the workspace sandbox | Anything Grok escalates |
 | Kimi | Ordinary tool calls (`--yolo`) | Anything Kimi escalates |
 | Gemini | Edits (`auto_edit`) inside `--sandbox`; Gyro approves Gemini's other tool requests | Nothing native; Gyro tools follow project policy |
-| Cursor | Tools inside Cursor's sandbox; Gyro approves its requests | Nothing native; Gyro tools follow project policy |
+| Cursor | Tools inside Cursor's sandbox (`--sandbox enabled`) | Anything that needs to run outside the sandbox |
 | Antigravity | Edits (`accept-edits`) in Google's sandbox | Shell commands the CLI soft-denies |
-| OpenCode | Gyro answers OpenCode's permission requests | Gyro tools that the project policy marks Ask |
+| OpenCode | Edits and reads in the project, plus `git status`, `git diff`, `git log`, `ls`, `pwd` | Other shell commands, web fetch and search, and paths outside the project; `.env` files are never read |
 | Ollama, DeepSeek, Mistral, OpenRouter, custom | Bounded workspace commands through Gyro | HTTPS commands, terminals, tasks, and file edits (edits go to review) |
 
 On every provider, HTTPS commands still need one-invocation approval, and

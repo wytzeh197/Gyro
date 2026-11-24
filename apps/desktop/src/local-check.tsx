@@ -15,7 +15,7 @@ import {
   type CheckWorkActivity,
   type SessionEvent,
   confirmAction,
-  useDialogDismiss,
+  Dialog,
 } from "@gyro-dev/ui";
 import { isTauriRuntime } from "./tauri-runtime";
 import type {
@@ -250,17 +250,15 @@ function CheckDialogSurface({
   onClose: () => void;
   children: ReactNode;
 }) {
-  const { ref, dismiss } = useDialogDismiss(onClose);
   return (
-    <div
-      className="gyro-check-backdrop"
-      ref={ref}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) dismiss();
+    <Dialog.Root
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
       }}
     >
       {children}
-    </div>
+    </Dialog.Root>
   );
 }
 
@@ -309,7 +307,7 @@ export function LocalCheckDialog({
   const [stage, setStage] = useState<"requirements" | "results">(
     "requirements",
   );
-  const dialogRef = useRef<HTMLElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const requirementInput = useRef<HTMLInputElement>(null);
   const focusNewRequirement = useRef(false);
   useLayoutEffect(() => {
@@ -668,16 +666,15 @@ export function LocalCheckDialog({
   if (!visible) return null;
   return (
     <CheckDialogSurface onClose={close}>
-      <section
+      <Dialog.Content
         className="gyro-check-dialog"
         ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
+        size="lg"
         aria-labelledby="gyro-check-title"
       >
         <header>
           <div>
-            <h2 id="gyro-check-title">Check this work</h2>
+            <Dialog.Title id="gyro-check-title">Check this work</Dialog.Title>
             <p>{session.title}</p>
             {requestText ? (
               <details>
@@ -1221,7 +1218,7 @@ export function LocalCheckDialog({
             </div>
           </>
         ) : null}
-      </section>
+      </Dialog.Content>
     </CheckDialogSurface>
   );
 }

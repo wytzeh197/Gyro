@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Button,
+  Empty,
+  Spinner,
   ChatSurface,
   confirmAction,
   ChatFileActionsContext,
@@ -17,7 +20,7 @@ import {
   FolderOpen,
   GitBranch,
   Terminal,
-} from "../../../../packages/ui/node_modules/lucide-react";
+} from "@gyro-dev/ui/icons";
 import { useRemoteAccess, useRemoteTheme } from "./context";
 import { useRemoteWorkspace } from "./use-workspace";
 import { useRemoteAttachments } from "./attachments";
@@ -183,9 +186,14 @@ export default function RemoteWorkspace({
     }
     return id;
   };
-  const startChat = async (message: string) => {
+  const canSendInMode = (mode: "normal" | "plan") => {
+    if (mode === "normal" || data.info?.capabilities.includes("chatModes")) return true;
+    workspace.setError("Update Gyro on the host to use Plan mode remotely.");
+    return false;
+  };
+  const startChat = async (message: string, mode = chatMode) => {
     const text = message.trim() || (media.attachments.length ? "Please review the attached files." : "");
-    if (!text || media.preparing) return;
+    if (!text || media.preparing || !canSendInMode(mode)) return;
     const attachments = media.attachments;
     const chosenModel = { ...model };
     const id = await create();
@@ -195,7 +203,7 @@ export default function RemoteWorkspace({
         ...previous,
         drafts: { ...previous.drafts, [id]: text, [homeDraftKey]: "" },
       }));
-      setQueued({ sessionId: id, text, model: chosenModel, attachments, mode: chatMode });
+      setQueued({ sessionId: id, text, model: chosenModel, attachments, mode });
     }
   };
   const openPanel = (value: (typeof PANELS)[number]["id"]) =>
@@ -237,14 +245,14 @@ export default function RemoteWorkspace({
   const reconnect = (
     <div className="gyro-remote-readonly" role="status">
       <span>Read only until {host.name} is back.</span>
-      <button
+      <Button
         type="button"
-        className="gyro-primary-button"
+        size="md"
         disabled={busy}
         onClick={() => void workspace.reconnect()}
       >
         Reconnect
-      </button>
+      </Button>
     </div>
   );
   const resolveSubmission = () => {
@@ -278,14 +286,14 @@ export default function RemoteWorkspace({
           sending it again.
         </span>
         <span className="gyro-remote-spacer" />
-        <button
+        <Button
           type="button"
-          className="gyro-secondary-button"
+          variant="outline"
           disabled={!online || busy || data.snapshot?.running}
           onClick={resolveSubmission}
         >
           Resolve submission
-        </button>
+        </Button>
       </div>
     ) : null,
     ...approvals.map((approval, index) => (
@@ -416,11 +424,8 @@ export default function RemoteWorkspace({
       return;
     }
     if (action === "set-chat-mode-normal" || action === "set-chat-mode-plan") {
-      if (action.endsWith("plan") && !data.info?.capabilities.includes("chatModes")) {
-        workspace.setError("Update Gyro on the host to use Plan mode remotely.");
-        return;
-      }
-      setChatMode(action.endsWith("plan") ? "plan" : "normal");
+      const mode = action.endsWith("plan") ? "plan" : "normal";
+      if (canSendInMode(mode)) setChatMode(mode);
       return;
     }
     if (action.startsWith("refresh-provider-models:") || action.startsWith("check-provider:")) {
@@ -470,20 +475,19 @@ export default function RemoteWorkspace({
     <div className="gyro-remote-workspace">
       {!session && workspace.loading && (
         <div className="gyro-remote-empty" role="status">
-          <p>Connecting to {host.name}…</p>
+          <p><Spinner decorative size="xs" /> Connecting to {host.name}…</p>
         </div>
       )}
       {!session && !workspace.loading && !online && (
         <div className="gyro-remote-home">{reconnect}</div>
       )}
       {!session && !workspace.loading && online && !data.projects.length && (
-        <div className="gyro-remote-empty">
-          <h2>No shared projects</h2>
-          <p>
-            Projects added to the sidebar on {host.name} appear here
-            automatically.
-          </p>
-        </div>
+        <Empty
+          className="gyro-remote-empty"
+          icon={<FolderOpen size={20} />}
+          title={<h2>No shared projects</h2>}
+          description={`Projects added to the sidebar on ${host.name} appear here automatically.`}
+        />
       )}
       {!session && !workspace.loading && online && data.projects.length > 0 && (
         <div className="gyro-remote-chat">
@@ -495,7 +499,7 @@ export default function RemoteWorkspace({
             paneKey={`remote:${host.id}:${homeDraftKey}`}
             draft={homeDraft}
             onDraftChange={setHomeDraft}
-            onSend={(message) => void startChat(message)}
+            onSend={(message, context) => void startChat(message, context?.mode)}
             attachments={media.attachments}
             onRemoveAttachment={media.remove}
             onAttachMediaFiles={media.files}
@@ -564,9 +568,11 @@ export default function RemoteWorkspace({
                     drafts: { ...previous.drafts, [session.id]: text },
                   }))
                 }
-                onSend={(message) => {
+                onSend={(message, context) => {
+                  const mode = context?.mode ?? chatMode;
+                  if (!canSendInMode(mode)) return;
                   const attachments = media.attachments;
-                  void workspace.submit(message, model, attachments, chatMode)
+                  void workspace.submit(message, model, attachments, mode)
                     .then((sent) => { if (sent) media.clear(session.id, attachments); });
                 }}
                 attachments={media.attachments}

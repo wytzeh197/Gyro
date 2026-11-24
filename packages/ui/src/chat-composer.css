@@ -1,0 +1,361 @@
+/* Composer: workspace context, rounded input, then an independent toolbar. */
+.gyro-chat-grid-slot > .gyro-chat-surface {
+  animation: gyro-chat-pane-enter var(--gyro-duration-140) var(--gyro-ease-out);
+}
+
+.gyro-user-message-bubble[data-just-sent] {
+  animation: gyro-chat-message-send-enter var(--gyro-duration-180) var(--gyro-ease-out);
+}
+
+.gyro-composer-trigger-label {
+  animation: gyro-composer-trigger-label-enter var(--gyro-duration-240) var(--gyro-ease-out);
+}
+
+:root[data-reduce-motion="true"] :is(
+  .gyro-chat-grid-slot > .gyro-chat-surface,
+  .gyro-user-message-bubble[data-just-sent],
+  .gyro-composer-trigger-label
+) { animation: none; }
+
+:root[data-theme] .gyro-chat-surface .gyro-composer-shell {
+  --gyro-composer-action-size: calc(28px * var(--gyro-ui-scale, 1));
+  max-width: min(100%, 720px);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  border-radius: var(--gyro-radius-composer);
+  min-height: 0;
+  overflow: visible;
+  padding: 0;
+}
+.gyro-composer-input {
+  display: grid;
+  background: var(--gyro-surface-raised);
+  border: 1px solid color-mix(in srgb, var(--gyro-border-heavy) 55%, var(--gyro-border-light));
+  border-radius: var(--gyro-radius-composer);
+  box-shadow: var(--gyro-shadow-composer);
+  box-sizing: border-box;
+  min-width: 0;
+  position: relative;
+}
+:root[data-theme] .gyro-chat-surface .gyro-composer-editor > :is(textarea, .gyro-composer-draft-mirror) {
+  background: transparent;
+  border: 0;
+  border-radius: inherit;
+  box-sizing: border-box;
+  font: var(--gyro-font-body)/1.5 var(--gyro-font-sans);
+  min-height: var(--gyro-composer-min-h);
+  max-height: calc(var(--gyro-space-panel) * 10);
+  padding: var(--gyro-composer-pad);
+}
+:root[data-theme] .gyro-chat-surface .gyro-composer-editor > textarea::placeholder {
+  color: var(--gyro-text-quaternary);
+}
+:root[data-theme] .gyro-chat-surface .gyro-composer-shell > .gyro-composer-bar {
+  background: transparent;
+  border: 0;
+  column-gap: var(--gyro-space-standard);
+  min-height: calc(
+    var(--gyro-composer-action-size) + var(--gyro-chat-space-2)
+  );
+  padding: var(--gyro-chat-space-2) var(--gyro-chat-space-1) 0;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-composer-shell
+  > .gyro-composer-context-row {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  flex-grow: 0;
+  justify-content: flex-start;
+  margin: 0;
+  backdrop-filter: none;
+  box-shadow: none;
+  min-height: 0;
+  padding: 0 var(--gyro-space-compact) var(--gyro-space-standard);
+  position: relative;
+  inset: auto;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-composer-context-row
+  > .gyro-composer-control {
+  justify-content: flex-start;
+}
+:root[data-theme]
+  .gyro-chat-surface.is-empty
+  > .gyro-chat-start:not(.is-mission) {
+  align-self: stretch;
+  box-sizing: border-box;
+  height: 100%;
+  justify-content: flex-end;
+  min-height: 0;
+  padding: 0 0 calc(var(--gyro-chat-space-1) * 4.5);
+}
+.gyro-chat-start-intro {
+  align-items: center;
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 0;
+  width: 100%;
+}
+.gyro-chat-start-intro > .gyro-brand-logo {
+  flex: none;
+  height: calc(var(--gyro-space-panel) * 2);
+  margin: 0 auto var(--gyro-space-section);
+  width: calc(var(--gyro-space-panel) * 2);
+}
+.gyro-chat-start-intro > h1 {
+  color: var(--gyro-text);
+  font: 500 var(--gyro-chat-start-heading-size)/1.12 var(--gyro-font-display);
+  letter-spacing: var(--gyro-letter-spacing-start);
+  margin: 0;
+  text-align: center;
+}
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-composer-input
+  > .gyro-composer-blocker {
+  background: transparent;
+  border: 0;
+  border-radius: inherit;
+  font-size: var(--gyro-chat-small-size);
+  margin: 0;
+  padding: var(--gyro-space-comfortable) var(--gyro-space-panel);
+}
+.gyro-composer-input.is-setup-empty > .gyro-composer-editor {
+  grid-area: 1 / 1;
+}
+.gyro-composer-input.is-setup-empty > .gyro-composer-blocker {
+  grid-area: 1 / 1;
+  position: relative;
+  z-index: 2;
+  pointer-events: none;
+}
+.gyro-composer-input.is-setup-empty > .gyro-composer-blocker > button {
+  pointer-events: auto;
+}
+.gyro-composer-input.is-setup-empty textarea::placeholder {
+  opacity: 0;
+}
+.gyro-composer-input.is-setup-empty:has(textarea:focus)
+  > .gyro-composer-blocker {
+  display: none;
+}
+.gyro-composer-input.is-setup-empty:has(textarea:focus)
+  textarea::placeholder {
+  opacity: 1;
+}
+@container (max-width: 620px) {
+  :root[data-theme]
+    .gyro-chat-surface
+    .gyro-composer-shell
+    > .gyro-composer-bar {
+    column-gap: var(--gyro-space-compact);
+  }
+}
+
+/* Focus is a quiet border lift, not a ring: the caret already says where
+   typing goes. */
+.gyro-composer-input {
+  transition: border-color var(--gyro-premium-motion-fast)
+    var(--gyro-premium-ease);
+}
+.gyro-composer-input:has(textarea:focus-visible) {
+  border-color: color-mix(
+    in srgb,
+    var(--gyro-text) 22%,
+    var(--gyro-chat-hairline)
+  );
+}
+:root[data-theme] .gyro-chat-surface .gyro-composer-shell:focus-within {
+  filter: none;
+}
+
+/* Attachments sit inside the input, above the text: square thumbnails and
+   compact file chips in one scrolling row. */
+.gyro-composer-input > .gyro-composer-attachments {
+  align-items: stretch;
+  flex-wrap: nowrap;
+  gap: var(--gyro-chat-space-2);
+  grid-row: 1;
+  min-width: 0;
+  overflow-x: auto;
+  padding: var(--gyro-chat-space-2) var(--gyro-chat-space-2) 0;
+  scrollbar-width: none;
+}
+.gyro-composer-input > .gyro-composer-attachments::-webkit-scrollbar {
+  display: none;
+}
+.gyro-composer-input > .gyro-composer-attachments .gyro-composer-attachment {
+  --gyro-composer-attachment-size: calc(56px * var(--gyro-ui-scale, 1));
+  background: var(--gyro-surface-raised);
+  border: 1px solid var(--gyro-chat-hairline);
+  border-radius: var(--gyro-radius-md);
+  box-sizing: border-box;
+  flex: none;
+  height: var(--gyro-composer-attachment-size);
+  max-width: calc(var(--gyro-space-panel) * 14);
+  padding: 0 var(--gyro-chat-space-2) 0 calc(var(--gyro-chat-space-1) * 2.5);
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment.is-image {
+  padding: 0;
+  width: var(--gyro-composer-attachment-size);
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment.is-image::after,
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment.is-image
+  > span {
+  display: none;
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment.is-image
+  > .gyro-composer-image-fallback {
+  top: 50%;
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment.is-image
+  button {
+  background: color-mix(in srgb, var(--gyro-chat-media-shade) 68%, transparent);
+  border: 0;
+  color: var(--gyro-chat-media-text);
+  height: calc(var(--gyro-space-panel) + var(--gyro-chat-space-1));
+  opacity: 0;
+  right: calc(var(--gyro-chat-space-1) * 0.75);
+  top: calc(var(--gyro-chat-space-1) * 0.75);
+  transform: none;
+  transition: opacity var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+  width: calc(var(--gyro-space-panel) + var(--gyro-chat-space-1));
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment.is-image:hover
+  button,
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment.is-image
+  button:focus-visible {
+  opacity: 1;
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment.is-image
+  button:hover {
+  background: color-mix(in srgb, var(--gyro-chat-media-shade) 86%, transparent);
+}
+@media (hover: none) {
+  .gyro-composer-input
+    > .gyro-composer-attachments
+    .gyro-composer-attachment.is-image
+    button {
+    opacity: 1;
+  }
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment:not(.is-image)
+  > svg {
+  color: var(--gyro-muted);
+  flex: none;
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment:not(.is-image)
+  strong {
+  font-size: var(--gyro-chat-small-size);
+  font-weight: 500;
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment:not(.is-image)
+  > button:last-child {
+  border-radius: var(--gyro-radius-sm);
+  padding: var(--gyro-chat-space-1);
+}
+.gyro-composer-input
+  > .gyro-composer-attachments
+  .gyro-composer-attachment:not(.is-image)
+  > button:last-child:hover {
+  background: var(--gyro-sidebar-soft);
+  color: var(--gyro-text);
+}
+.gyro-composer-input > .gyro-composer-attachment-preview {
+  grid-row: 2;
+  margin: var(--gyro-chat-space-2) var(--gyro-chat-space-2) 0;
+}
+.gyro-composer-input.is-setup-empty:has(> .gyro-composer-attachments)
+  > :is(.gyro-composer-editor, .gyro-composer-blocker) {
+  grid-area: 3 / 1;
+}
+/* The composer a dragged image will land in, so a drop never feels blind. */
+.gyro-composer-shell[data-media-drop-target] .gyro-composer-input {
+  border-color: var(--gyro-focus-ring);
+  box-shadow: 0 0 0 1px var(--gyro-focus-ring);
+}
+
+:root[data-theme]
+  .gyro-chat-surface.is-empty.is-tiled
+  > .gyro-chat-start:not(.is-mission) {
+  padding-inline: var(--gyro-chat-gutter);
+}
+.gyro-composer-bar > .gyro-dictation-button::before {
+  background: var(--gyro-border-strong);
+  content: "";
+  height: 50%;
+  left: calc(-1 * var(--gyro-space-compact));
+  pointer-events: none;
+  position: absolute;
+  top: 25%;
+  width: 1px;
+}
+
+/* Shared sizing for the composer controls and utility menus. */
+:root[data-theme]
+  .gyro-chat-surface
+  .gyro-composer-shell
+  .gyro-composer-bar
+  :is(.gyro-composer-chip, .gyro-composer-tool) {
+  min-height: var(--gyro-composer-action-size);
+  font-size: var(--gyro-chat-small-size);
+}
+:root
+  .gyro-composer-shell
+  .gyro-composer-popover:not(.gyro-model-rail):not(
+    .gyro-effort-slider-popover
+  ) {
+  background: var(--gyro-surface);
+  border-radius: var(--gyro-radius-md);
+  padding: var(--gyro-chat-space-2);
+  gap: calc(var(--gyro-chat-space-1) / 2);
+}
+:root .gyro-composer-shell .gyro-composer-popover .gyro-composer-menu-item {
+  min-height: calc(var(--gyro-space-panel) * 2);
+  padding: var(--gyro-chat-space-2);
+  border-radius: var(--gyro-radius-sm);
+  font-size: var(--gyro-chat-small-size);
+}
+:root .gyro-composer-shell .gyro-approval-picker .gyro-composer-menu-item {
+  border-radius: var(--gyro-radius-sm);
+}
+:root
+  .gyro-composer-shell
+  .gyro-composer-popover
+  .gyro-composer-menu-item
+  strong {
+  font-size: var(--gyro-chat-small-size);
+  line-height: 1.4;
+}
+:root .gyro-composer-shell .gyro-context-picker {
+  width: calc(var(--gyro-space-panel) * 16);
+  max-width: calc(100vw - var(--gyro-space-panel) * 2);
+}

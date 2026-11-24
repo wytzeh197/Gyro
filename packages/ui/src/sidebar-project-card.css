@@ -25,7 +25,7 @@
 
 /* Project memory uses the same dialog shell and control surfaces as General.
    Only its body scrolls, keeping the project tabs and close action in reach. */
-.gyro-project-edit-dialog.is-memory[open] {
+.gyro-dialog.gyro-project-edit-dialog.is-memory {
   display: flex;
   flex-direction: column;
   max-height: min(640px, calc(100dvh - var(--gyro-space-section) * 2));
@@ -130,21 +130,6 @@
 
 .gyro-project-settings-memory .gyro-memory-panel .gyro-memory-toolbar input {
   padding-left: calc(var(--gyro-space-comfortable) * 3);
-}
-
-.gyro-project-settings-memory .gyro-memory-panel .gyro-primary-button {
-  flex-shrink: 0;
-  min-height: var(--gyro-control-comfortable);
-  padding: var(--gyro-space-standard) var(--gyro-space-panel);
-  border-radius: var(--gyro-radius-md);
-  background: var(--gyro-text);
-  color: var(--gyro-surface);
-}
-
-.gyro-project-settings-memory
-  .gyro-memory-panel
-  .gyro-primary-button:hover:not(:disabled) {
-  opacity: 0.85;
 }
 
 .gyro-project-settings-memory .gyro-memory-list ul {

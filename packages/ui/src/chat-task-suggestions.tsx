@@ -7,7 +7,7 @@ import {
   CornerDownRight,
   Gauge,
   X,
-} from "lucide-react";
+} from "./icons";
 import {
   createContext,
   useContext,

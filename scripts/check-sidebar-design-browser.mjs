@@ -231,8 +231,10 @@ try {
     );
     await click(".gyro-sidebar-project-toggle");
     await click(".gyro-sidebar-new-session > button");
-    assert.ok(
-      await evaluate("!!document.querySelector('[aria-label=\"New Chat\"]')"),
+    // The Base UI menu mounts its popup a frame after the click.
+    await until(
+      () => evaluate("!!document.querySelector('[aria-label=\"New Chat\"]')"),
+      "new session menu",
     );
     await click('[aria-label="New Chat"]');
     await until(
@@ -275,6 +277,51 @@ try {
         ": geometry, pin persistence, collapse persistence, new chat, search, workflows, hide/restore passed",
     );
   }
+  await load("scene=chat&theme=dark&reset=1", 860);
+  const sessionCount = () =>
+    evaluate("window.__TAURI_INTERNALS__.invoke('list_sessions').then(items => items.length)");
+  const beforeDelete = await sessionCount();
+  const dialog = "document.querySelector('.gyro-workbench-confirmation[role=alertdialog]')";
+  const openDelete = async () => {
+    await click('.gyro-session-row [aria-label="Chat options"]');
+    await until(
+      () => evaluate(`[...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent.trim() === 'Delete')`),
+      "chat delete menu item",
+    );
+    await evaluate(`[...document.querySelectorAll('[role="menuitem"]')].find(item => item.textContent.trim() === 'Delete').click()`);
+    await until(
+      () => evaluate(`(${dialog})?.contains(document.activeElement) && document.activeElement.textContent.trim() === "Cancel"`),
+      "delete dialog focuses the safe action",
+    );
+  };
+  await openDelete();
+  assert.equal(
+    await evaluate(`document.getElementById((${dialog}).getAttribute("aria-labelledby"))?.textContent.trim()`),
+    "Delete this chat?",
+  );
+  await key("Escape", "Escape", 27);
+  await until(() => evaluate(`!(${dialog})`), "Escape closes the delete dialog");
+  assert.equal(await sessionCount(), beforeDelete, "Escape preserves the chat");
+  await openDelete();
+  for (const type of ["mousePressed", "mouseReleased"]) {
+    await call("Input.dispatchMouseEvent", {
+      type,
+      x: 20,
+      y: 20,
+      button: "left",
+      clickCount: 1,
+    });
+  }
+  await until(() => evaluate(`!(${dialog})`), "backdrop closes the delete dialog");
+  assert.equal(await sessionCount(), beforeDelete, "the backdrop preserves the chat");
+  await openDelete();
+  await evaluate(`[...(${dialog}).querySelectorAll('button')].find(button => button.textContent.trim() === "Delete chat").click()`);
+  await until(
+    async () => (await sessionCount()) === beforeDelete - 1,
+    "explicit confirmation deletes the fixture chat",
+  );
+  console.log("Session deletion confirms explicitly. Escape and the backdrop preserve the chat.");
+
   // The host receives new chats from another device without reloading or
   // changing the active conversation. Repeat delivery must not duplicate rows.
   await load("scene=chat&theme=light&reset=1");
@@ -428,11 +475,15 @@ try {
     "project details",
   );
   await click(".gyro-project-card-edit");
+  await until(
+    () => evaluate("!!document.querySelector('.gyro-project-edit-dialog[role=dialog]')"),
+    "project settings dialog",
+  );
   await click(".gyro-project-settings-views button:last-child");
   await until(
     () =>
       evaluate(
-        "!!document.querySelector('.gyro-project-edit-dialog[open] .gyro-memory-list')",
+        "!!document.querySelector('.gyro-project-edit-dialog[role=dialog] .gyro-memory-list')",
       ),
     "memory in project settings",
   );

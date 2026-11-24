@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { FileText, Image, Music2, Video, X } from "lucide-react";
+import { FileText, Image, Music2, Video, X } from "./icons";
 import { workspaceFileBadge } from "./workspace-file-icons";
 import {
   chatFileKind,

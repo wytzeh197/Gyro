@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import { applyAppearancePreferences } from "../packages/ui/src/appearance-runtime.ts";
+import { normalizeThemePreferences } from "../packages/ui/src/theme/theme-engine.ts";
 
 const transpile = (path) =>
   ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), {
@@ -36,6 +38,11 @@ async function runBoot(surface, failure) {
     localStorage: { getItem: () => null },
   };
   window.top = window.self;
+  const documentElement = {
+    dataset: {},
+    ownerDocument: { defaultView: null },
+    style: { setProperty() {}, removeProperty() {} },
+  };
   runInNewContext(boot, {
     exports: {},
     URLSearchParams,
@@ -43,12 +50,14 @@ async function runBoot(surface, failure) {
     window,
     localStorage: { getItem: () => null },
     document: {
-      documentElement: { dataset: {} },
+      documentElement,
       querySelector: () => null,
       getElementById: () => ({}),
     },
     require: (id) => {
       if (id === "react") return { default: react };
+      if (id === "@gyro-dev/ui/appearance-runtime")
+        return { applyAppearancePreferences };
       if (id === "@tauri-apps/api/core") return { isTauri: () => false };
       if (id === "react-dom/client")
         return {
@@ -66,7 +75,7 @@ async function runBoot(surface, failure) {
           {
             exports,
             window,
-            document: { documentElement: { dataset: {} } },
+            document: { documentElement },
             require: (dependency) => {
               if (dependency === "@tauri-apps/api/core")
                 return { isTauri: () => false };
@@ -76,6 +85,14 @@ async function runBoot(surface, failure) {
                     throw new Error("Browser boot must not set a native theme");
                   },
                 };
+              if (dependency === "@tauri-apps/api/window")
+                return {
+                  getCurrentWindow: () => {
+                    throw new Error("Browser boot must not update a native window");
+                  },
+                };
+              if (dependency === "@gyro-dev/ui/theme")
+                return { normalizeThemePreferences };
               throw new Error("Unexpected appearance import " + dependency);
             },
           },

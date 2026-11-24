@@ -1,3 +1,6 @@
+import { Input } from "./primitives/controls";
+import { Button } from "./primitives/button";
+import { Empty, Spinner } from "./primitives/feedback";
 import { Folder, FolderOpen } from "./workspace-folder-icons";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
@@ -5,11 +8,11 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  LoaderCircle,
   Search,
   X,
-} from "lucide-react";
+} from "./icons";
 import { SettingsEmptyState, SettingsGroup, SettingsRow, SettingsSwitch } from "./settings-controls";
+import { WorkbenchScene } from "./workbench-scenes";
 import gyroLogoLight from "./assets/gyro-logo.svg";
 import gyroLogoDark from "./assets/gyro-logo-white.svg";
 import type {
@@ -209,23 +212,27 @@ function ResultRow({
       </div>
       {result.sessionId && (
         <div className="gyro-import-row-actions">
-          <button
-            className="gyro-import-button is-quiet"
+          <Button
+            className="gyro-import-button"
+            variant="link"
+            size="sm"
             type="button"
             onClick={() =>
               onOpenSession(result.sessionId!, result.workspacePath)
             }
           >
             Open chat
-          </button>
+          </Button>
           {!workspaceAvailable && (
-            <button
-              className="gyro-import-button is-quiet"
+            <Button
+              className="gyro-import-button"
+              variant="link"
+              size="sm"
               type="button"
               onClick={() => onLocateFolder(result.sessionId!)}
             >
               Locate folder
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -368,31 +375,15 @@ export function ProjectImportSettings({
           : "Import complete";
 
   const scanAction = (
-        <button
-          className="gyro-import-button gyro-primary-button is-primary"
-          disabled={
-            busy ||
-            loadingSources ||
-            !sources.some((source) => source.available)
-          }
-          onClick={onScan}
-          type="button"
-        >
-          {scanning ? (
-            <>
-              <LoaderCircle
-                aria-hidden="true"
-                className="gyro-import-spinner"
-                size={14}
-              />
-              Scanning…
-            </>
-          ) : scan ? (
-            "Rescan projects"
-          ) : (
-            "Scan projects"
-          )}
-        </button>
+    <Button
+      className="gyro-import-button"
+      loading={scanning}
+      size="sm"
+      disabled={busy || loadingSources || !sources.some((source) => source.available)}
+      onClick={onScan}
+    >
+      {scanning ? "Scanning…" : scan ? "Rescan projects" : "Scan projects"}
+    </Button>
   );
   return (
     <div className="gyro-project-import-settings">
@@ -401,9 +392,10 @@ export function ProjectImportSettings({
         label="Import sources"
         description="Your projects stay in their current folders. Choose the chats you want to bring into Gyro."
       >
+        {!scan && !scanning && !loadingSources ? <WorkbenchScene kind="import" /> : null}
         {loadingSources && (
           <div className="gyro-import-loading" role="status">
-            <LoaderCircle aria-hidden="true" size={15} />
+            <Spinner decorative size="sm" />
             Finding local data folders…
           </div>
         )}
@@ -426,14 +418,16 @@ export function ProjectImportSettings({
             >
               {source.available ? "Available" : "Not found"}
             </span>
-            <button
+            <Button
               className="gyro-import-button"
+              variant="outline"
+              size="sm"
               disabled={busy || loadingSources}
               onClick={() => onChooseDataFolder(source.kind)}
               type="button"
             >
               Choose data folder
-            </button>
+            </Button>
           </div>
         ))}
         <SettingsRow
@@ -455,14 +449,16 @@ export function ProjectImportSettings({
         <div className="gyro-import-error" role="alert">
           <span>{error}</span>
           {onRetry && (
-            <button
+            <Button
               className="gyro-import-button"
+              variant="outline"
+              size="sm"
               disabled={busy || loadingSources}
               onClick={onRetry}
               type="button"
             >
               Retry
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -481,13 +477,15 @@ export function ProjectImportSettings({
               </span>
             </div>
             {running && (
-              <button
+              <Button
                 className="gyro-import-button"
+                variant="outline"
+                size="sm"
                 onClick={onCancel}
                 type="button"
               >
                 Cancel import
-              </button>
+              </Button>
             )}
           </div>
           <progress
@@ -508,7 +506,7 @@ export function ProjectImportSettings({
           <div className="gyro-import-projects-toolbar">
             <label className="gyro-import-search">
               <Search aria-hidden="true" size={15} />
-              <input
+              <Input
                 aria-label="Search projects and chats"
                 disabled={scanning}
                 onChange={(event) => setQuery(event.target.value)}
@@ -522,17 +520,17 @@ export function ProjectImportSettings({
             </span>
           </div>
           {groups.length === 0 && (
-            <div className="gyro-import-empty">
-              <FolderOpen aria-hidden="true" size={22} />
-              <strong>
-                {query ? "No matching projects" : "No chats found"}
-              </strong>
-              <span>
-                {query
+            <Empty
+              className="gyro-import-empty"
+              size="compact"
+              icon={<FolderOpen size={22} />}
+              title={query ? "No matching projects" : "No chats found"}
+              description={
+                query
                   ? "Try another project name, path, or chat title."
-                  : "Choose a different data folder or include archived chats, then scan again."}
-              </span>
-            </div>
+                  : "Choose a different data folder or include archived chats, then scan again."
+              }
+            />
           )}
           {groups.map((group, groupIndex) => {
             const availableIds = group.chats
@@ -619,13 +617,15 @@ export function ProjectImportSettings({
                     </time>
                   </div>
                   {existingId && (
-                    <button
-                      className="gyro-import-button is-quiet"
+                    <Button
+                      className="gyro-import-button"
+                      variant="link"
+                      size="sm"
                       type="button"
                       onClick={() => onOpenSession(existingId, group.path)}
                     >
                       Open project
-                    </button>
+                    </Button>
                   )}
                 </div>
                 {isExpanded && (
@@ -669,8 +669,10 @@ export function ProjectImportSettings({
                                 <span className="gyro-import-existing">
                                   Already in Gyro
                                 </span>
-                                <button
-                                  className="gyro-import-button is-quiet"
+                                <Button
+                                  className="gyro-import-button"
+                                  variant="link"
+                                  size="sm"
                                   type="button"
                                   onClick={() =>
                                     onOpenSession(
@@ -680,15 +682,17 @@ export function ProjectImportSettings({
                                   }
                                 >
                                   Open
-                                </button>
+                                </Button>
                                 {!candidate.workspaceAvailable && (
-                                  <button
-                                    className="gyro-import-button is-quiet"
+                                  <Button
+                                    className="gyro-import-button"
+                                    variant="link"
+                                    size="sm"
                                     type="button"
                                     onClick={() => onLocateFolder(sessionId)}
                                   >
                                     Locate folder
-                                  </button>
+                                  </Button>
                                 )}
                               </>
                             )}
@@ -707,15 +711,17 @@ export function ProjectImportSettings({
                 ? `${selectedIds.length} ${selectedIds.length === 1 ? "chat" : "chats"} selected`
                 : "Select projects or individual chats to import."}
             </span>
-            <button
-              className="gyro-import-button is-primary"
+            <Button
+              className="gyro-import-button"
+              variant="default"
+              size="sm"
               disabled={busy || !selectedIds.length}
               onClick={() => onImport(selectedIds)}
               type="button"
             >
               Import {selectedIds.length}{" "}
               {selectedIds.length === 1 ? "chat" : "chats"}
-            </button>
+            </Button>
           </div>
         </SettingsGroup>
       )}
@@ -773,33 +779,39 @@ export function ImportedChatRecoveryNotice({
       </div>
       <div className="gyro-import-row-actions">
         {kind === "missing-workspace" && onLocateFolder && (
-          <button
+          <Button
             className="gyro-import-button"
+            variant="outline"
+            size="sm"
             onClick={onLocateFolder}
             type="button"
           >
             Locate folder
-          </button>
+          </Button>
         )}
         {kind === "resume-unavailable" && (
           <>
             {onRetry && (
-              <button
+              <Button
                 className="gyro-import-button"
+                variant="outline"
+                size="sm"
                 onClick={onRetry}
                 type="button"
               >
                 Retry
-              </button>
+              </Button>
             )}
             {onContinueNewSession && (
-              <button
+              <Button
                 className="gyro-import-button"
+                variant="outline"
+                size="sm"
                 onClick={onContinueNewSession}
                 type="button"
               >
                 Continue in a new session
-              </button>
+              </Button>
             )}
           </>
         )}

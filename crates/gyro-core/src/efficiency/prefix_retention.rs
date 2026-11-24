@@ -4,6 +4,7 @@ use super::context::{
     EvidencePolicy,
 };
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 /// Retention is local to one owned API turn. Window compaction and provider
 /// recovery remain free to shorten a request sooner.
@@ -11,6 +12,8 @@ use serde_json::Value;
 pub struct PrefixRetention {
     rounds: usize,
     checkpoint_bytes: usize,
+    previous: Option<PreparedPrefix>,
+    reuses_completed_prefix: bool,
 }
 
 // Candidates for paired measurement, not claims about a provider's cache.
@@ -38,42 +41,119 @@ impl PrefixRetention {
             *self = Self::default();
             return prepare_owned_model_request_for_task(messages, policy, task);
         }
-        // The current exchange has not been sent yet. Fold duplicate reads in
-        // it even when previously sent messages must survive byte for byte.
         let saved = compact_duplicate_reads(messages);
-        // A shrinking request means compaction/recovery has already changed
-        // the prefix. Retire now rather than delaying behind a stale checkpoint.
-        if (1..CHECKPOINT_ROUNDS).contains(&self.rounds)
-            && request_bytes(messages)
-                .checked_sub(self.checkpoint_bytes)
-                .is_some_and(|growth| growth < MAX_GROWTH_BYTES)
-        {
-            self.rounds += 1;
-            return saved;
+        saved + self.prepare_request_for_task(messages, policy, enabled, task, None)
+    }
+
+    /// The runner has already folded duplicate evidence as it appended the
+    /// fresh tool replies. Prepare only the retained prefix here.
+    pub(crate) fn prepare_request_for_task(
+        &mut self,
+        messages: &mut [Value],
+        policy: EvidencePolicy,
+        enabled: bool,
+        task: &str,
+        tools: Option<(&[Value], bool)>,
+    ) -> usize {
+        if !enabled {
+            *self = Self::default();
+            return retire_with_policy(messages, policy, task);
         }
-        let retired = retire_with_policy(messages, policy, task);
-        self.checkpoint_bytes = request_bytes(messages);
-        self.rounds = 1;
-        saved + retired
+        let (mut prefix, matches_previous) = measure_request(messages, tools, self.previous);
+        // A growing request can still have an edited prefix. Retire now if
+        // a warning, catalog change, or compaction invalidated the earlier input.
+        let retain = matches_previous
+            && (1..CHECKPOINT_ROUNDS).contains(&self.rounds)
+            && prefix
+                .message_bytes
+                .checked_sub(self.checkpoint_bytes)
+                .is_some_and(|growth| growth < MAX_GROWTH_BYTES);
+        let retired = if retain {
+            self.rounds += 1;
+            0
+        } else {
+            let retired = retire_with_policy(messages, policy, task);
+            if retired > 0 {
+                prefix = measure_request(messages, tools, None).0;
+            }
+            self.checkpoint_bytes = prefix.message_bytes;
+            self.rounds = 1;
+            retired
+        };
+        self.reuses_completed_prefix =
+            retain && self.previous.is_some_and(|prefix| prefix.completed);
+        self.previous = Some(prefix);
+        retired
+    }
+
+    pub(crate) fn confirm_request_completed(&mut self) {
+        if let Some(prefix) = self.previous.as_mut() {
+            prefix.completed = true;
+        }
+        if std::mem::take(&mut self.reuses_completed_prefix) {
+            crate::provider_observation::efficiency_event(|events| {
+                events.confirmed_prefix_reuses = events.confirmed_prefix_reuses.saturating_add(1);
+            });
+        }
     }
 }
 
-// Measure serialized bytes without retaining another full request allocation.
-fn request_bytes(messages: &[Value]) -> usize {
-    struct Counter(usize);
-    impl std::io::Write for Counter {
+#[derive(Clone, Copy)]
+struct PreparedPrefix {
+    message_count: usize,
+    message_bytes: usize,
+    hash: [u8; 32],
+    completed: bool,
+}
+
+// Measure the growth budget and fingerprint the earlier prefix in the same
+// serialization pass. Only the digest and counts live past this preparation.
+fn measure_request(
+    messages: &[Value],
+    tools: Option<(&[Value], bool)>,
+    previous: Option<PreparedPrefix>,
+) -> (PreparedPrefix, bool) {
+    struct Measurement {
+        hash: Sha256,
+        bytes: usize,
+    }
+    impl std::io::Write for Measurement {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0 = self.0.saturating_add(bytes.len());
+            self.hash.update(bytes);
+            self.bytes = self.bytes.saturating_add(bytes.len());
             Ok(bytes.len())
         }
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
     }
-    let mut counter = Counter(0);
-    // Serializing a Value to this infallible writer cannot fail.
-    serde_json::to_writer(&mut counter, messages).expect("count JSON bytes");
-    counter.0
+    let mut measurement = Measurement {
+        hash: Sha256::new(),
+        bytes: 0,
+    };
+    serde_json::to_writer(&mut measurement, &tools).expect("fingerprint tool settings");
+    measurement.bytes = 2; // The message array's brackets, outside the growing hash.
+    let mut matches_previous = false;
+    for (index, message) in messages.iter().enumerate() {
+        if index > 0 {
+            measurement.hash.update(b",");
+            measurement.bytes += 1;
+        }
+        serde_json::to_writer(&mut measurement, message).expect("fingerprint JSON message");
+        if let Some(previous) = previous.filter(|previous| previous.message_count == index + 1) {
+            let previous_length_hash: [u8; 32] = measurement.hash.clone().finalize().into();
+            matches_previous = previous_length_hash == previous.hash;
+        }
+    }
+    (
+        PreparedPrefix {
+            message_count: messages.len(),
+            message_bytes: measurement.bytes,
+            hash: measurement.hash.finalize().into(),
+            completed: false,
+        },
+        matches_previous,
+    )
 }
 
 #[cfg(test)]
@@ -148,6 +228,60 @@ mod tests {
         state.prepare(&mut messages, EvidencePolicy::Preview, true);
         exchange(&mut messages, 1, MAX_GROWTH_BYTES);
         assert!(state.prepare(&mut messages, EvidencePolicy::Preview, true) > 0);
+    }
+
+    #[test]
+    fn a_rewritten_prefix_starts_a_new_retirement_checkpoint_even_if_the_body_grows() {
+        let mut state = PrefixRetention::default();
+        let mut messages = messages();
+        state.prepare(&mut messages, EvidencePolicy::Preview, true);
+        messages[1]["content"] = json!("updated task");
+        exchange(&mut messages, 1, 3000);
+        state.prepare(&mut messages, EvidencePolicy::Preview, true);
+        assert_eq!(state.rounds, 1, "the earlier messages were changed");
+    }
+
+    #[test]
+    fn reuse_requires_two_completed_requests_and_the_same_tool_settings() {
+        let _scope = crate::provider_observation::Scope::start();
+        let observed = || {
+            crate::provider_observation::snapshot()
+                .unwrap()
+                .context_attribution
+                .efficiency_events
+                .map_or(0, |events| events.confirmed_prefix_reuses)
+        };
+        let mut state = PrefixRetention::default();
+        let mut messages = messages();
+        let tools = [json!({"type":"function","function":{"name":"read_file"}})];
+        let policy = EvidencePolicy::Preview;
+
+        state.prepare_request_for_task(&mut messages, policy, true, "", Some((&tools, true)));
+        state.confirm_request_completed();
+        exchange(&mut messages, 1, 3000);
+        state.prepare_request_for_task(&mut messages, policy, true, "", Some((&tools, true)));
+        assert_eq!(
+            observed(),
+            0,
+            "the matching preparation is not yet confirmed"
+        );
+        state.confirm_request_completed();
+        assert_eq!(observed(), 1);
+        state.confirm_request_completed();
+        assert_eq!(observed(), 1, "a completion is counted once");
+
+        exchange(&mut messages, 2, 3000);
+        state.prepare_request_for_task(&mut messages, policy, true, "", Some((&tools, false)));
+        state.confirm_request_completed();
+        assert_eq!(state.rounds, 1);
+        assert_eq!(observed(), 1, "tool choice changed");
+
+        exchange(&mut messages, 3, 3000);
+        state.prepare_request_for_task(&mut messages, policy, true, "", None);
+        exchange(&mut messages, 4, 3000);
+        state.prepare_request_for_task(&mut messages, policy, true, "", None);
+        state.confirm_request_completed();
+        assert_eq!(observed(), 1, "the preceding preparation did not complete");
     }
 
     #[test]

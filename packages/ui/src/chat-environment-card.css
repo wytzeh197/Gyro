@@ -57,8 +57,8 @@
   border: 0;
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--gyro-premium-motion)
-    var(--gyro-premium-ease);
+  transition: background-color var(--gyro-motion)
+    var(--gyro-ease);
 }
 
 .gyro-env-card-bar-toggle:hover {
@@ -236,9 +236,7 @@
 }
 
 .gyro-env-card-node.is-active {
-  border: 2px solid color-mix(in srgb, var(--gyro-cobalt) 25%, transparent);
-  border-top-color: var(--gyro-cobalt);
-  animation: gyro-env-card-spin 900ms linear infinite;
+  color: var(--gyro-cobalt);
 }
 
 .gyro-env-card-node.is-todo {
@@ -247,12 +245,6 @@
 
 .gyro-env-card-node.is-blocked {
   border: 1.5px dashed var(--gyro-attention);
-}
-
-@keyframes gyro-env-card-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* Buttons (waiting) */
@@ -268,8 +260,8 @@
   font-size: var(--gyro-font-support);
   cursor: pointer;
   transition:
-    background-color var(--gyro-premium-motion) var(--gyro-premium-ease),
-    color var(--gyro-premium-motion) var(--gyro-premium-ease);
+    background-color var(--gyro-motion) var(--gyro-ease),
+    color var(--gyro-motion) var(--gyro-ease);
 }
 
 .gyro-env-card-button:hover {
@@ -503,8 +495,8 @@
   border-left: 1px solid var(--gyro-border-soft);
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--gyro-premium-motion)
-    var(--gyro-premium-ease);
+  transition: background-color var(--gyro-motion)
+    var(--gyro-ease);
 }
 
 .gyro-env-card-cell:first-child {
@@ -854,12 +846,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .gyro-env-card-node.is-active {
-    animation: none;
-    border-color: var(--gyro-cobalt);
-    border-right-color: color-mix(in srgb, var(--gyro-cobalt) 25%, transparent);
-  }
-
   .gyro-env-card-bar-toggle,
   .gyro-env-card-button,
   .gyro-env-card-cell {

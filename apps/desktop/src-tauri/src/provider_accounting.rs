@@ -31,20 +31,6 @@ pub(super) fn has_dispatched_tools(app: &tauri::AppHandle, session_id: &str) -> 
         })
 }
 
-pub(super) fn set_usage_offset(app: &tauri::AppHandle, session: &str, tokens: Option<UsageTokens>) {
-    if let Some(control) = app
-        .state::<ProviderCancellationManager>()
-        .flags
-        .lock()
-        .ok()
-        .and_then(|flags| flags.get(session).cloned())
-    {
-        if let Ok(mut offset) = control.usage_offset.lock() {
-            *offset = tokens;
-        }
-    }
-}
-
 struct TokenEmission {
     display: UsageTokens,
     spend: Option<(UsageTokens, u32)>,
@@ -86,17 +72,12 @@ impl TokenEmission {
         let worker_tokens = observed.and_then(|(_, tokens)| tokens).unwrap_or(tokens);
         Self {
             display: delegated_agents::add_tokens(offset, Some(tokens)).unwrap(),
-            spend: Some((
-                delegated_agents::add_tokens(offset, Some(worker_tokens)).unwrap(),
-                observed.map_or(0, |(requests, _)| requests),
-            )),
+            spend: Some((worker_tokens, observed.map_or(0, |(requests, _)| requests))),
         }
     }
 
     fn task(tokens: UsageTokens) -> Self {
-        // The worker receipts were checked while running. This cumulative
-        // display reading may also include child receipts in the ledger, so
-        // feeding it back into the live guard would count those children twice.
+        // Committed receipts already appear in the guard's ledger.
         Self {
             display: tokens,
             spend: None,
@@ -294,7 +275,10 @@ pub(super) fn record_provider_usage(
                 .unwrap_or(session_id);
                 let _ = store.link_efficiency_task(task, session_id, turn);
                 let totals = store.efficiency_task_totals(task).ok();
-                let _ = store.append_event_with_turn_id(session_id,SessionEventKind::SystemEvent,"",serde_json::json!({"kind":"efficiency-receipt","taskId":task,"contextAttribution":attribution,"optimizationOverheadMicros":timing::efficiency_overhead(),"generationRequests":observation.as_ref().map(|s|s.requests.max(s.provider_attempts)),"retryCount":entry.retry_count,"requestedReasoningEffort":request.reasoning_effort,"usageTokens":tokens,"usageAccounting":tokens.effective_accounting(),"estimatedCost":price.and_then(|p|p.price(tokens)),"taskTotals":totals,"subscriptionBilling":!gyro_core::efficiency::controls(&request.provider_id).owns_requests}),Some(turn));
+                let checkpoint_recoveries = observation.as_ref()
+                    .and_then(|summary| summary.context_attribution.efficiency_events.as_ref())
+                    .map(|events| events.checkpoint_recoveries);
+                let _ = store.append_event_with_turn_id(session_id,SessionEventKind::SystemEvent,"",serde_json::json!({"kind":"efficiency-receipt","taskId":task,"contextAttribution":attribution,"optimizationOverheadMicros":timing::efficiency_overhead(),"generationRequests":observation.as_ref().map(|s|s.requests.max(s.provider_attempts)),"retryCount":entry.retry_count,"requestedReasoningEffort":request.reasoning_effort,"usageTokens":tokens,"usageAccounting":tokens.effective_accounting(),"estimatedCost":price.and_then(|p|p.price(tokens)),"checkpointRecoveries":checkpoint_recoveries,"taskTotals":totals,"subscriptionBilling":!gyro_core::efficiency::controls(&request.provider_id).owns_requests}),Some(turn));
             }
         }
         Err(error) => eprintln!(
@@ -436,30 +420,27 @@ mod tests {
             .link_usage_turn(child.id, child_turn, parent.id, turn)
             .unwrap();
         let task = store.task_usage_tokens(parent.id, turn).unwrap().unwrap();
-        let outside = store
-            .provider_usage_outside_turn_since(
+        let settled = store
+            .provider_usage_totals_since(
                 "openrouter",
                 chrono::Utc::now() - chrono::Duration::hours(24),
-                parent.id,
-                turn,
             )
             .unwrap();
+        let direct = store.direct_turn_usage_tokens(parent.id, turn).unwrap();
         assert_eq!(task.total_tokens, 300);
-        assert_eq!(outside.total_tokens, 800);
+        assert_eq!(settled.total_tokens, 900);
         let display = TokenEmission::task(task);
         assert_eq!(display.display.total_tokens, 300);
-        assert!(
-            display.spend.is_none(),
-            "child spend is already in the outside-turn ledger"
-        );
+        assert!(display.spend.is_none());
         let live = TokenEmission::live(
             UsageTokens::measured(Some(100), None, Some(0), None, None),
             None,
-            None,
+            direct,
         );
+        assert_eq!(live.display.total_tokens, 200);
         assert_eq!(
-            outside.total_tokens + live.spend.unwrap().0.total_tokens,
-            900
+            settled.total_tokens + live.spend.unwrap().0.total_tokens,
+            1_000
         );
     }
 
@@ -475,7 +456,7 @@ mod tests {
                 Some(tokens(5)),
             );
             assert_eq!(emission.display.total_tokens, 105 + active);
-            assert_eq!(emission.spend.unwrap().0.total_tokens, 105 + active);
+            assert_eq!(emission.spend.unwrap().0.total_tokens, 100 + active);
         }
         let first = TokenEmission::request(tokens(20), None, Some((1, None)), None);
         assert_eq!(first.display.total_tokens, 20);
@@ -506,14 +487,14 @@ mod tests {
         );
         assert_eq!(emission.display.total_tokens, 150);
         let (spend, requests) = emission.spend.unwrap();
-        assert_eq!((requests, spend.total_tokens), (2, 150));
+        assert_eq!((requests, spend.total_tokens), (2, 120));
         assert_eq!(
             gyro_core::call_ceiling_tokens(
                 Some(spend.input_tokens),
                 Some(spend.cached_input_tokens),
                 Some(spend.output_tokens),
             ),
-            140
+            120
         );
         assert!(
             !spend.measured,

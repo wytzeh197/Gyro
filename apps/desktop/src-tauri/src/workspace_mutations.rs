@@ -17,6 +17,18 @@ use gyro_core::{
     SessionEventKind, SessionStore,
 };
 use uuid::Uuid;
+
+#[derive(Debug)]
+pub(super) struct StaleEditBase(pub &'static str);
+
+impl std::fmt::Display for StaleEditBase {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.0)
+    }
+}
+
+impl std::error::Error for StaleEditBase {}
+
 pub(super) fn bound_workspace_root_id(
     store: &SessionStore,
     bound: &BoundProviderCapabilityContext,
@@ -105,7 +117,7 @@ fn create_file_mutation_proposal_with_base(
     }
     let base_exists = candidate.exists();
     if require_expected_base && base_exists != request.expected_hash.is_some() {
-        anyhow::bail!("file changed on disk; reload before proposing an edit");
+        return Err(StaleEditBase("file changed on disk; reload before proposing an edit").into());
     }
     let expected_hash = if base_exists {
         let (current, _) = read_workspace_bytes(
@@ -123,7 +135,9 @@ fn create_file_mutation_proposal_with_base(
         let current_hash = content_hash(&current);
         if let Some(expected) = request.expected_hash.as_deref() {
             if current_hash != expected {
-                anyhow::bail!("file changed on disk; reload before proposing an edit");
+                return Err(
+                    StaleEditBase("file changed on disk; reload before proposing an edit").into(),
+                );
             }
         }
         Some(current_hash)

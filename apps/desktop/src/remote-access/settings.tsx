@@ -1,9 +1,10 @@
+import { Button, Input, Textarea } from "@gyro-dev/ui";
 import { useEffect, useId, useRef, useState } from "react";
 import {
   Check,
   Copy,
   ShieldCheck,
-} from "../../../../packages/ui/node_modules/lucide-react";
+} from "@gyro-dev/ui/icons";
 import { PairQr } from "./pair-qr";
 import {
   SettingsEmptyState,
@@ -118,22 +119,22 @@ function PendingApproval({
         </div>
       </div>
       <div className="gyro-remote-actions is-end">
-        <button
+        <Button
           type="button"
-          className="gyro-secondary-button"
+          variant="outline"
           disabled={busy}
           onClick={onReject}
         >
           Reject
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className={primary ? "gyro-primary-button" : "gyro-secondary-button"}
+          variant={primary ? "default" : "outline"} leading={<ShieldCheck size={14} aria-hidden />}
           disabled={busy}
           onClick={onApprove}
         >
-          <ShieldCheck size={14} aria-hidden /> Approve
-        </button>
+           Approve
+        </Button>
       </div>
     </section>
   );
@@ -173,24 +174,24 @@ function TrustedDeviceRow({
       ) : (
         <>
           <DeviceKindPicker id={peer.id} name={peer.name} compact />
-          <button
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             disabled={busy || !enabled}
             onClick={onOpen}
           >
             {connected ? "Open projects" : "Connect"}
-          </button>
+          </Button>
         </>
       )}
-      <button
+      <Button
         type="button"
-        className="gyro-secondary-button"
+        variant="outline"
         disabled={busy}
         onClick={onRevoke}
       >
         Revoke
-      </button>
+      </Button>
     </SettingsRow>
   );
 }
@@ -378,13 +379,13 @@ export default function RemoteAccessSettings() {
               loadError ?? "Gyro could not read this Mac's remote access state."
             }
           >
-            <button
+            <Button
               type="button"
-              className="gyro-secondary-button"
+              variant="outline"
               onClick={() => void refresh()}
             >
               Retry loading settings
-            </button>
+            </Button>
           </SettingsEmptyState>
         ) : (
           <>
@@ -466,14 +467,10 @@ export default function RemoteAccessSettings() {
                     </span>
                   )}
                   {!pairOpen && (
-                    <button
+                    <Button
                       aria-describedby={pairingScopeId}
                       type="button"
-                      className={
-                        pairIsPrimary
-                          ? "gyro-primary-button"
-                          : "gyro-secondary-button"
-                      }
+                      variant={pairIsPrimary ? "default" : "outline"}
                       disabled={busy || !enabled}
                       title={
                         enabled ? undefined : "Turn on remote access to pair"
@@ -481,7 +478,7 @@ export default function RemoteAccessSettings() {
                       onClick={() => void startInvitation()}
                     >
                       Pair a device
-                    </button>
+                    </Button>
                   )}
                   {!pairOpen && (
                     <p className="gyro-remote-pairing-scope" id={pairingScopeId}>
@@ -544,26 +541,22 @@ export default function RemoteAccessSettings() {
                         </SettingsStatus>
                         <span>{inviteError}</span>
                         <span className="gyro-remote-spacer" />
-                        <button
+                        <Button
                           type="button"
-                          className="gyro-secondary-button"
+                          variant="outline"
                           disabled={busy}
                           onClick={closePairing}
                         >
                           Cancel
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
-                          className={
-                            sheetIsPrimary
-                              ? "gyro-primary-button"
-                              : "gyro-secondary-button"
-                          }
+                          variant={sheetIsPrimary ? "default" : "outline"}
                           disabled={busy}
                           onClick={() => void startInvitation()}
                         >
                           Retry
-                        </button>
+                        </Button>
                       </div>
                     ) : pairTarget === "phone" ? (
                       <>
@@ -614,26 +607,22 @@ export default function RemoteAccessSettings() {
                             </SettingsStatus>
                             <span>Codes work for 5 minutes.</span>
                             <span className="gyro-remote-spacer" />
-                            <button
+                            <Button
                               type="button"
-                              className="gyro-secondary-button"
+                              variant="outline"
                               disabled={busy}
                               onClick={closePairing}
                             >
                               Close
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                               type="button"
-                              className={
-                                sheetIsPrimary
-                                  ? "gyro-primary-button"
-                                  : "gyro-secondary-button"
-                              }
+                              variant={sheetIsPrimary ? "default" : "outline"}
                               disabled={busy}
                               onClick={() => void startInvitation()}
                             >
                               New code
-                            </button>
+                            </Button>
                           </div>
                         ) : (
                           <div className="gyro-remote-actions">
@@ -643,17 +632,17 @@ export default function RemoteAccessSettings() {
                                 : "Codes work once, for 5 minutes."}
                             </span>
                             <span className="gyro-remote-spacer" />
-                            <button
+                            <Button
                               type="button"
-                              className="gyro-secondary-button"
+                              variant="outline"
                               disabled={busy}
                               onClick={closePairing}
                             >
                               Cancel
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                               type="button"
-                              className="gyro-secondary-button"
+                              variant="outline" leading={<Copy size={14} aria-hidden />}
                               disabled={!invitation}
                               title="For a phone that can't scan: paste this in Gyro on the phone"
                               onClick={() =>
@@ -665,8 +654,8 @@ export default function RemoteAccessSettings() {
                                 )
                               }
                             >
-                              <Copy size={14} aria-hidden /> Copy code instead
-                            </button>
+                               Copy code instead
+                            </Button>
                           </div>
                         )}
                       </>
@@ -703,26 +692,22 @@ export default function RemoteAccessSettings() {
                             </SettingsStatus>
                             <span>Invitations work for 5 minutes.</span>
                             <span className="gyro-remote-spacer" />
-                            <button
+                            <Button
                               type="button"
-                              className="gyro-secondary-button"
+                              variant="outline"
                               disabled={busy}
                               onClick={closePairing}
                             >
                               Close
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                               type="button"
-                              className={
-                                sheetIsPrimary
-                                  ? "gyro-primary-button"
-                                  : "gyro-secondary-button"
-                              }
+                              variant={sheetIsPrimary ? "default" : "outline"}
                               disabled={busy}
                               onClick={() => void startInvitation()}
                             >
                               New invitation
-                            </button>
+                            </Button>
                           </div>
                         ) : (
                           <>
@@ -740,21 +725,17 @@ export default function RemoteAccessSettings() {
                                 once
                               </span>
                               <span className="gyro-remote-spacer" />
-                              <button
+                              <Button
                                 type="button"
-                                className="gyro-secondary-button"
+                                variant="outline"
                                 disabled={busy}
                                 onClick={closePairing}
                               >
                                 Cancel
-                              </button>
-                              <button
+                              </Button>
+                              <Button
                                 type="button"
-                                className={
-                                  sheetIsPrimary
-                                    ? "gyro-primary-button"
-                                    : "gyro-secondary-button"
-                                }
+                                variant={sheetIsPrimary ? "default" : "outline"} leading={<Copy size={14} aria-hidden />}
                                 onClick={() =>
                                   void run(() =>
                                     navigator.clipboard.writeText(
@@ -763,8 +744,8 @@ export default function RemoteAccessSettings() {
                                   )
                                 }
                               >
-                                <Copy size={14} aria-hidden /> Copy invitation
-                              </button>
+                                 Copy invitation
+                              </Button>
                             </div>
                           </>
                         )}
@@ -783,7 +764,7 @@ export default function RemoteAccessSettings() {
                     label="Device name"
                     detail="Shown on devices you pair with. Traffic is end-to-end encrypted; relay operators can see connection metadata."
                   >
-                    <input
+                    <Input
                       className="gyro-settings-input"
                       aria-label="Device name"
                       value={name}
@@ -897,9 +878,9 @@ export default function RemoteAccessSettings() {
                         }
                       >
                         {control.owner === "local" && control.requestedBy && (
-                          <button
+                          <Button
                             type="button"
-                            className="gyro-secondary-button"
+                            variant="outline"
                             disabled={busy}
                             onClick={() =>
                               void run(() =>
@@ -912,11 +893,11 @@ export default function RemoteAccessSettings() {
                             }
                           >
                             Allow requesting device
-                          </button>
+                          </Button>
                         )}
-                        <button
+                        <Button
                           type="button"
-                          className="gyro-secondary-button"
+                          variant="outline"
                           disabled={busy}
                           onClick={() =>
                             void run(() =>
@@ -933,7 +914,7 @@ export default function RemoteAccessSettings() {
                           {control.owner === "local"
                             ? "Release control"
                             : "Take control"}
-                        </button>
+                        </Button>
                       </SettingsRow>
                     ))}
                   </SettingsGroup>
@@ -944,7 +925,7 @@ export default function RemoteAccessSettings() {
                   description="Paste an invitation created on the Mac you want to use."
                 >
                   <div className="gyro-remote-stack">
-                    <textarea
+                    <Textarea
                       id="gyro-paste-invitation"
                       aria-label="Invitation from the host Mac"
                       className="gyro-settings-input"
@@ -955,9 +936,9 @@ export default function RemoteAccessSettings() {
                       spellCheck={false}
                     />
                     <div className="gyro-remote-actions">
-                      <button
+                      <Button
                         type="button"
-                        className="gyro-secondary-button"
+                        variant="outline"
                         disabled={busy || !pasted.trim()}
                         onClick={() =>
                           void run(async () => {
@@ -972,7 +953,7 @@ export default function RemoteAccessSettings() {
                         }
                       >
                         {busy ? "Connecting…" : "Request pairing"}
-                      </button>
+                      </Button>
                       {pending && (
                         <span role="status">
                           {pending.status === "pending" ? (
@@ -992,13 +973,13 @@ export default function RemoteAccessSettings() {
                         </span>
                       )}
                       {paired && (
-                        <button
+                        <Button
                           type="button"
-                          className="gyro-secondary-button"
+                          variant="outline"
                           onClick={() => selectHost(paired)}
                         >
                           Open remote workspace
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </div>

@@ -1,5 +1,6 @@
 import { retainGitSnapshot } from "./workspace-preparation.ts";
 import { normalizedInterfaceSize, normalizedMotionSpeed } from "./appearance.ts";
+import { normalizeThemePreferences, type ThemePreferences } from "./theme/theme-engine.ts";
 import {
   mergeDiscoveredTaskRuns,
   rememberTaskRun,
@@ -1644,7 +1645,7 @@ export type WorkbenchAction =
   | { type: "open-tool-panel"; tab?: WorkbenchPaneTab }
   | { type: "close-tool-panel" }
   | { type: "set-workbench-mode"; mode: WorkbenchMode }
-  | { type: "set-settings-preferences"; patch: Partial<Pick<WorkbenchPreferences, "settingsSections" | "defaultChatProviderId" | "defaultChatEffort" | "checkReminders">> }
+  | { type: "set-settings-preferences"; patch: Partial<Pick<WorkbenchPreferences, "settingsSections" | "defaultChatProviderId" | "defaultChatEffort" | "checkReminders">> & ThemePreferences }
   | { type: "import-portable-settings"; settings: Partial<import("./settings-transfer").PortableSettings> }
   | { type: "set-default-workspace-mode"; mode: WorkbenchMode }
   | { type: "set-theme"; theme: ThemeMode }
@@ -2192,6 +2193,8 @@ export function workbenchReducer(
         preferences: {
           ...state.preferences,
           theme: defaults.theme,
+          ...normalizeThemePreferences(undefined),
+          themePreset: state.preferences.themePreset ? "gyro" : undefined,
           mainColor: defaults.mainColor,
           secondaryColor: defaults.secondaryColor,
           density: defaults.density,
@@ -2308,8 +2311,10 @@ export function workbenchReducer(
             ? false
             : state.isToolPanelOpen,
       };
-    case "set-settings-preferences":
-      return { ...state, preferences: { ...state.preferences, ...action.patch } };
+    case "set-settings-preferences": {
+      const preferences = { ...state.preferences, ...action.patch };
+      return { ...state, preferences: { ...preferences, ...normalizeThemePreferences(preferences) } };
+    }
     case "import-portable-settings":
       return { ...state, preferences: { ...state.preferences, ...action.settings, desktopNotifications: { ...state.preferences.desktopNotifications, ...action.settings.desktopNotifications } } };
     case "set-default-workspace-mode":
@@ -5279,7 +5284,9 @@ function normalizeWorkbenchPreferences(
           (commandId): commandId is string => typeof commandId === "string",
         )
       : [],
-    density: preferences?.density === "compact" ? "compact" : "comfortable",
+    density: preferences?.density === "compact" || preferences?.density === "spacious"
+      ? preferences.density
+      : "comfortable",
     interfaceSize: normalizedInterfaceSize(preferences?.interfaceSize),
     motionSpeed: normalizedMotionSpeed(preferences?.motionSpeed),
     lastSettingsSection: normalizedSettingsSection(
@@ -5338,6 +5345,7 @@ function normalizeWorkbenchPreferences(
       preferences?.theme === "system"
         ? preferences.theme
         : "system",
+    ...normalizeThemePreferences(preferences),
     mainColor: normalizeAppearanceColor(preferences?.mainColor, "#ffffff"),
     secondaryColor: normalizeAppearanceColor(
       preferences?.secondaryColor,

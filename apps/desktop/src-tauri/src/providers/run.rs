@@ -1,12 +1,12 @@
 use crate::{
     app::config::load_config_blocking,
     capabilities::bridge::active_provider_capability_context,
-    context_compaction, delegated_agents, efficiency, goal_runner, live_model_context,
+    context_compaction, delegated_agents, efficiency, live_model_context,
     project_import_continuation,
-    provider_accounting::provider_turn_tokens,
+    provider_accounting::{provider_turn_tokens, record_provider_usage},
     provider_context::provider_context_usage_with_window,
     provider_run_cleanup::ProviderTurnFinalizer,
-    provider_timeline,
+    provider_spend_guard, provider_timeline,
     providers::{
         binding::{
             bind_provider_capability_context, bind_provider_chat_request, validate_chat_context,
@@ -15,7 +15,7 @@ use crate::{
             normal_chat_requests_plan, ChatMode, ProviderChatRequest, ProviderChatResponse,
             ProviderContextCompactionResponse,
         },
-        compaction::compact_local_provider_chat,
+        compaction::{compact_local_provider_chat, compaction_usage_context},
         events::{
             append_provider_diagnostics_event, append_provider_status_event,
             emit_provider_activity_event, emit_provider_chat_event, kimi_acp_plan_payload,
@@ -46,11 +46,12 @@ use crate::{
     },
     stores::{open_store, parse_uuid, to_string},
     text::{chat_message_preview, validate_chat_message},
-    usage::guard::UsageContext,
+    usage::guard::{usage_guard_block, UsageContext},
 };
 use gyro_core::{
     timing, timing::Stage as TimingStage, GyroConfig, GyroPaths, HarnessRunStatus,
-    ProviderRunPayload, SessionEvent, SessionEventKind, UsageOrigin, WorkspaceContextSnapshot,
+    ProviderRunPayload, SessionEvent, SessionEventKind, UsageOrigin, UsageOutcome,
+    WorkspaceContextSnapshot,
 };
 use tauri::{Emitter, Manager};
 use uuid::Uuid;
@@ -415,10 +416,34 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
         #[cfg(test)]
         message: control_markers.message.clone(),
     };
-    session_title_stream::repair_missing(&store, &app, &request, title_extraction.title.as_deref());
+    if let Some(tokens) = session_title_stream::repair_missing(
+        &store,
+        &app,
+        &request,
+        title_extraction.title.as_deref(),
+    ) {
+        runner_output.accounted_usage = Some(tokens);
+    }
     let mut plan_payloads =
         completed_plan_updates(&runner_output.activities, control_markers.plan_updates);
     let questions = control_markers.questions;
+    let goal_update = control_markers.goal_update.and_then(|update| {
+        request
+            .goal
+            .as_ref()
+            .filter(|goal| goal.status == "active")?;
+        Some(session_goal::checked_goal_update(
+            &store,
+            session_id,
+            run_id,
+            &goal_events,
+            update,
+            questions.is_some(),
+            runner_output.answer_cut_off
+                || runner_output.paused_at_tool_budget
+                || provider_chat_cancelled(&app, &request.session_id),
+        ))
+    });
     let artifact_extraction = ChatArtifactExtraction {
         // Intermediate previews remain attached to the final reply; emitting
         // one no longer closes the turn or discards it when the answer arrives.
@@ -520,12 +545,8 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
         if let Some(update) = control_markers.agent_update.as_ref() {
             object.insert("agentUpdate".into(), update.clone());
         }
-        if let Some(update) = control_markers
-            .goal_update
-            .as_ref()
-            .and_then(goal_runner::normalize_update)
-        {
-            object.insert("goalUpdate".into(), update);
+        if let Some(update) = goal_update.as_ref() {
+            object.insert("goalUpdate".into(), update.clone());
         }
         object.insert(
             "turnTokens".into(),
@@ -719,8 +740,7 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
 
     // The model may report that it met the goal, never that the goal changed:
     // the text stays the user's, only the status moves.
-    let goal_event = control_markers
-        .goal_update
+    let goal_event = goal_update
         .as_ref()
         .filter(|update| {
             update.get("status").and_then(serde_json::Value::as_str) == Some("complete")
@@ -730,10 +750,13 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
             goal.status == "active"
                 && !goal.text.trim().is_empty()
                 && !provider_chat_cancelled(&app, &request.session_id)
-                && session_goal::stored_session_goal(
-                    &store.read_goal_events(session_id).unwrap_or_default(),
-                )
-                .is_some_and(|current| current.status == "active" && current.text == goal.text)
+                && store.read_goal_events(session_id).is_ok_and(|current| {
+                    session_goal::goal_revision(&current)
+                        == session_goal::goal_revision(&goal_events)
+                        && session_goal::stored_session_goal(&current).is_some_and(|current| {
+                            current.status == "active" && current.text == goal.text
+                        })
+                })
         })
         .and_then(|goal| {
             let text = goal.text.trim();
@@ -799,9 +822,8 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
     if let Some(goal_event) = goal_event {
         activity_events.push(goal_event);
     }
-    // Every adapter reaches this boundary with a durable reply and no active
-    // tool writes. Native CLIs cannot have their private context rewritten by
-    // an API loop, so compact here as well as before the next prompt.
+    // Finish queued /compact requests once the reply is durable and tool
+    // writes have ended. Check the automatic threshold on the next prompt.
     // Close request admission under the same registry lock used by /compact.
     // A click after this point waits for release and compacts independently.
     if let Ok(flags) = app.state::<ProviderCancellationManager>().flags.lock() {
@@ -812,14 +834,11 @@ pub(crate) fn run_provider_chat_blocking_in_lease(
         }
     }
     if !provider_chat_cancelled(&app, &request.session_id) {
-        let binding = store
-            .get_provider_session_binding(session_id, &request.provider_id)
-            .map_err(to_string)?;
         match super::retry::auto_compact_owned_session(
             &store,
             &app,
             &request,
-            binding,
+            None,
             UsageContext::new(origin),
             super::retry::CompactionPoint::AfterReply,
         ) {
@@ -972,16 +991,44 @@ pub(crate) fn compact_provider_chat_blocking(
     let Some(resume_cursor) = resume_cursor else {
         return compact_local_provider_chat(&app, &store, &request, session_uuid, run_id);
     };
+    let usage_context = compaction_usage_context(&store, session_uuid)?;
+    if let Some(reason) = usage_guard_block(&store, usage_context.origin, &request.provider_id) {
+        return Err(reason);
+    }
+    provider_spend_guard::prepare_call(&app, &request, &store).map_err(to_string)?;
     let activity_params = serde_json::json!({ "turnId": format!("{run_id}:{}", Uuid::new_v4()) });
     let running =
         context_compaction::codex_context_compaction_activity(&activity_params, "running");
     emit_provider_activity_event(&app, &request, &running, Some(0));
 
-    let Some(compacted) = runner_for(ProviderAdapterKind::OpenAiCodex).compact(
-        &super::tauri_host::TauriRunnerHost::new(&app),
-        &request,
-        &resume_cursor,
-    ) else {
+    let compacted = {
+        let _observations = gyro_core::provider_observation::Scope::start();
+        let started = std::time::Instant::now();
+        let compacted = runner_for(ProviderAdapterKind::OpenAiCodex).compact(
+            &super::tauri_host::TauriRunnerHost::new(&app),
+            &request,
+            &resume_cursor,
+        );
+        if gyro_core::provider_observation::snapshot()
+            .is_some_and(|summary| summary.provider_attempts > 0)
+        {
+            let outcome = match &compacted {
+                Some(Ok(_)) => UsageOutcome::Done,
+                _ if provider_chat_cancelled(&app, &request.session_id) => UsageOutcome::Cancelled,
+                _ => UsageOutcome::Failed,
+            };
+            record_provider_usage(
+                &store,
+                &request,
+                usage_context,
+                None,
+                outcome,
+                started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+            );
+        }
+        compacted
+    };
+    let Some(compacted) = compacted else {
         return compact_local_provider_chat(&app, &store, &request, session_uuid, run_id);
     };
     let (completed, context_usage) = match compacted {

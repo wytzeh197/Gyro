@@ -16,58 +16,68 @@ import {
   Images,
   LockKeyhole,
   Settings,
-  createLucideIcon,
-} from "lucide-react";
+} from "./icons";
+import { createGyroIcon as createLucideIcon } from "./gyro-icon";
 import { resolveLanguage } from "./editor/languages/registry";
 
 // Filled letterforms stay crisp at the 14px size used by file rows. These
 // glyphs inherit the same theme-aware ink as the other file icons.
-const TypeScript = createLucideIcon("TypeScript", [
+const TypeScript = /* @__PURE__ */ createLucideIcon("TypeScript", [
   [
     "path",
     {
-      d: "M1 5h10v3H7.5v11h-3V8H1z M22 6.2l-1.5 2.4c-1.3-.9-2.3-1.3-3.5-1.3-1.2 0-1.8.5-1.8 1.3 0 .8.7 1.2 2.8 1.8 3 .9 4.5 2.1 4.5 4.5 0 2.7-2.1 4.4-5.4 4.4-2.3 0-4.3-.8-5.7-2.1l1.8-2.3c1.3 1.1 2.6 1.7 4 1.7 1.4 0 2.1-.5 2.1-1.4 0-.8-.6-1.2-2.6-1.8-3-.9-4.7-1.9-4.7-4.5 0-2.6 2-4.2 5.1-4.2 1.9 0 3.6.5 4.9 1.5z",
+      d: "M4 7h8v2.9H9.5V18H6.5V9.9H4zm16 1.1-1.4 2c-1.8-1.35-3.9-1.4-3.9-.12 0 .7.8.99 2.2 1.36 2.44.65 3.7 1.55 3.7 3.4 0 2.1-1.63 3.42-4.15 3.42-1.8 0-3.5-.62-4.62-1.76l1.56-1.9c1.02.84 2.05 1.25 3.06 1.25 1.05 0 1.51-.37 1.51-.88 0-.61-.65-.92-2.25-1.33C13.35 13 12 12.14 12 10.11 12 8.14 13.68 7 16.12 7c1.38 0 2.7.39 3.88 1.1Z",
       fill: "currentColor",
       stroke: "none",
-      key: "letters",
+      key: "0",
     },
   ],
 ]);
-const JavaScript = createLucideIcon("JavaScript", [
+
+const JavaScript = /* @__PURE__ */ createLucideIcon("JavaScript", [
   [
     "path",
     {
-      d: "M7 5h3v9.4c0 3.3-1.8 4.9-4.8 4.9-2.3 0-4-1.1-4.7-3l2.6-1.6c.5 1.1 1.1 1.7 2.1 1.7 1.2 0 1.8-.6 1.8-2z M22 6.2l-1.5 2.4c-1.3-.9-2.3-1.3-3.5-1.3-1.2 0-1.8.5-1.8 1.3 0 .8.7 1.2 2.8 1.8 3 .9 4.5 2.1 4.5 4.5 0 2.7-2.1 4.4-5.4 4.4-2.3 0-4.3-.8-5.7-2.1l1.8-2.3c1.3 1.1 2.6 1.7 4 1.7 1.4 0 2.1-.5 2.1-1.4 0-.8-.6-1.2-2.6-1.8-3-.9-4.7-1.9-4.7-4.5 0-2.6 2-4.2 5.1-4.2 1.9 0 3.6.5 4.9 1.5z",
+      d: "M7.4 7h3.15v7.36c0 2.52-1.43 3.89-3.75 3.89-1.74 0-2.89-.75-3.55-2L5.3 14.8c.32.55.72.86 1.22.86.57 0 .88-.35.88-1.24zm12.6 1.1-1.4 2c-1.8-1.35-3.9-1.4-3.9-.12 0 .7.8.99 2.2 1.36 2.44.65 3.7 1.55 3.7 3.4 0 2.1-1.63 3.42-4.15 3.42-1.8 0-3.5-.62-4.62-1.76l1.56-1.9c1.02.84 2.05 1.25 3.06 1.25 1.05 0 1.51-.37 1.51-.88 0-.61-.65-.92-2.25-1.33C13.35 13 12 12.14 12 10.11 12 8.14 13.68 7 16.12 7c1.38 0 2.7.39 3.88 1.1Z",
       fill: "currentColor",
       stroke: "none",
-      key: "letters",
+      key: "0",
     },
   ],
 ]);
-const Shell = createLucideIcon("Shell", [
-  ["path", { d: "m4 6 6 6-6 6m9 0h7", key: "prompt" }],
+
+const Shell = /* @__PURE__ */ createLucideIcon("Shell", [
+  ["path", { d: "m5.5 8 4 4-4 4m7.5 0h5.5", key: "0" }],
 ]);
-const Markdown = createLucideIcon("Markdown", [
-  ["path", { d: "M3 18V6l5 6 5-6v12m4-5 3 4 3-4m-3 4V6", key: "mark" }],
-]);
-const Vue = createLucideIcon("Vue", [
+
+const Markdown = /* @__PURE__ */ createLucideIcon("Markdown", [
   [
     "path",
     {
-      d: "M2 4h4l6 10 6-10h4L12 21Z",
+      d: "M3.75 16V8.25l4.45 4.4 4.45-4.4V16M18 8v8m-2.75-2.75L18 16l2.75-2.75",
+      key: "0",
+    },
+  ],
+]);
+
+const Vue = /* @__PURE__ */ createLucideIcon("Vue", [
+  [
+    "path",
+    {
+      d: "M3 5.5h4.65L12 13l4.35-7.5H21l-9 15Z",
       fill: "currentColor",
       stroke: "none",
-      key: "outer",
+      key: "0",
     },
   ],
   [
     "path",
     {
-      d: "M6 4h4l2 3.5L14 4h4l-6 10Z",
+      d: "M7.65 5.5h2.4L12 9l1.95-3.5h2.4L12 13Z",
       fill: "currentColor",
-      fillOpacity: "0.45",
+      fillOpacity: ".4",
       stroke: "none",
-      key: "inner",
+      key: "1",
     },
   ],
 ]);

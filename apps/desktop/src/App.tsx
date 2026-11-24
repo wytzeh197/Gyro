@@ -2,6 +2,8 @@ import { browserTraceRuntime } from "./browser-trace";
 import { useProviderCapabilityEvents } from "./use-provider-capability-events";
 import { refreshOpenEditorBuffers } from "./refresh-open-editor-buffers";
 import { ConfigRecoveryDialog } from "./config-recovery-dialog";
+import { ServerRunsDialog } from "./server-runs-dialog";
+import { Terminal as TerminalIcon } from "@gyro-dev/ui/icons";
 import { useTerminalLaunch } from "./use-terminal-launch";
 import { mergeTerminalOutput } from "./terminal-output";
 import { clearFocusedTerminal } from "./terminal-shortcuts";
@@ -43,7 +45,6 @@ import {
   restoreCompanionPanes,
   sessionApprovalCounts,
   sessionQuestionCounts,
-  revealChatQuestion,
   chatQuestionDismissalVersion,
   subscribeChatQuestionDismissals,
   setConfirmActionHandler,
@@ -140,8 +141,6 @@ import {
   MAX_QUEUED_CHAT_MESSAGES_TOTAL,
   MAX_RECENT_PROJECTS,
   MAX_REMOVED_PROJECTS,
-  MenuBarNavigationTarget,
-  MODEL_FOCUS_PEEK_CONTEXT_LINES,
   ModelStandardPrompt,
   normalizeChatMessage,
   OllamaDiscovery,
@@ -160,7 +159,6 @@ import {
   PROVIDER_SIGN_IN_FAST_POLL_MS,
   PROVIDER_SIGN_IN_POLL_ATTEMPTS,
   PROVIDER_STREAM_FLUSH_MS,
-  ProviderApprovalNotificationOpen,
   ProviderCapabilityResourceEvent,
   ProviderChatResponse,
   ProviderContextCompactionResponse,
@@ -218,7 +216,7 @@ import {
 } from "./browser-capture";
 import { createBrowserHostVisibility } from "./browser-host-visibility";
 import { sessionBrowserNative } from "./session-browser-native";
-import { requestBrowserAnnotation } from "./browser-annotations";
+import { prepareNativeAppAnnotation, requestBrowserAnnotation } from "./browser-annotations";
 import type { SessionBrowserSnapshot } from "./session-browser-queue";
 import {
   browserLiveStatusMessage,
@@ -316,6 +314,8 @@ import {
 import { githubSetupProfile } from "./github-setup-profile";
 import { parseProviderLoginProgress } from "./provider-login-progress";
 import { QuitConfirmDialog } from "./quit-confirm-dialog";
+import { useSourceControlOrigin } from "./use-source-control-origin";
+import { useWorkbenchNavigation } from "./use-workbench-navigation";
 import {
   sameSessionEvents,
   useCoalescedByKey,
@@ -542,8 +542,6 @@ import {
   type IdeAssistantRequest,
   type MenuBarOutcome,
   type MenuBarSnapshot,
-  type ModelFocus,
-  type ModelFocusPeekContent,
   type ModelFollowMode,
   type ModelProviderConfig,
   type NotificationPermissionState,
@@ -630,6 +628,7 @@ import {
 import { useUnreadCompletedChats } from "./unread-completed-chats";
 import { useGyroUpdater } from "./update-controller";
 import { useWorkspaceExplorerFiles } from "./workspace-explorer";
+import { normalizeThemePreferences } from "@gyro-dev/ui/theme";
 import { runWorkspaceSearchRoots } from "./workspace-search-run";
 
 // GitHub setup polls its terminal for up to 15 minutes: long enough for a
@@ -657,11 +656,16 @@ export function App() {
           type: "set-theme",
           theme: settings.theme as "system" | "light" | "dark",
         });
-      if (["compact", "comfortable"].includes(String(settings.density)))
+      if (settings.density === "compact" || settings.density === "comfortable" || settings.density === "spacious")
         dispatchWorkbench({
           type: "set-density",
-          density: settings.density as "compact" | "comfortable",
+          density: settings.density,
         });
+      const themePatch = Object.fromEntries(Object.entries(normalizeThemePreferences(settings))
+        .filter(([, value]) => value !== undefined));
+      if (Object.keys(themePatch).length) {
+        dispatchWorkbench({ type: "set-settings-preferences", patch: themePatch });
+      }
       if (
         ["small", "default", "large"].includes(String(settings.interfaceSize))
       )
@@ -1161,6 +1165,7 @@ export function App() {
     [],
   );
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [serverRunsWorkspace, setServerRunsWorkspace] = useState<string>();
   const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
   const [commandPaletteMode, setCommandPaletteMode] = useState<
     "commands" | "files" | "global"
@@ -7988,193 +7993,33 @@ export function App() {
     [acknowledgeFinishedChat, sessions],
   );
 
-  /**
-   * The one path that navigates on the model's behalf, and only because the
-   * user clicked "Open in workspace" on the focus strip or its peek.
-   */
-  const openModelFocus = useCallback(
-    (focus: ModelFocus) => {
-      if (focus.sessionId !== activeSessionIdRef.current) {
-        selectSession(focus.sessionId);
-      }
-      if (focus.kind === "ide" && focus.path) {
-        setSelectedFile(focus.path);
-        dispatchWorkbench({
-          type: "ide-open-tab",
-          tab: {
-            path: focus.path,
-            title: workspaceName(focus.path),
-            dirty: false,
-            preview: true,
-          },
-        });
-        setEditorRevealTarget({
-          path: focus.path,
-          lineNumber: Math.max(1, focus.line ?? 1),
-          column: Math.max(1, focus.column ?? 1),
-          nonce: Date.now(),
-        });
-        dispatchWorkbench({ type: "select-workspace-layout", layout: "code" });
-        return;
-      }
-      if (focus.kind === "terminal" && focus.paneId) {
-        dispatchWorkbench({
-          type: "select-terminal-pane",
-          paneId: focus.paneId,
-        });
-      }
-      if (focus.paneTab) {
-        dispatchWorkbench({ type: "open-tool-panel", tab: focus.paneTab });
-      }
-    },
-    [selectSession],
-  );
-
-  const loadModelFocusPeek = useCallback(
-    async (focus: ModelFocus): Promise<ModelFocusPeekContent> => {
-      if (focus.kind === "terminal") {
-        const pane = workbench.terminalPanes.find(
-          (item) => item.id === focus.paneId,
-        );
-        return {
-          title: focus.detail ?? focus.label,
-          subtitle: pane ? pane.status : "No terminal snapshot yet",
-          lines: (pane?.output ?? "").split("\n").slice(-40),
-        };
-      }
-      if (focus.kind === "output") {
-        const channel = workbench.ide.outputChannels.find(
-          (item) => item.id === focus.resourceId,
-        );
-        return {
-          title: focus.label,
-          subtitle: focus.detail,
-          lines: (channel?.lines ?? [])
-            .flatMap((line) => line.split("\n"))
-            .slice(-40),
-        };
-      }
-      if (focus.kind === "proposal") {
-        return {
-          title: focus.label,
-          subtitle: `${workbench.diffReview.files.length} file(s) in review`,
-          lines: workbench.diffReview.files.map(
-            (file) => `${file.state.padEnd(9)} ${file.path}`,
-          ),
-        };
-      }
-      if (focus.kind === "browser") {
-        return {
-          title: focus.label,
-          subtitle: focus.detail,
-          lines: focus.detail ? [focus.detail] : [],
-        };
-      }
-      const root = workspaceRoots[0];
-      if (!focus.path || !root) {
-        return { title: focus.label, lines: [] };
-      }
-      const content = await invoke<WorkspaceFileContent>(
-        "read_workspace_file_full",
-        { path: focus.path, workspacePath: root },
-      );
-      const allLines = content.content.split("\n");
-      const target = Math.max(1, focus.line ?? 1);
-      const startLine = Math.max(1, target - MODEL_FOCUS_PEEK_CONTEXT_LINES);
-      return {
-        title: focus.label,
-        subtitle: focus.path,
-        lines: allLines.slice(
-          startLine - 1,
-          target + MODEL_FOCUS_PEEK_CONTEXT_LINES,
-        ),
-        startLine,
-        highlightLine: target,
-      };
-    },
-    [
-      workbench.diffReview.files,
-      workbench.ide.outputChannels,
-      workbench.terminalPanes,
-      workspaceRoots,
-    ],
-  );
-
-  useEffect(() => {
-    if (!isTauriRuntime()) return;
-    let mounted = true;
-    let unlistenNavigation: (() => void) | undefined;
-    void listen<MenuBarNavigationTarget>(
-      "gyro://menu-bar-navigation",
-      (event) => {
-        if (!mounted) return;
-        const target = event.payload;
-        if (target.kind === "chat") {
-          dispatchWorkbench({
-            type: "select-destination",
-            destination: "workspace",
-          });
-          selectSession(target.id);
-          const reveal = () =>
-            requestAnimationFrame(() => revealChatQuestion(target.id));
-          void refreshEvents(target.id).then(reveal, reveal);
-          return;
-        }
-        if (target.kind === "automation") {
-          dispatchWorkbench({
-            type: "select-automation",
-            automationId: target.id,
-          });
-          return;
-        }
-        dispatchWorkbench({
-          type: "select-destination",
-          destination: "settings",
-        });
-        dispatchWorkbench({
-          type: "set-settings-section",
-          section: "general",
-        });
-      },
-    ).then((unlisten) => {
-      if (!mounted) unlisten();
-      else unlistenNavigation = unlisten;
-    });
-    return () => {
-      mounted = false;
-      unlistenNavigation?.();
-    };
-  }, [refreshEvents, selectSession]);
-
-  useEffect(() => {
-    if (!isTauriRuntime()) {
-      return;
-    }
-    let isMounted = true;
-    let unlistenApprovalNotification: (() => void) | undefined;
-    void listen<ProviderApprovalNotificationOpen>(
-      "gyro://provider-approval-notification-open",
-      (event) => {
-        if (!isMounted || !event.payload.sessionId) return;
-        dispatchWorkbench({
-          type: "select-destination",
-          destination: "workspace",
-        });
-        selectSession(event.payload.sessionId);
-        void refreshEvents(event.payload.sessionId);
-      },
-    ).then((unlisten) => {
-      if (!isMounted) {
-        unlisten();
-        return;
-      }
-      unlistenApprovalNotification = unlisten;
-    });
-    return () => {
-      isMounted = false;
-      unlistenApprovalNotification?.();
-    };
-  }, [refreshEvents, selectSession]);
+  const {
+    changeOriginNavigation,
+    readScmOriginHistory,
+    openScmOriginChat,
+    returnToOriginDiff,
+  } = useSourceControlOrigin({
+    visibleSessions,
+    activeSessionIdRef,
+    sessionEventsByIdRef,
+    selectSession,
+    capabilityResourceDataByCallId,
+    setChatAttachments,
+    setChatDrafts,
+    setSelectedWorkspaceRoot,
+    dispatchWorkbench,
+    setSelectedFile,
+  });
+  const { openModelFocus, loadModelFocusPeek } = useWorkbenchNavigation({
+    activeSessionIdRef,
+    dispatchWorkbench,
+    refreshEvents,
+    selectSession,
+    setEditorRevealTarget,
+    setSelectedFile,
+    workbench,
+    workspaceRoots,
+  });
 
   const focusChatPane = useCallback(
     (pane: ChatPaneRef) => {
@@ -15336,6 +15181,7 @@ export function App() {
     !isCommandPaletteOpen &&
     !quitConfirmation.requested &&
     !branchNameRequest &&
+    !serverRunsWorkspace &&
     !workspaceRename.draft &&
     !projectRemoveCandidate &&
     !terminalTerminateCandidate &&
@@ -15471,6 +15317,7 @@ export function App() {
     quitConfirmation.requested ||
     isCommandPaletteOpen ||
     Boolean(branchNameRequest) ||
+    Boolean(serverRunsWorkspace) ||
     Boolean(workspaceRename.draft) ||
     Boolean(projectRemoveCandidate) ||
     Boolean(terminalTerminateCandidate) ||
@@ -15481,6 +15328,7 @@ export function App() {
     quitConfirmation.requested ||
     isCommandPaletteOpen ||
     Boolean(branchNameRequest) ||
+    Boolean(serverRunsWorkspace) ||
     Boolean(workspaceRename.draft) ||
     Boolean(projectRemoveCandidate) ||
     Boolean(terminalTerminateCandidate) ||
@@ -15760,10 +15608,12 @@ export function App() {
     ) => {
       const preview = previewForBrowser(owner);
       if (action.startsWith("annotate-")) {
-        const result = await requestBrowserAnnotation({
-          action, feedback, capture: preview.latestCapture, sessionId: owner.sessionId,
-        });
-        if (action === "annotate-send") {
+        const result = action === "annotate-native-send"
+          ? await prepareNativeAppAnnotation(preview.runtime, owner, feedback)
+          : await requestBrowserAnnotation({
+            action, feedback, capture: preview.latestCapture, sessionId: owner.sessionId,
+          });
+        if (action === "annotate-send" || action === "annotate-native-send") {
           if (result.error || !result.message || !result.attachments) return result;
           const current = annotationContextRef.current;
           const isDraft = owner.sessionId === "workbench" || owner.sessionId.startsWith("workbench:");
@@ -16390,6 +16240,11 @@ export function App() {
             type: "select-workspace-layout",
             layout: "terminal-grid",
           });
+          break;
+        case "server-runs":
+          if (import.meta.env.DEV && isTauriRuntime() && workspaceActionRoot && workspaceTrusted) {
+            setServerRunsWorkspace(workspaceActionRoot);
+          }
           break;
         case "run-claude":
           runCommandProfile("claude");
@@ -18023,6 +17878,12 @@ export function App() {
       pane.kind === "session"
         ? sessions.find((session) => session.id === pane.sessionId)
         : undefined;
+    const sourceDiffTarget =
+      changeOriginNavigation &&
+      changeOriginNavigation.sessionId === paneSession?.id &&
+      !changeOriginNavigation.returning
+        ? changeOriginNavigation
+        : undefined;
     const paneWorkspace = normalizeProjectPath(pane.workspacePath);
     const paneBranchCatalog = branchCatalogs.get(paneWorkspace);
     const paneFiles = files.filter((file) =>
@@ -18178,6 +18039,8 @@ export function App() {
           questionState={questionStateForSession(paneSession?.id)}
           activeChatPanel={panePanel}
           paneKey={paneDraftKey}
+          sourceDiffTarget={sourceDiffTarget}
+          onReturnToSourceDiff={sourceDiffTarget ? returnToOriginDiff : undefined}
           onSelectChatPanel={selectPanePanel}
           {...paneCompanionProps}
           backupReview={backupReviewFor(paneSession?.id)}
@@ -19417,10 +19280,11 @@ export function App() {
                 terminalPanes={workbench.terminalPanes}
                 terminalTemplate={workbench.terminalTemplate}
                 renderEditor={(props) => {
-                  const review = workbench.ide.tabs.find(
+                  const diffTab = workbench.ide.tabs.find(
                     (tab) => tab.path === props.path,
-                  )?.sourceControlDiff;
-                  return review ? (
+                  );
+                  const review = diffTab?.sourceControlDiff;
+                  return review && diffTab ? (
                     <Suspense
                       fallback={
                         <div className="gyro-code-empty">
@@ -19431,6 +19295,17 @@ export function App() {
                       <SourceControlDiffEditor
                         key={props.path}
                         review={review}
+                        readOriginHistory={
+                          isTauriRuntime() ? readScmOriginHistory : undefined
+                        }
+                        onOpenOriginChat={openScmOriginChat}
+                        originTab={diffTab}
+                        restoreOrigin={
+                          changeOriginNavigation?.returning &&
+                          changeOriginNavigation.tab.path === props.path
+                            ? changeOriginNavigation.hunk
+                            : undefined
+                        }
                         onDetectedLanguage={(id) => {
                           const key = props.path;
                           if (key)
@@ -20129,6 +20004,14 @@ export function App() {
           onFinish={finishBranchNameRequest}
         />
       ) : null}
+      {serverRunsWorkspace ? (
+        <ServerRunsDialog
+          key={serverRunsWorkspace}
+          workspacePath={serverRunsWorkspace}
+          onClose={() => setServerRunsWorkspace(undefined)}
+          onBranchFetched={() => void refreshWorkspaceBranches(serverRunsWorkspace, true)}
+        />
+      ) : null}
       {quitConfirmation.requested ? (
         <QuitConfirmDialog
           onResolve={quitConfirmation.resolve}
@@ -20193,6 +20076,15 @@ export function App() {
       ) : null}
       {isCommandPaletteOpen ? (
         <CommandPaletteOverlay
+          additionalActions={import.meta.env.DEV && isTauriRuntime() ? [{
+            id: "server-runs",
+            label: "Server runs",
+            meta: "Run Codex on your Linux server",
+            keywords: "ssh remote host run on server",
+            icon: TerminalIcon,
+            requiresWorkspace: true,
+            requiresTrust: true,
+          }] : undefined}
           onClose={closeGlobalSearch}
           onCommand={runCommandPaletteCommand}
           onQueryChange={setCommandPaletteQuery}

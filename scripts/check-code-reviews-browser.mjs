@@ -145,11 +145,13 @@ try {
       deviceScaleFactor: 1,
       mobile: false,
     });
-    await call("Page.navigate", {
-      url: `${origin}/v012-review-fixture.html?${query}`,
-    });
+    const url = `${origin}/v012-review-fixture.html?${query}`;
+    await call("Page.navigate", { url });
     await until(
-      () => evaluate(`Boolean(document.querySelector('.gyro-second-opinion'))`),
+      () => evaluate(
+        `location.href === ${JSON.stringify(url)} &&
+          Boolean(document.querySelector('.gyro-second-opinion'))`,
+      ),
       "review panel",
     );
     await pause(600);

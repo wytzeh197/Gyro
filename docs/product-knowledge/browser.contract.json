@@ -6,7 +6,7 @@
   },
   "commands": [
     {
-      "description": "Discover Web, real macOS windows, and booted iPhone Simulator targets with prerequisite issues. Returns the selected target for this chat.",
+      "description": "Discover Web, real macOS windows, and installed iPhone and iPad Simulator targets with prerequisite issues. Returns the selected target for this chat.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {},
@@ -16,7 +16,7 @@
       "name": "gyro_browser_targets"
     },
     {
-      "description": "Select a discovered runtime targetId for this chat's Preview. Use web to return to the web page. Selection invalidates earlier framed captures; never presents an old capture as live.",
+      "description": "Select a discovered runtime targetId for this chat's Preview. Use web to return to the web page. Selection invalidates earlier captures; never presents an old capture as live.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -31,7 +31,7 @@
       "name": "gyro_browser_select_target"
     },
     {
-      "description": "Capture the selected runtime with a surround. PNG pixels include the frame; contentRect maps to the runtime. Returns target, owner, capture time and expiry. Native images are snapshots, not live streams. iPhone Simulator is capture-only.",
+      "description": "Capture the selected runtime as a PNG. contentRect maps image pixels to the runtime. Returns target, owner, capture time and expiry. Native images are snapshots. Simulator input takes place in Device Hub.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {},

@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, type ForwardedRef } from "react";
-import { Zap } from "lucide-react";
+import { Zap } from "./icons";
 import { clippingBounds } from "./composer-popover-bounds";
 import {
   useEffect,

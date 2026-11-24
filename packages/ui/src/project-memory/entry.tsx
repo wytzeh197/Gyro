@@ -1,4 +1,5 @@
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { Button } from "../primitives/button";
+import { ArrowLeft, Trash2 } from "../icons";
 import type { MemoryEntry } from "./types";
 export function MemoryEntryDetail({
   selected,
@@ -19,10 +20,13 @@ export function MemoryEntryDetail({
 }) {
   return (
     <div className="gyro-memory-detail">
-      <button className="gyro-secondary-button" onClick={back}>
-        <ArrowLeft size={14} />
+      <Button
+        variant="outline"
+        leading={<ArrowLeft size={14} aria-hidden="true" />}
+        onClick={back}
+      >
         All entries
-      </button>
+      </Button>
       <p className="gyro-memory-entry-text">{selected.text}</p>
       <p className="gyro-memory-hint">
         {selected.kind.replace("-", " ")}
@@ -58,19 +62,19 @@ export function MemoryEntryDetail({
         </p>
       ) : (
         <div className="gyro-memory-actions">
-          <button
-            className="gyro-secondary-button"
+          <Button
+            variant="outline"
             onClick={() => edit(selected)}
           >
             Edit memory
-          </button>
-          <button
-            className="gyro-secondary-button"
+          </Button>
+          <Button
+            variant="outline"
+            leading={<Trash2 size={14} aria-hidden="true" />}
             onClick={() => setForgetting(true)}
           >
-            <Trash2 size={14} />
             Forget
-          </button>
+          </Button>
         </div>
       )}
       {forgetting ? (
@@ -84,19 +88,19 @@ export function MemoryEntryDetail({
             context, and saved review inputs have separate deletion controls.
           </p>
           <div className="gyro-memory-actions">
-            <button
-              className="gyro-primary-button"
+            <Button
+              variant="destructive"
               disabled={saving}
               onClick={onForget}
             >
               Forget memory
-            </button>
-            <button
-              className="gyro-secondary-button"
+            </Button>
+            <Button
+              variant="outline"
               onClick={() => setForgetting(false)}
             >
               Keep memory
-            </button>
+            </Button>
           </div>
         </div>
       ) : null}

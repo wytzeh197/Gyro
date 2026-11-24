@@ -100,7 +100,11 @@ export function installGyroTooltips(root: Document = document): () => void {
     window.clearTimeout(timer);
     timer = window.setTimeout(
       () => {
-        if (target === element) show(element, text);
+        // A trigger whose menu or popover is open already shows its content.
+        const popupOpen =
+          element.hasAttribute("data-popup-open") ||
+          element.getAttribute("aria-expanded") === "true";
+        if (target === element && !popupOpen) show(element, text);
       },
       immediate || warm ? 0 : SHOW_DELAY_MS,
     );

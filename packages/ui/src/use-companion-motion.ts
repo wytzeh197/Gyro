@@ -94,7 +94,7 @@ export function useCompanionMotion(
     const factor =
       parseFloat(computed.getPropertyValue("--gyro-motion-factor")) || 1;
     const easing =
-      computed.getPropertyValue("--gyro-premium-ease").trim() || "ease-out";
+      computed.getPropertyValue("--gyro-ease").trim() || "ease-out";
     const opacity = Number(start.opacity);
     const fraction = open ? (initial || !changed ? 1 : 1 - opacity) : opacity;
     const duration =

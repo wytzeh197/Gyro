@@ -31,6 +31,7 @@ const browserChecks = [
   ["--settings-redesign", "settings-preview.html", "scripts/check-settings-redesign.mjs"],
   ["--companion-redesign", "companion-polish-fixture.html", "scripts/check-companion-redesign.mjs"],
   ["--command-failure", "command-failure-fixture.html", "scripts/check-command-failure-browser.mjs"],
+  ["--primitives", "primitives-gallery.html", "scripts/check-primitives-browser.mjs"],
 ];
 const selectedCheck = browserChecks.find(([flag]) => process.argv.includes(flag));
 const [, fixture, guard] = selectedCheck ?? [

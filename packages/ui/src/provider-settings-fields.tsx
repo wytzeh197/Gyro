@@ -1,9 +1,9 @@
-import { useLayoutEffect, useState, type ReactNode } from "react";
-import { MoreHorizontal, Plus, RefreshCw } from "lucide-react";
+import { Input, Textarea } from "./primitives/controls";
+import { Button } from "./primitives/button";
+import { useState, type ReactNode } from "react";
+import { MoreHorizontal, Plus, RefreshCw } from "./icons";
 import { SettingsGroup } from "./settings-controls";
-import { useOutsidePointerDismiss } from "./menu-dismiss";
-import { clippingBounds } from "./composer-popover-bounds";
-import { providerDetailsPosition } from "./provider-details-position";
+import { Popover } from "./primitives";
 import {
   providersForConfig,
   providerSupportsApiKey,
@@ -134,13 +134,13 @@ export function ProviderApiKeySection({
           notice={provider.id === "openai" ? "The Codex CLI connection uses your ChatGPT sign-in. Saving a key does not switch it to API billing." : undefined}
           action={
             canUse && onUseProvider ? (
-              <button
-                className="gyro-primary-button"
+              <Button
+                size="md"
                 type="button"
                 onClick={() => onUseProvider(provider.id, modelId!)}
               >
                 Use in chat
-              </button>
+              </Button>
             ) : null
           }
         />
@@ -182,7 +182,7 @@ function ProviderApiKeyField({
     <div className="gyro-provider-api-key">
       <div className="gyro-provider-api-key-row">
         {children}
-        <input
+        <Input
           aria-label="Provider API key"
           autoComplete="off"
           disabled={saving}
@@ -194,8 +194,8 @@ function ProviderApiKeyField({
           type="password"
           value={draft}
         />
-        <button
-          className="gyro-primary-button"
+        <Button
+          size="md"
           disabled={saving || !onSave || draft.trim().length === 0}
           onClick={async () => {
             if (await onSave?.(draft.trim())) setDraft("");
@@ -203,16 +203,16 @@ function ProviderApiKeyField({
           type="button"
         >
           {saving ? "Saving…" : configured ? "Replace" : "Save"}
-        </button>
+        </Button>
         {configured ? (
-          <button
-            className="gyro-danger-button"
+          <Button
+            variant="destructive-outline"
             disabled={saving}
             onClick={() => onClear?.()}
             type="button"
           >
             Remove
-          </button>
+          </Button>
         ) : null}
         {action}
       </div>
@@ -286,8 +286,8 @@ export function CustomProviderSection({
                     model{provider.models.length === 1 ? "" : "s"}
                   </span>
                 </div>
-                <button
-                  className="gyro-danger-button"
+                <Button
+                  variant="destructive-outline"
                   disabled={busy}
                   onClick={async () => {
                     setError(undefined);
@@ -303,7 +303,7 @@ export function CustomProviderSection({
                   type="button"
                 >
                   Remove
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
@@ -311,7 +311,7 @@ export function CustomProviderSection({
         <div className="gyro-provider-custom-form">
           <label>
             <span>Display name</span>
-            <input
+            <Input
               aria-label="Custom provider display name"
               disabled={busy}
               onChange={(event) => setDisplayName(event.target.value)}
@@ -321,7 +321,7 @@ export function CustomProviderSection({
           </label>
           <label>
             <span>Base URL</span>
-            <input
+            <Input
               aria-label="Custom provider base URL"
               autoComplete="off"
               disabled={busy}
@@ -333,7 +333,7 @@ export function CustomProviderSection({
           </label>
           <label>
             <span>API key</span>
-            <input
+            <Input
               aria-label="Custom provider API key"
               autoComplete="off"
               disabled={busy}
@@ -345,8 +345,8 @@ export function CustomProviderSection({
             />
           </label>
           <div className="gyro-provider-custom-fetch">
-            <button
-              className="gyro-secondary-button"
+            <Button
+              variant="outline" leading={<RefreshCw size={14} aria-hidden="true" />}
               disabled={
                 !onFetchCustomProviderModels ||
                 busy ||
@@ -373,13 +373,13 @@ export function CustomProviderSection({
               }}
               type="button"
             >
-              <RefreshCw size={14} />
+
               {fetching ? "Fetching…" : "Fetch models"}
-            </button>
+            </Button>
           </div>
           <label className="is-wide">
             <span>Model ids</span>
-            <textarea
+            <Textarea
               aria-label="Custom provider model ids"
               disabled={busy}
               onChange={(event) => setModelIds(event.target.value)}
@@ -390,8 +390,8 @@ export function CustomProviderSection({
             />
           </label>
           <div className="gyro-provider-custom-actions">
-            <button
-              className="gyro-primary-button"
+            <Button
+              size="md" leading={<Plus size={15} aria-hidden="true" />}
               disabled={!canSubmit}
               onClick={async () => {
                 setError(undefined);
@@ -417,9 +417,9 @@ export function CustomProviderSection({
               }}
               type="button"
             >
-              <Plus size={15} />
+
               Add provider
-            </button>
+            </Button>
           </div>
           {error ? <p className="gyro-provider-custom-error">{error}</p> : null}
           <p className="gyro-provider-custom-note">
@@ -431,7 +431,7 @@ export function CustomProviderSection({
   );
 }
 
-/** Dismiss the disclosure when clicking outside its controls. */
+/** An overflow trigger whose details open in the shared Popover surface. */
 export function ProviderDetailsMenu({
   children,
   label,
@@ -439,98 +439,24 @@ export function ProviderDetailsMenu({
   children: ReactNode;
   label: string;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const detailsRef = useOutsidePointerDismiss<HTMLDetailsElement>(isOpen, () =>
-    setIsOpen(false),
-  );
-  useLayoutEffect(() => {
-    const details = detailsRef.current;
-    const summary = details?.querySelector("summary");
-    const menu = details?.querySelector<HTMLElement>(":scope > div");
-    if (!isOpen || !details || !summary || !menu) return;
-    const position = () => {
-      const scrollTop = menu.scrollTop;
-      menu.style.top = "";
-      menu.style.bottom = "";
-      menu.style.translate = "";
-      menu.style.maxHeight = "";
-      const bounds = clippingBounds(menu);
-      // Settings disclosures inset the table from the scroll pane. Keep its
-      // menus inside that panel too, including when actions stack on the left.
-      const table = details.closest<HTMLElement>(".gyro-provider-table");
-      if (table) {
-        const panel = table.getBoundingClientRect();
-        bounds.left = Math.max(bounds.left, panel.left + table.clientLeft);
-        bounds.right = Math.min(
-          bounds.right,
-          panel.left + table.clientLeft + table.clientWidth,
-        );
-      }
-      const availableWidth = Math.max(0, bounds.right - bounds.left - 16);
-      menu.style.maxWidth = `${availableWidth}px`;
-      menu.style.minWidth = `${Math.min(230, availableWidth)}px`;
-      const anchor = summary.getBoundingClientRect();
-      const natural = menu.getBoundingClientRect();
-      const prefersUp = natural.bottom <= anchor.top;
-      const gap = Math.max(
-        0,
-        prefersUp ? anchor.top - natural.bottom : natural.top - anchor.bottom,
-      );
-      const fitted = providerDetailsPosition({
-        anchorTop: anchor.top,
-        anchorBottom: anchor.bottom,
-        boundsTop: bounds.top,
-        boundsBottom: bounds.bottom,
-        menuHeight: natural.height,
-        prefersUp,
-        gap,
-      });
-      menu.style.maxHeight = `${fitted.maxHeight}px`;
-      menu.style.bottom = "auto";
-      menu.style.top = `${fitted.top - details.getBoundingClientRect().top}px`;
-      const rect = menu.getBoundingClientRect();
-      const shift = Math.max(
-        bounds.left + 8 - rect.left,
-        Math.min(0, bounds.right - 8 - rect.right),
-      );
-      menu.style.translate = `${shift}px 0`;
-      menu.scrollTop = scrollTop;
-    };
-    position();
-    const observer = new ResizeObserver(position);
-    for (
-      let ancestor: HTMLElement | null = details;
-      ancestor && ancestor !== document.body;
-      ancestor = ancestor.parentElement
-    ) {
-      observer.observe(ancestor);
-    }
-    const onScroll = (event: Event) => {
-      // Scrolling the capped menu must not reset its own scroll position.
-      if (event.target === menu) return;
-      position();
-    };
-    window.addEventListener("resize", position);
-    window.addEventListener("scroll", onScroll, true);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", position);
-      window.removeEventListener("scroll", onScroll, true);
-    };
-  }, [isOpen, children]);
-
   return (
-    <details
-      className="gyro-provider-details"
-      onToggle={(event) => setIsOpen(event.currentTarget.open)}
-      open={isOpen}
-      ref={detailsRef}
-    >
-      <summary aria-label={label}>
-        <MoreHorizontal size={16} />
-      </summary>
-      {children}
-    </details>
+    <span className="gyro-provider-details">
+      <Popover.Root>
+        <Popover.Trigger
+          aria-label={label}
+          className="gyro-provider-details__trigger"
+        >
+          <MoreHorizontal aria-hidden="true" size={16} />
+        </Popover.Trigger>
+        <Popover.Content
+          align="end"
+          aria-label={label}
+          className="gyro-provider-details__popup"
+        >
+          {children}
+        </Popover.Content>
+      </Popover.Root>
+    </span>
   );
 }
 
@@ -577,21 +503,21 @@ export function ProviderRemoveControl({
   const [pending, setPending] = useState(false);
   if (!confirming) {
     return (
-      <button
-        className="gyro-danger-button"
+      <Button
+        variant="destructive-outline"
         disabled={pending || !onRemove}
         onClick={() => setConfirming(true)}
         type="button"
       >
         Remove from Gyro
-      </button>
+      </Button>
     );
   }
   return (
     <>
       <p className="gyro-provider-remove-copy">{providerRemoveCopy(provider)}</p>
-      <button
-        className="gyro-danger-button"
+      <Button
+        variant="destructive-outline"
         disabled={pending || !onRemove}
         onClick={() => {
           setPending(true);
@@ -604,15 +530,15 @@ export function ProviderRemoveControl({
         type="button"
       >
         {pending ? "Removing\u2026" : `Remove ${provider.displayName}`}
-      </button>
-      <button
-        className="gyro-secondary-button"
+      </Button>
+      <Button
+        variant="outline"
         disabled={pending}
         onClick={() => setConfirming(false)}
         type="button"
       >
         Cancel
-      </button>
+      </Button>
     </>
   );
 }
@@ -637,8 +563,8 @@ export function RemovedProvidersSection({
                 <strong>{name}</strong>
                 <span>Hidden from Gyro until you restore it.</span>
               </div>
-              <button
-                className="gyro-secondary-button"
+              <Button
+                variant="outline"
                 disabled={pendingId === id || !onRestoreProvider}
                 onClick={() => {
                   setPendingId(id);
@@ -649,7 +575,7 @@ export function RemovedProvidersSection({
                 type="button"
               >
                 {pendingId === id ? "Restoring\u2026" : "Restore"}
-              </button>
+              </Button>
             </li>
           );
         })}

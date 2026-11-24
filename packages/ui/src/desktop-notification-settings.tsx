@@ -1,3 +1,4 @@
+import { Button } from "./primitives/button";
 import type {
   DesktopNotificationPreferences,
   NotificationPermissionState,
@@ -7,7 +8,7 @@ import {
   SettingsRow,
   SettingsSwitch,
 } from "./settings-controls";
-import { Bell } from "lucide-react";
+import { Bell } from "./icons";
 
 type DesktopNotificationSettingsProps = {
   preferences: DesktopNotificationPreferences;
@@ -66,15 +67,14 @@ export function DesktopNotificationSettings({
       label="Test notification"
       detail="Sends a sample so you can check how Gyro's notifications look."
     >
-      <button
-        className="gyro-secondary-button"
+      <Button
+        variant="outline" leading={<Bell aria-hidden="true" size={13} />}
         disabled={isTesting || !onTest}
         onClick={onTest}
         type="button"
       >
-        <Bell aria-hidden="true" size={13} />
         {isTesting ? "Sending..." : "Send test"}
-      </button>
+      </Button>
     </SettingsRow>
   );
   // A test is how macOS gets asked for permission, so it stays in view until then.

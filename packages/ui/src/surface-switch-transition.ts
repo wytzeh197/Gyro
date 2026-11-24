@@ -4,7 +4,7 @@ import { flushSync } from "react-dom";
    Without it the old surface unmounts on the spot and the new one fades up
    from nothing while the shell columns slide, which reads as a blink. The
    data attribute names the sidebar, main pane and switch for the transition
-   and pauses the shell's own tweens (see interaction-motion.css), so the
+   and pauses the shell's own tweens (see motion.css), so the
    browser blends two settled layouts. WebViews without view transitions, and
    reduced motion, apply the change directly. */
 let activeTransition: ViewTransition | undefined;

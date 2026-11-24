@@ -101,6 +101,89 @@ pub(super) fn root_argument_required(root_count: usize, root_id_present: bool) -
     !root_id_present && root_count != 1
 }
 
+#[derive(Debug)]
+pub(super) struct OutsideWorkspaceInspectionPath(String);
+
+impl std::fmt::Display for OutsideWorkspaceInspectionPath {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "The absolute path is outside the selected Workspace root. If you meant a Workspace-relative path, retry with {:?} without the leading slash.", self.0)
+    }
+}
+
+impl std::error::Error for OutsideWorkspaceInspectionPath {}
+
+/// Treat an exact absolute inspection path as relative to the already bound
+/// root. The same permission and filesystem checks still resolve the target.
+pub(super) fn relative_workspace_inspection_path(
+    workspace: &Path,
+    id: CapabilityId,
+    arguments: &serde_json::Value,
+) -> anyhow::Result<Option<String>> {
+    let accepts_root = matches!(
+        id,
+        CapabilityId::WorkspaceList | CapabilityId::WorkspaceSearch
+    );
+    if !accepts_root
+        && !matches!(
+            id,
+            CapabilityId::WorkspaceRead
+                | CapabilityId::WorkspaceReadRange
+                | CapabilityId::WorkspaceReadEditor
+        )
+    {
+        return Ok(None);
+    }
+    let Some(path) = arguments
+        .get("path")
+        .and_then(serde_json::Value::as_str)
+        .map(Path::new)
+    else {
+        return Ok(None);
+    };
+    if !accepts_root && (path == workspace || path == Path::new(".")) {
+        anyhow::bail!(
+            "This path is the Workspace directory. Pass the workspace-relative path of the file you need, or call gyro_workspace_list with path \".\" to inspect the directory."
+        );
+    }
+    if !path.is_absolute() {
+        return Ok(None);
+    }
+    if !path.starts_with(workspace) {
+        // This is a syntax hint only. Never resolve or admit the absolute path.
+        if let Ok(candidate) = relative_path_in_bound_root(Path::new("/"), path, false) {
+            return Err(OutsideWorkspaceInspectionPath(candidate).into());
+        }
+    }
+    relative_path_in_bound_root(workspace, path, accepts_root).map(Some)
+}
+
+/// Derive the same relative operand from an absolute spelling of the bound
+/// root. This is lexical only; callers still resolve and check file targets.
+pub(super) fn relative_path_in_bound_root(
+    workspace: &Path,
+    path: &Path,
+    accepts_root: bool,
+) -> anyhow::Result<String> {
+    let relative = path
+        .strip_prefix(workspace)
+        .map_err(|_| anyhow::anyhow!("Use a path inside the selected Workspace root"))?;
+    if accepts_root && relative.as_os_str().is_empty() {
+        return Ok(".".into());
+    }
+    let normalized = gyro_core::normalize_capability_relative_path(
+        relative
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Workspace path must be UTF-8"))?,
+    )?;
+    anyhow::ensure!(
+        Path::new(&normalized)
+            .components()
+            .eq(relative.components()),
+        "Use the exact workspace-relative path"
+    );
+    Ok(normalized)
+}
+
 pub(super) fn capability_uses_workspace_root(id: CapabilityId) -> bool {
     !matches!(
         id,

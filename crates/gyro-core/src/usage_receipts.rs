@@ -78,6 +78,14 @@ pub fn note_call(conn: &Connection, session: Uuid, turn: Uuid) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn turn_call_count(conn: &Connection, session: Uuid, turn: Uuid) -> Result<usize> {
+    Ok(conn.query_row(
+        "select count(*) from usage_ledger where session_id = ?1 and turn_id = ?2",
+        params![session.to_string(), turn.to_string()],
+        |row| row.get(0),
+    )?)
+}
+
 fn fold_rows(
     conn: &Connection,
     sql: &str,
@@ -136,6 +144,23 @@ const COLUMNS: &str = "(select tokens_json from usage_receipt_revisions r
     where r.usage_id = l.id order by r.id desc limit 1),
     l.input_tokens, l.cached_input_tokens, l.output_tokens,
     l.reasoning_output_tokens, l.total_tokens, l.measured";
+
+/// Completed calls made directly in this turn. Child turns and live requests
+/// have their own receipts and are accounted for separately.
+pub(crate) fn direct_turn_tokens(
+    conn: &Connection,
+    session: Uuid,
+    turn: Uuid,
+) -> Result<Option<UsageTokens>> {
+    let sql = format!(
+        "select {COLUMNS} from usage_ledger l where l.session_id = ?1 and l.turn_id = ?2
+         order by l.occurred_at, l.id"
+    );
+    Ok(
+        fold_rows(conn, &sql, &[&session.to_string(), &turn.to_string()])?
+            .map(|tokens| tokens.with_scope(UsageScope::Turn)),
+    )
+}
 
 const SESSION_OWNED_TURNS: &str = "with recursive owned(session_id, turn_id) as (
     select session_id, turn_id from usage_call_expectations where session_id = ?1
@@ -274,6 +299,9 @@ mod tests {
         assert_eq!(result.total_tokens, 170);
         assert_eq!(result.effective_accounting().scope, UsageScope::Task);
         assert!(result.measured);
+        let direct = direct_turn_tokens(&conn, parent, turn).unwrap().unwrap();
+        assert_eq!(direct.total_tokens, 120);
+        assert_eq!(direct.effective_accounting().scope, UsageScope::Turn);
         let session_total = crate::usage::session_usage_totals(&conn, parent).unwrap();
         assert_eq!(session_total.total_tokens, 170);
         assert_eq!(session_total.calls, 3);

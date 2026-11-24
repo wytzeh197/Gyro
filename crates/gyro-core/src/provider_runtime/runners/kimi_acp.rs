@@ -363,6 +363,12 @@ pub fn run_kimi_acp_chat(
             // Full Access answers permission requests inside the core, so a card
             // that cannot be shown can never become a declined tool.
             auto_allow_permissions: approval_posture == crate::ApprovalPosture::FullAccess,
+            approval_posture,
+            session_meta: if request.provider_id == "xai" && !plan_mode {
+                crate::grok_session_meta(approval_posture)
+            } else {
+                None
+            },
             resume_session_id,
             // Wall clock is the 24h chat max, not the 30m quiet-period constant.
             // Mis-wiring both to inactivity killed healthy Grok/Kimi/Gemini turns
@@ -460,10 +466,10 @@ pub fn run_kimi_acp_chat(
                 KimiAcpApprovalKind::FileChange => "file-change",
                 KimiAcpApprovalKind::Other => "permissions",
             };
-            // Grok `auto` and Kimi `--yolo` already let the safe set through.
-            // A request that still arrives is outside that set, so Approve for
-            // Me shows a card instead of allowing it silently. Full Access
-            // does not ask: those CLIs are started with the bypass flag.
+            // Grok `auto`, Kimi `--yolo`, Cursor's sandbox and OpenCode's
+            // Approve for Me rules already let the safe set through. A request
+            // that still arrives is outside that set, so Approve for Me shows
+            // a card instead of allowing it silently. Full Access does not ask.
             let escalation = approval_posture == crate::ApprovalPosture::ApproveForMe
                 && crate::approve_for_me_keeps_escalations(&request.provider_id);
             let auto_allow = if escalation {

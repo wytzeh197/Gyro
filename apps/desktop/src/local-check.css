@@ -1,23 +1,9 @@
-.gyro-check-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1500;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgb(0 0 0 / 35%);
-}
-.gyro-check-dialog {
-  box-sizing: border-box;
-  width: min(640px, 100%);
-  max-height: calc(100vh - 48px);
+/* Frame, backdrop and motion come from the Dialog primitive. */
+.gyro-dialog.gyro-check-dialog {
+  display: block;
+  max-inline-size: 640px;
   overflow: auto;
   padding: 28px 32px;
-  border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-lg, 14px);
-  background: var(--gyro-surface);
-  color: var(--gyro-text);
-  box-shadow: 0 20px 80px rgb(0 0 0 / 25%);
   font-size: 14px;
 }
 .gyro-check-dialog header {

@@ -1,4 +1,4 @@
-import { WrapText } from "lucide-react";
+import { WrapText } from "./icons";
 import { useMemo, useState, type ReactNode } from "react";
 import { diffHunks, type DiffHunk } from "./file-review.ts";
 
@@ -14,6 +14,7 @@ export function PlainDiffView({
   diff,
   lead,
   notice,
+  renderHunkAction,
   onRetry,
   onOpenFile,
 }: {
@@ -23,6 +24,7 @@ export function PlainDiffView({
   /** Names the comparison ahead of the section count, e.g. "Recorded turn". */
   lead?: ReactNode;
   notice?: string;
+  renderHunkAction?: (index: number) => ReactNode;
   onRetry?: () => void;
   onOpenFile?: () => void;
 }) {
@@ -105,7 +107,11 @@ export function PlainDiffView({
       </div>
       <div className="gyro-plain-diff-hunks">
         {visible.map((hunk, index) => (
-          <PlainDiffHunk hunk={hunk} key={`${hunk.header}:${index}`} />
+          <PlainDiffHunk
+            hunk={hunk}
+            action={renderHunkAction?.(safePage * HUNKS_PER_PAGE + index)}
+            key={`${hunk.header}:${index}`}
+          />
         ))}
       </div>
       <PlainDiffActions onOpenFile={onOpenFile} onRetry={onRetry} />
@@ -113,13 +119,13 @@ export function PlainDiffView({
   );
 }
 
-function PlainDiffHunk({ hunk }: { hunk: DiffHunk }) {
+function PlainDiffHunk({ hunk, action }: { hunk: DiffHunk; action?: ReactNode }) {
   const range = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(hunk.header);
   let oldLine = range ? Number(range[1]) : undefined;
   let newLine = range ? Number(range[2]) : undefined;
   return (
     <section className="gyro-plain-diff-hunk">
-      <header>{hunk.header}</header>
+      <header>{action ? <span>{hunk.header}</span> : hunk.header}{action}</header>
       {hunk.lines.map((line, index) => {
         const marker = line.text.startsWith("\\");
         const before = !marker && line.kind !== "added" ? oldLine : undefined;

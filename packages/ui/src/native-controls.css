@@ -96,7 +96,7 @@
   border: 2px solid var(--gyro-primary-bg, var(--gyro-accent));
   border-radius: 50%;
   background: var(--gyro-surface-raised);
-  box-shadow: 0 1px 3px var(--gyro-premium-shadow-lift);
+  box-shadow: 0 1px 3px var(--gyro-shadow-lift);
   transition: transform 120ms ease;
 }
 :where(:is(input[type="range"]):hover)::-webkit-slider-thumb {
@@ -204,7 +204,7 @@
   height: 12px;
   cursor: pointer;
   background: var(--gyro-muted);
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 3l6 6M9 3L3 9' stroke='black' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E")
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m3.5 3.5 5 5m0-5-5 5' stroke='black' stroke-width='1.25' stroke-linecap='round'/%3E%3C/svg%3E")
     center / contain no-repeat;
 }
 :where(input[type="search"])::-webkit-search-decoration {
@@ -263,7 +263,7 @@
   border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-sm);
   background-color: var(--gyro-surface-soft);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 4l2.5 2.5L7.5 4'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m2.8 4 2.2 2.2L7.2 4'/%3E%3C/svg%3E");
   background-position: right 10px center;
   background-repeat: no-repeat;
   background-size: 10px;

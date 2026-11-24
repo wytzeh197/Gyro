@@ -528,12 +528,16 @@ function MonacoEditorPaneView(props: MonacoEditorPaneProps) {
     },
     [],
   );
-  const { scale, reduceMotion } = useAppearance();
+  const { scale, reduceMotion, codeFont } = useAppearance();
+  useEffect(() => {
+    if (mounted) void import("../monaco-editor").then(({ remeasureMonacoFonts }) => remeasureMonacoFonts());
+  }, [codeFont, mounted]);
   const editorOptions = useMemo(
     () =>
       workspaceEditorOptions({
         scale,
         reduceMotion,
+        codeFont,
         minimapEnabled,
         limited: syntax.policy.limited,
         readOnly: syntax.policy.readOnly || Boolean(props.readOnly),
@@ -547,6 +551,7 @@ function MonacoEditorPaneView(props: MonacoEditorPaneProps) {
       props.readOnly,
       scale,
       reduceMotion,
+      codeFont,
     ],
   );
   useEffect(() => {
@@ -634,9 +639,6 @@ function MonacoEditorPaneView(props: MonacoEditorPaneProps) {
     synchronizeModelLanguage(editor, monaco);
     hasMountedRef.current = true;
     setMounted(true);
-    void import("../monaco-editor").then(({ remeasureMonacoFonts }) =>
-      remeasureMonacoFonts(),
-    );
     // React Monaco's default cache is shared across panes; each split should
     // retain its own cursor, selection and scroll position for each file.
     paneRegistrations.current.push(

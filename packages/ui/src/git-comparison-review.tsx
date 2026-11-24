@@ -1,4 +1,6 @@
-import { FileDiff, Files, GitPullRequest, ShieldCheck } from "lucide-react";
+import { Button } from "./primitives/button";
+import { Empty, Spinner } from "./primitives/feedback";
+import { FileDiff, Files, GitPullRequest, ShieldCheck } from "./icons";
 import "./review-design.css";
 import {
   useEffect,
@@ -200,11 +202,13 @@ export function GitComparisonReview({
               workspacePath={workspacePath}
             />
           ) : (
-            <div className="gyro-diff-empty-state">
-              <GitPullRequest size={18} />
-              <strong>{empty.title}</strong>
-              <span>{listing.limitation ?? empty.detail}</span>
-            </div>
+            <Empty
+              className="gyro-diff-empty-state"
+              size="compact"
+              icon={<GitPullRequest size={18} />}
+              title={empty.title}
+              description={listing.limitation ?? empty.detail}
+            />
           )}
         </section>
       </div>
@@ -276,25 +280,24 @@ function ScopedDiffPane({
           lead="Recorded turn"
         />
       ) : (
-        <div className="gyro-diff-empty-state" role="status">
-          <FileDiff size={18} aria-hidden="true" />
-          <strong>No patch was saved for this turn</strong>
-          <span>
-            The current working tree may have changed since then.
-          </span>
-          <div className="gyro-plain-diff-actions gyro-review-recovery-actions">
-            {props.onOpenFile ? (
-              <button
-                className="gyro-secondary-button"
-                type="button"
-                onClick={() => props.onOpenFile?.(props.file.path)}
-              >
-                Open current file
-              </button>
-            ) : null}
-            {compareButton}
-          </div>
-        </div>
+        <Empty
+          className="gyro-diff-empty-state"
+          size="compact"
+          role="status"
+          icon={<FileDiff size={18} />}
+          title="No patch was saved for this turn"
+          description="The current working tree may have changed since then."
+          actions={
+            <div className="gyro-plain-diff-actions gyro-review-recovery-actions">
+              {props.onOpenFile ? (
+                <Button variant="outline" onClick={() => props.onOpenFile?.(props.file.path)}>
+                  Open current file
+                </Button>
+              ) : null}
+              {compareButton}
+            </div>
+          }
+        />
       )}
     </div>
   );
@@ -368,6 +371,18 @@ function ComparisonDiffPane({
         : "Index ↔ Working Tree";
   const previewUnavailable =
     state.kind === "ready" && state.result.notice && !state.result.unified;
+  const recovery = (
+    <>
+      <Button variant="outline" onClick={() => setReload((value) => value + 1)}>
+        Try again
+      </Button>
+      {onOpenFile ? (
+        <Button variant="outline" onClick={() => onOpenFile(file.path)}>
+          Open file
+        </Button>
+      ) : null}
+    </>
+  );
 
   return (
     <div className="gyro-comparison-diff-pane">
@@ -378,61 +393,34 @@ function ComparisonDiffPane({
         </div>
       ) : null}
       {state.kind === "loading" ? (
-        <div className="gyro-diff-empty-state" role="status">
-          <FileDiff size={18} />
-          <strong>Loading changes…</strong>
-          <span>
-            Reading {relative} for {scopeLabel}.
-          </span>
-        </div>
+        <Empty
+          className="gyro-diff-empty-state"
+          size="compact"
+          role="status"
+          icon={<Spinner decorative size="sm" />}
+          title="Loading changes…"
+          description={`Reading ${relative} for ${scopeLabel}.`}
+        />
       ) : state.kind === "failed" ? (
-        <div className="gyro-diff-empty-state" role="alert">
-          <FileDiff size={18} />
-          <strong>Could not load this diff</strong>
-          <span>{state.message}</span>
-          <div className="gyro-plain-diff-actions">
-            <button
-              className="gyro-secondary-button"
-              onClick={() => setReload((value) => value + 1)}
-              type="button"
-            >
-              Try again
-            </button>
-            {onOpenFile ? (
-              <button
-                className="gyro-secondary-button"
-                onClick={() => onOpenFile(file.path)}
-                type="button"
-              >
-                Open file
-              </button>
-            ) : null}
-          </div>
-        </div>
+        <Empty
+          className="gyro-diff-empty-state"
+          size="compact"
+          role="alert"
+          icon={<FileDiff size={18} />}
+          title="Could not load this diff"
+          description={state.message}
+          actions={recovery}
+        />
       ) : previewUnavailable ? (
-        <div className="gyro-diff-empty-state" role="status">
-          <FileDiff size={18} />
-          <strong>Preview unavailable</strong>
-          <span>{state.result.notice}</span>
-          <div className="gyro-plain-diff-actions">
-            <button
-              className="gyro-secondary-button"
-              onClick={() => setReload((value) => value + 1)}
-              type="button"
-            >
-              Try again
-            </button>
-            {onOpenFile ? (
-              <button
-                className="gyro-secondary-button"
-                onClick={() => onOpenFile(file.path)}
-                type="button"
-              >
-                Open file
-              </button>
-            ) : null}
-          </div>
-        </div>
+        <Empty
+          className="gyro-diff-empty-state"
+          size="compact"
+          role="status"
+          icon={<FileDiff size={18} />}
+          title="Preview unavailable"
+          description={state.result.notice}
+          actions={recovery}
+        />
       ) : (
         <PlainDiffView
           actions={toolbarAction}

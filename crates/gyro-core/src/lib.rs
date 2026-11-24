@@ -201,7 +201,7 @@ pub use provider_install::{
 };
 pub use provider_permissions::{
     acp_permission_args, approval_posture, approve_for_me_keeps_escalations,
-    claude_permission_mode, codex_execution_policy, ApprovalPosture,
+    claude_permission_mode, codex_execution_policy, grok_session_meta, ApprovalPosture,
 };
 pub use provider_registry::{
     execution_kind_for, health_kind_for, is_custom_provider_id, is_openai_compatible_provider,

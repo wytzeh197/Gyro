@@ -166,6 +166,8 @@ const base = {
   comparison: "gyro",
   retries: 0,
   generationRequests: 1,
+  gyroToolRequests: 0,
+  schemaValidToolRequests: 4,
   elapsedMs: 100,
   requestedReasoningEffort: "medium",
   requestedEffortCoverage: "observed",
@@ -187,7 +189,10 @@ const spec = {
 const candidate = {
   ...base,
   variant: "stable-api-prefix",
+  gyroToolRequests: 0,
+  schemaValidToolRequests: null,
   estimatedCost: { ...base.estimatedCost, micros: 70 },
+  efficiencyEvents: { confirmedPrefixReuses: 1 },
 };
 const result = report([base, candidate], spec);
 assert.equal(
@@ -196,9 +201,19 @@ assert.equal(
   "diagnostics must not loosen existing gates",
 );
 assert.equal(result.groups[1].pairedQuality.successRateChange, 0);
+assert.equal(result.groups[1].attemptsWithConfirmedPrefixReuse, 1);
+const legacyPrefixCounter = report([
+  base, { ...candidate, efficiencyEvents: { prefixPreservations: 1 } },
+], spec);
+assert.equal(legacyPrefixCounter.groups[1].gate, "policy-not-exercised");
 assert.match(markdown(result), /Paired correctness/);
 assert.match(markdown(result), /Uncached input/);
 assert.match(markdown(result), /Failure breakdown/);
+assert.equal(result.groups[0].schemaValidToolRequests, 4);
+assert.equal(result.groups[0].gyroToolRequests, 0);
+assert.equal(result.groups[1].schemaValidToolRequests, null);
+assert.match(markdown(result), /\| baseline \| 4 \| 0 \|/);
+assert.match(markdown(result), /\| stable-api-prefix \| unknown \| 0 \|/);
 const incomplete = report([base, candidate, candidate], spec).groups[1];
 assert.equal(incomplete.gate, "incomplete");
 assert.equal(incomplete.pairedQuality.successRateChange, null);

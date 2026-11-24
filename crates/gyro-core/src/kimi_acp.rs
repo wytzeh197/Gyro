@@ -212,6 +212,11 @@ pub struct KimiAcpRequest {
     /// answer it, must not become a declined tool -- agents end the whole turn
     /// for that, and every step around it is lost.
     pub auto_allow_permissions: bool,
+    /// The composer's saved choice. OpenCode's managed agent takes its rules
+    /// from it; other agents get the posture through their argv.
+    pub approval_posture: crate::ApprovalPosture,
+    /// ACP `_meta` for `session/new`, for agents that set a session mode there.
+    pub session_meta: Option<Value>,
     pub resume_session_id: Option<String>,
     pub timeout: Duration,
     pub inactivity_timeout: Duration,
@@ -330,6 +335,7 @@ impl KimiAcpConnection {
             Some(crate::opencode_policy::configure(
                 &mut command,
                 request.mode == KimiAcpMode::Plan,
+                request.approval_posture,
             )?)
         } else {
             None
@@ -1461,10 +1467,11 @@ where
     Approval: FnMut(&KimiAcpApprovalRequest) -> Result<KimiAcpApprovalDecision>,
     WriteFile: FnMut(&Path, &str, Option<&str>) -> Result<()>,
 {
-    let new_id = connection.send_request(
-        "session/new",
-        json!({"cwd": request.workspace, "mcpServers": request.mcp_servers}),
-    )?;
+    let mut params = json!({"cwd": request.workspace, "mcpServers": request.mcp_servers});
+    if let Some(meta) = &request.session_meta {
+        params["_meta"] = meta.clone();
+    }
+    let new_id = connection.send_request("session/new", params)?;
     let result = wait_for_response(
         connection,
         new_id,
@@ -2547,6 +2554,8 @@ pub fn discover_acp_models(
         reasoning_effort: None,
         mode: KimiAcpMode::Normal,
         auto_allow_permissions: false,
+        approval_posture: crate::ApprovalPosture::Ask,
+        session_meta: None,
         resume_session_id: None,
         timeout,
         inactivity_timeout: timeout,
@@ -2614,6 +2623,8 @@ pub fn check_acp_health(
         reasoning_effort: None,
         mode: KimiAcpMode::Normal,
         auto_allow_permissions: false,
+        approval_posture: crate::ApprovalPosture::Ask,
+        session_meta: None,
         resume_session_id: None,
         timeout,
         inactivity_timeout: timeout,
@@ -3500,6 +3511,8 @@ done
             reasoning_effort: Some("max".into()),
             mode: KimiAcpMode::Normal,
             auto_allow_permissions: false,
+            approval_posture: crate::ApprovalPosture::Ask,
+            session_meta: None,
             resume_session_id,
             timeout: Duration::from_secs(3),
             inactivity_timeout: Duration::from_secs(3),
@@ -5161,6 +5174,52 @@ done
         assert!(!activities
             .iter()
             .any(|activity| activity.label.contains("Kimi")));
+    }
+
+    /// Grok takes the session's mode as `_meta` on `session/new`.
+    #[cfg(unix)]
+    #[test]
+    fn session_meta_is_sent_on_session_new() {
+        let (temp, program) = acp_fixture(
+            r#"
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"authMethods":[{"id":"login"}]}}' ;;
+    *'"method":"authenticate"'*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}' ;;
+    *'"method":"session/new"'*)
+      printf '%s\n' "$line" > session-new
+      printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"xai-session"}}' ;;
+    *'"method":"session/set_model"'*) printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{}}' ;;
+    *'"method":"session/set_config_option"'*) printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":{}}' ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}}'
+      printf '%s\n' '{"jsonrpc":"2.0","id":6,"result":{"stopReason":"end_turn"}}' ;;
+  esac
+done
+"#,
+        );
+        let mut request = fixture_request(
+            program,
+            temp.path().to_path_buf(),
+            CancellationToken::default(),
+            None,
+        );
+        request.provider_label = "xAI".into();
+        request.model = "grok-4.5".into();
+        request.session_meta = crate::grok_session_meta(crate::ApprovalPosture::ApproveForMe);
+        run_kimi_acp(
+            request,
+            |_| {},
+            |_| {},
+            |_| Ok(KimiAcpApprovalDecision::RejectOnce),
+            |_, _, _| Ok(()),
+        )
+        .unwrap();
+        let sent: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(temp.path().join("session-new")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(sent["params"]["_meta"], json!({ "autoMode": true }));
     }
 
     /// Kind + rawInput should beat the bare "{provider} tool" fallback so the

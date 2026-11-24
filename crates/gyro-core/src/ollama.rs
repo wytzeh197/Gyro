@@ -15,10 +15,8 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use url::{Host, Url};
 mod context;
-use context::{
-    context_overflow_message, request_context_window, resident_context_window,
-    OllamaContextOverflow,
-};
+pub(crate) use context::OllamaContextOverflow;
+use context::{request_context_window, resident_context_window};
 
 pub const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434/api";
 pub const OLLAMA_CANCELLED_MESSAGE: &str = "Ollama chat cancelled";
@@ -331,30 +329,44 @@ where
     let estimated_window = request_context_window(request, || prompt_observation.content_chars())?;
     let mut window = resident_context_window(request, estimated_window, model_digest, cancellation)
         .or(estimated_window);
+    let mut context_retried = false;
     crate::provider_retry::stream_response(
         cancellation,
-        |mut emit| loop {
-            match ollama_tool_chat_once_with_updates(
-                request,
-                window,
-                &prompt_observation,
-                cancellation,
-                &mut emit,
-                &mut on_usage,
-            ) {
-                Err(error) if error.is::<OllamaContextOverflow>() => {
-                    let can_grow = window
-                        .zip(request.context_window_tokens)
-                        .is_some_and(|(allocated, maximum)| allocated < maximum);
-                    if !can_grow || !crate::provider_retry::compatibility_retry() {
-                        return Err(error);
+        |mut emit| {
+            loop {
+                match ollama_tool_chat_once_with_updates(
+                    request,
+                    window,
+                    &prompt_observation,
+                    cancellation,
+                    &mut emit,
+                    &mut on_usage,
+                ) {
+                    Err(error) => {
+                        let mut overflow = error.downcast::<OllamaContextOverflow>()?;
+                        let retry_window = (!context_retried)
+                            .then(|| {
+                                overflow.recovery_window(window, request.context_window_tokens)
+                            })
+                            .flatten();
+                        match retry_window {
+                            Some(larger)
+                                if !cancellation.is_cancelled()
+                                    && crate::provider_retry::compatibility_retry() =>
+                            {
+                                // Only the allocation changes. A rejection cannot
+                                // discard messages or repeat an executed tool.
+                                context_retried = true;
+                                window = Some(larger);
+                            }
+                            _ => {
+                                overflow.rejected_allocation = window;
+                                return Err(overflow.into());
+                            }
+                        }
                     }
-                    // A tokenizer-confirmed rejection happened before any
-                    // published output or tool calls. One bounded retry uses
-                    // the model's capacity, with identical messages and tools.
-                    window = request.context_window_tokens;
+                    result => return result,
                 }
-                result => return result,
             }
         },
         on_delta,
@@ -511,13 +523,15 @@ where
             }
         }
         if let Some(error) = frame.error {
-            if content.is_empty()
+            if terminal_error.is_none()
+                && content.is_empty()
                 && thinking_chars == 0
                 && tool_calls.is_empty()
-                && context_overflow_message(&error)
             {
-                observation.rejected();
-                return Err(OllamaContextOverflow.into());
+                if let Some(overflow) = OllamaContextOverflow::from_response_error(&error) {
+                    observation.rejected();
+                    return Err(overflow.into());
+                }
             }
             terminal_error.get_or_insert_with(|| {
                 anyhow!("Ollama reported a generation error; no tool calls were executed")
@@ -713,12 +727,12 @@ fn ollama_generation_error(error: ureq::Error) -> anyhow::Error {
             let value =
                 serde_json::from_reader::<_, serde_json::Value>(response.into_reader().take(8192))
                     .ok();
-            if value
+            if let Some(overflow) = value
                 .as_ref()
                 .and_then(|value| value.get("error"))
-                .is_some_and(context_overflow_message)
+                .and_then(OllamaContextOverflow::from_response_error)
             {
-                OllamaContextOverflow.into()
+                overflow.into()
             } else {
                 anyhow!("Ollama returned HTTP 400")
             }
@@ -1075,47 +1089,81 @@ mod tests {
 
     #[test]
     fn a_context_rejection_grows_once_without_discarding_the_prompt_or_tools() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = std::thread::spawn(move || {
-            let mut requests = Vec::new();
-            for (status, body) in [
-                (
-                    400,
-                    r#"{"error":"the input length exceeds the context length"}"#,
-                ),
-                (
-                    200,
-                    r#"{"message":{"content":"ready"},"done":true,"prompt_eval_count":5,"eval_count":2}"#,
-                ),
-            ] {
-                let (mut stream, _) = listener.accept().unwrap();
-                requests.push(read_payload(&mut stream));
-                write!(stream, "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        use serde_json::json;
+
+        let structured = |prompt, window| json!({"type": "exceed_context_size_error", "n_prompt_tokens": prompt, "n_ctx": window});
+        let wrapped = |prompt, window| json!({"error": json!({"error": structured(prompt, window)}).to_string()});
+        for (rejection, retry_window, reject_again) in [
+            (
+                json!({"error": "the input length exceeds the context length"}),
+                Some(32768),
+                false,
+            ),
+            (wrapped(5271, 4096), Some(8192), false),
+            (json!({"error": structured(8192, 4096)}), Some(16384), false),
+            (wrapped(32768, 4096), None, false),
+            (wrapped(5271, 4096), Some(8192), true),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let rejected_retry = wrapped(10240, 8192);
+            let server = std::thread::spawn(move || {
+                let mut requests = Vec::new();
+                let mut replies = vec![(400, rejection)];
+                if retry_window.is_some() {
+                    replies.push(if reject_again {
+                    (400, rejected_retry)
+                } else {
+                    (200, json!({"message":{"content":"ready"},"done":true,"prompt_eval_count":5,"eval_count":2}))
+                });
+                }
+                for (status, reply) in replies {
+                    let (mut stream, _) = listener.accept().unwrap();
+                    requests.push(read_payload(&mut stream));
+                    let body = reply.to_string();
+                    write!(stream, "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                }
+                assert_eq!(requests[0]["options"]["num_ctx"], 4096);
+                if let Some(window) = retry_window {
+                    assert_eq!(requests[1]["options"]["num_ctx"], window);
+                    for key in ["messages", "tools", "model", "truncate", "shift"] {
+                        assert_eq!(requests[0][key], requests[1][key], "{key}");
+                    }
+                }
+                assert_eq!(requests[0]["truncate"], false);
+                assert_eq!(requests[0]["shift"], false);
+            });
+            let _scope = crate::provider_observation::Scope::start();
+            let response = ollama_tool_chat_with_progress(
+                OllamaToolChatRequest {
+                    base_url: Some(&format!("http://{address}/api")),
+                    model: "fixture",
+                    messages: vec![
+                        serde_json::json!({"role":"user", "content":"Keep this original request."}),
+                    ],
+                    tools: vec![
+                        serde_json::json!({"function":{"name":"read_file", "parameters":{"type":"object"}}}),
+                    ],
+                    context_window_tokens: Some(32768),
+                    minimum_context_window_tokens: None,
+                },
+                &CancellationToken::default(),
+                |_| {},
+            );
+            server.join().unwrap();
+            let summary = crate::provider_observation::snapshot().unwrap();
+            let retries = u32::from(retry_window.is_some());
+            assert_eq!(
+                (summary.requests, summary.rejected, summary.retries),
+                (1 + retries, 1 + u32::from(reject_again), retries)
+            );
+            if retry_window.is_none() || reject_again {
+                assert!(response.unwrap_err().is::<OllamaContextOverflow>());
+            } else {
+                assert_eq!(response.unwrap().context_window_tokens, retry_window);
+                assert_eq!(summary.tokens.unwrap().total_tokens, 7);
             }
-            assert_eq!(requests[0]["options"]["num_ctx"], 4096);
-            assert_eq!(requests[1]["options"]["num_ctx"], 32768);
-            for key in ["messages", "tools", "model", "truncate", "shift"] {
-                assert_eq!(requests[0][key], requests[1][key], "{key}");
-            }
-            assert_eq!(requests[0]["truncate"], false);
-            assert_eq!(requests[0]["shift"], false);
-        });
-        let _scope = crate::provider_observation::Scope::start();
-        let response = ollama_tool_chat_with_progress(OllamaToolChatRequest {
-            base_url: Some(&format!("http://{address}/api")), model: "fixture",
-            messages: vec![serde_json::json!({"role":"user", "content":"Keep this original request."})],
-            tools: vec![serde_json::json!({"function":{"name":"read_file", "parameters":{"type":"object"}}})],
-            context_window_tokens: Some(32768), minimum_context_window_tokens: None,
-        }, &CancellationToken::default(), |_| {}).unwrap();
-        server.join().unwrap();
-        assert_eq!(response.context_window_tokens, Some(32768));
-        let summary = crate::provider_observation::snapshot().unwrap();
-        assert_eq!(
-            (summary.requests, summary.rejected, summary.retries),
-            (2, 1, 1)
-        );
-        assert_eq!(summary.tokens.unwrap().total_tokens, 7);
+        }
     }
 
     #[test]

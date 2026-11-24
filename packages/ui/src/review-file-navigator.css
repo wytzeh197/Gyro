@@ -108,7 +108,7 @@
   color: var(--gyro-muted);
 }
 .gyro-review-tree-directory > svg:first-child {
-  transition: transform var(--gyro-premium-motion) var(--gyro-premium-ease);
+  transition: transform var(--gyro-motion) var(--gyro-ease);
 }
 .gyro-review-tree-directory > svg.is-open {
   transform: rotate(90deg);

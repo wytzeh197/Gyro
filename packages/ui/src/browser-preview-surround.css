@@ -33,7 +33,7 @@
 }
 .gyro-preview-stage[data-framed="true"]
   > .gyro-preview-surround:not([data-kind="browser"]) {
-  box-shadow: 0 8px 24px var(--gyro-premium-shadow-soft);
+  box-shadow: var(--gyro-shadow-toast);
 }
 .gyro-preview-surround-caption {
   position: absolute;

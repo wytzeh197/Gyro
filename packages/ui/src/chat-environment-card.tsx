@@ -6,7 +6,8 @@ import {
   RefreshCw,
   Terminal,
   X,
-} from "lucide-react";
+} from "./icons";
+import { LiveStatusSpinner } from "./primitives/feedback";
 import {
   useEffect,
   useId,
@@ -212,7 +213,9 @@ function StepNode({
   }
   if (status === "blocked")
     return <span className="gyro-env-card-node is-blocked" />;
-  if (isActive) return <span className="gyro-env-card-node is-active" />;
+  if (isActive) {
+    return <LiveStatusSpinner className="gyro-env-card-node is-active" size="md" />;
+  }
   return <span className="gyro-env-card-node is-todo" />;
 }
 
@@ -394,7 +397,7 @@ export function ChatEnvironmentCard({
 
   const barLead =
     mode === "running" ? (
-      <span className="gyro-env-card-node is-active is-lead" />
+      <LiveStatusSpinner className="gyro-env-card-node is-active is-lead" size="md" />
     ) : mode === "waiting" ? (
       <span className="gyro-env-card-node is-blocked is-lead" />
     ) : mode === "done" ? (

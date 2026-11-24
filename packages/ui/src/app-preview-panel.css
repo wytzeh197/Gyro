@@ -8,6 +8,9 @@
   color: var(--gyro-text);
   background: var(--gyro-pane);
 }
+.gyro-app-preview[hidden] {
+  display: none;
+}
 .gyro-app-preview > .gyro-browser-preview {
   flex: 1;
   min-height: 0;
@@ -135,7 +138,7 @@
   width: auto;
   height: auto;
   object-fit: contain;
-  box-shadow: 0 8px 24px #0002;
+  box-shadow: var(--gyro-shadow-toast);
 }
 .gyro-app-preview-image img.is-interactive {
   cursor: crosshair;
@@ -167,4 +170,517 @@
   border: 1px solid var(--gyro-border-soft);
   border-radius: var(--gyro-radius-md);
   font-size: var(--gyro-font-caption);
+}
+
+.gyro-preview-device {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  container-type: inline-size;
+}
+.gyro-preview-device-canvas {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+}
+.gyro-preview-device-fit {
+  --gyro-device-screen: #070709;
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.gyro-preview-device-shell {
+  /* The device frame is an illustration. Its hardware finishes stay the same
+     when the surrounding workbench changes between light and dark palettes. */
+  --gyro-device-phone-finish: linear-gradient(150deg, #727984, #373c45 28%, #4b515a 68%, #818891);
+  --gyro-device-tablet-finish: linear-gradient(150deg, #838b95, #535965 48%, #767d87);
+  --gyro-device-laptop-finish: linear-gradient(#535961, #2a2e33 35%, #34383e);
+  --gyro-device-laptop-base-finish: linear-gradient(#969aa0 0%, #7b818a 24%, #676d76 63%, #3c414a 100%);
+  --gyro-device-camera-finish: radial-gradient(circle, #384452 19%, #202431 32%, #151920 64%, #292c30 66%, #0a0a0d 73%);
+  --gyro-device-glass: #0a0a0d;
+  --gyro-device-glass-edge: #0d111766;
+  --gyro-device-button-finish: #656c77;
+  --gyro-device-laptop-bezel: #090a0c;
+  --gyro-device-laptop-notch: #22242a;
+  --gyro-device-laptop-camera: #2e3644;
+  --gyro-device-laptop-base-highlight: #bbbdc2;
+  --gyro-device-laptop-base-edge: #545a63;
+  --gyro-device-glass-radius: calc(var(--gyro-device-radius) - var(--gyro-device-edge));
+  --gyro-device-laptop-content-radius: var(--gyro-device-screen-radius) var(--gyro-device-screen-radius) 0 0;
+  --gyro-device-laptop-camera-radius: 0 0 calc(var(--gyro-device-camera-height) * .4) calc(var(--gyro-device-camera-height) * .4);
+  --gyro-device-laptop-base-radius: 1px 1px calc(var(--gyro-device-base) * .55) calc(var(--gyro-device-base) * .55);
+  --gyro-device-laptop-base-inset-radius: 0 0 calc(var(--gyro-device-base) * .3) calc(var(--gyro-device-base) * .3);
+  position: absolute;
+  pointer-events: none;
+}
+.gyro-preview-device-lid {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--gyro-device-radius);
+  background: var(--gyro-device-phone-finish);
+  box-shadow: 0 4px 14px var(--gyro-shadow);
+}
+.gyro-preview-device-glass {
+  position: absolute;
+  inset: var(--gyro-device-edge);
+  border-radius: var(--gyro-device-glass-radius);
+  background: var(--gyro-device-glass);
+  box-shadow: 0 0 0 var(--gyro-hairline) var(--gyro-device-glass-edge);
+}
+.gyro-preview-device-shell[data-form="ipad"] .gyro-preview-device-lid {
+  background: var(--gyro-device-tablet-finish);
+}
+.gyro-preview-device-buttons {
+  position: absolute;
+  inset: 0;
+}
+.gyro-preview-device-buttons > i {
+  position: absolute;
+  top: var(--gyro-button-start);
+  right: 100%;
+  width: var(--gyro-device-button);
+  height: var(--gyro-button-length);
+  border-radius: var(--gyro-device-button);
+  background: var(--gyro-device-button-finish);
+}
+.gyro-preview-device-buttons [data-button="action"] {
+  --gyro-button-start: 20.5%;
+  --gyro-button-length: 4.3%;
+}
+.gyro-preview-device-buttons [data-button="volume-up"] {
+  --gyro-button-start: 28.7%;
+  --gyro-button-length: 7.5%;
+}
+.gyro-preview-device-buttons [data-button="volume-down"] {
+  --gyro-button-start: 38%;
+  --gyro-button-length: 7.5%;
+}
+.gyro-preview-device-buttons [data-button="side"] {
+  --gyro-button-start: 31%;
+  --gyro-button-length: 11.8%;
+  right: auto;
+  left: 100%;
+}
+.gyro-preview-device-shell[data-landscape] .gyro-preview-device-buttons > i {
+  top: 100%;
+  right: auto;
+  left: var(--gyro-button-start);
+  width: var(--gyro-button-length);
+  height: var(--gyro-device-button);
+}
+.gyro-preview-device-shell[data-landscape]
+  .gyro-preview-device-buttons
+  [data-button="side"] {
+  top: auto;
+  bottom: 100%;
+}
+.gyro-preview-device-camera {
+  position: absolute;
+  width: var(--gyro-device-camera-width);
+}
+.gyro-preview-device-shell[data-form="ipad"] .gyro-preview-device-camera {
+  top: 46.16%;
+  right: calc((var(--gyro-device-bezel) - var(--gyro-device-camera-width)) / 2);
+  transform: translateY(-50%);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--gyro-device-camera-finish);
+}
+.gyro-preview-device-shell[data-form="ipad"][data-landscape]
+  .gyro-preview-device-camera {
+  top: calc((var(--gyro-device-bezel) - var(--gyro-device-camera-width)) / 2);
+  right: auto;
+  left: 46.16%;
+  transform: translateX(-50%);
+}
+.gyro-preview-device-shell[data-form="macbook"] .gyro-preview-device-lid {
+  border-bottom-left-radius: 2px;
+  border-bottom-right-radius: 2px;
+  background: var(--gyro-device-laptop-finish);
+}
+.gyro-preview-device-shell[data-form="macbook"]
+  .gyro-preview-device-lid::before {
+  position: absolute;
+  content: "";
+  inset: var(--gyro-device-edge);
+  border-radius: var(--gyro-device-glass-radius);
+  border-bottom-left-radius: 1px;
+  border-bottom-right-radius: 1px;
+  background: var(--gyro-device-laptop-bezel);
+}
+.gyro-preview-device-shell[data-form="macbook"] .gyro-preview-device-glass {
+  inset: var(--gyro-device-bezel) var(--gyro-device-bezel)
+    var(--gyro-device-chin);
+  border-radius: var(--gyro-device-laptop-content-radius);
+  background: var(--gyro-device-laptop-notch);
+}
+.gyro-preview-device-shell[data-form="macbook"] .gyro-preview-device-camera {
+  top: var(--gyro-device-bezel);
+  left: 50%;
+  transform: translateX(-50%);
+  height: var(--gyro-device-camera-height);
+  border-radius: var(--gyro-device-laptop-camera-radius);
+  background: var(--gyro-device-laptop-bezel);
+}
+.gyro-preview-device-shell[data-form="macbook"]
+  .gyro-preview-device-camera::after {
+  position: absolute;
+  content: "";
+  top: 28%;
+  left: 50%;
+  transform: translateX(-50%);
+  height: 31%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--gyro-device-laptop-camera);
+}
+.gyro-preview-device-base {
+  position: absolute;
+  inset: 100% calc(-1 * var(--gyro-device-overhang)) auto;
+  height: var(--gyro-device-base);
+  border-radius: var(--gyro-device-laptop-base-radius);
+  background: var(--gyro-device-laptop-base-finish);
+  box-shadow:
+    inset 0 var(--gyro-hairline) var(--gyro-device-laptop-base-highlight),
+    0 4px 12px var(--gyro-shadow);
+}
+.gyro-preview-device-base::after {
+  position: absolute;
+  content: "";
+  top: 0;
+  left: 41.5%;
+  width: 17%;
+  height: 41%;
+  border-radius: var(--gyro-device-laptop-base-inset-radius);
+  background: var(--gyro-device-laptop-base-edge);
+}
+.gyro-preview-device-screen {
+  position: absolute;
+  isolation: isolate;
+  overflow: hidden;
+}
+.gyro-preview-device-screen[data-can-tap] {
+  cursor: crosshair;
+}
+.gyro-preview-device-screen[data-selecting] {
+  cursor: crosshair;
+  touch-action: none;
+}
+.gyro-preview-device-screen img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+}
+.gyro-preview-device-cutout {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  border-radius: var(--gyro-radius-pill);
+  background: var(--gyro-device-screen);
+  pointer-events: none;
+}
+.gyro-preview-device-region {
+  position: absolute;
+  outline: 2px solid var(--gyro-blue);
+  outline-offset: -2px;
+  box-shadow: 0 0 0 1px var(--gyro-pane);
+  pointer-events: none;
+}
+.gyro-preview-device-footer,
+.gyro-preview-device-instruction {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+}
+.gyro-preview-device-instruction {
+  position: absolute;
+  inset: auto 12px 12px;
+  background: var(--gyro-surface);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+}
+.gyro-preview-device-footer {
+  border-top: 1px solid var(--gyro-border-soft);
+}
+.gyro-preview-device-footer span,
+.gyro-preview-device-instruction span {
+  margin-inline-end: auto;
+}
+.gyro-preview-device :is(footer, .gyro-preview-device-canvas) button {
+  font: inherit;
+  font-size: var(--gyro-font-caption);
+  color: var(--gyro-text);
+  background: var(--gyro-surface);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  padding: 5px 8px;
+}
+.gyro-preview-device-popover {
+  position: absolute;
+}
+.gyro-preview-device-annotation {
+  padding: 8px;
+  background: var(--gyro-surface);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  box-shadow: var(--gyro-shadow-popover);
+}
+.gyro-preview-device-annotation textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px;
+  resize: vertical;
+  color: var(--gyro-text);
+  background: var(--gyro-pane);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  font: inherit;
+  font-size: var(--gyro-font-caption);
+}
+.gyro-preview-device-annotation > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 4px;
+}
+.gyro-preview-device .gyro-preview-device-annotation button[type="submit"] {
+  color: var(--gyro-blue-action-text);
+  background: var(--gyro-blue);
+}
+.gyro-preview-device
+  :is(.gyro-app-preview-toolbar, .gyro-preview-device-toggle)
+  button:not(:disabled)[aria-pressed="true"] {
+  color: var(--gyro-blue-action-text);
+  border-color: transparent;
+  background: var(--gyro-blue);
+}
+.gyro-preview-device-log {
+  padding: 8px 12px;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+}
+.gyro-preview-device-log pre {
+  max-height: 9rem;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.gyro-preview-device-comparison {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 12px;
+}
+.gyro-preview-device-comparison figure {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.gyro-preview-device-comparison figcaption {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+  text-align: center;
+}
+.gyro-preview-device-toggle {
+  display: none;
+}
+@container (max-width: 480px) {
+  .gyro-preview-device-comparison {
+    flex-direction: column;
+  }
+  .gyro-preview-device-toggle {
+    display: flex;
+    justify-content: center;
+    gap: 4px;
+  }
+  .gyro-preview-device-comparison figcaption {
+    display: none;
+  }
+  .gyro-preview-device-comparison[data-side="before"]
+    figure[data-frame="after"],
+  .gyro-preview-device-comparison[data-side="after"]
+    figure[data-frame="before"] {
+    display: none;
+  }
+}
+
+.gyro-apple-setup-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: clamp(12px, 4cqi, 24px);
+}
+
+.gyro-apple-setup-card {
+  max-width: 480px;
+  margin-inline: auto;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-lg);
+  background: var(--gyro-surface);
+}
+
+.gyro-apple-setup-card > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+}
+
+.gyro-apple-setup-icon {
+  display: grid;
+  flex: 0 0 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-blue);
+  background: var(--gyro-blue-soft);
+}
+
+.gyro-apple-setup h2,
+.gyro-apple-setup h3,
+.gyro-apple-setup p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.gyro-apple-setup h2 {
+  font-size: var(--gyro-font-body);
+  line-height: 1.35;
+  font-weight: var(--gyro-weight-semibold);
+}
+
+.gyro-apple-setup h2:focus {
+  outline: none;
+}
+
+.gyro-apple-setup h3,
+.gyro-apple-setup button,
+.gyro-apple-setup select {
+  font-size: var(--gyro-font-caption);
+}
+
+.gyro-apple-setup h3 {
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.gyro-apple-setup p {
+  margin-top: 3px;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+  line-height: 1.5;
+}
+
+.gyro-apple-setup-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.gyro-apple-setup-steps > li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--gyro-border-soft);
+}
+
+.gyro-apple-setup-step-marker {
+  display: grid;
+  place-items: center;
+  height: 22px;
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: 50%;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  line-height: 1;
+}
+
+.gyro-apple-setup [data-step="current"] .gyro-apple-setup-step-marker {
+  color: var(--gyro-blue);
+  background: var(--gyro-blue-soft);
+  border-color: currentColor;
+}
+
+.gyro-apple-setup [data-step="done"] .gyro-apple-setup-step-marker {
+  color: var(--gyro-success);
+}
+
+.gyro-apple-setup :is(button, select) {
+  max-width: 100%;
+  min-height: 28px;
+}
+
+.gyro-apple-setup button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.gyro-apple-setup button > svg {
+  flex: none;
+}
+
+.gyro-apple-setup-card :is(button, select) {
+  font-family: inherit;
+  color: var(--gyro-text);
+  background: var(--gyro-pane);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  padding: 4px 8px;
+}
+
+.gyro-apple-setup-card button[data-primary] {
+  color: var(--gyro-blue-action-text);
+  background: var(--gyro-blue);
+  border-color: var(--gyro-blue);
+  font-weight: 600;
+}
+
+.gyro-apple-setup-steps h3 + p + button,
+.gyro-apple-setup-device {
+  margin-top: 8px;
+}
+
+.gyro-apple-setup :is(button, select):focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+
+.gyro-apple-setup-card footer {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-top: 1px solid var(--gyro-border-soft);
+  padding: 12px 16px;
+}
+
+.gyro-apple-setup-actions,
+.gyro-apple-setup-device {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gyro-apple-setup-device select {
+  flex: 1 1 135px;
+  min-width: 0;
+}
+
+.gyro-apple-setup .gyro-apple-setup-error {
+  padding: 4px 16px 12px;
+  white-space: pre-wrap;
 }

@@ -1,3 +1,31 @@
+:root {
+  --gyro-duration-140: calc(140ms * var(--gyro-motion-factor, 1));
+  --gyro-duration-160: calc(160ms * var(--gyro-motion-factor, 1));
+  --gyro-duration-180: calc(180ms * var(--gyro-motion-factor, 1));
+  --gyro-duration-200: calc(200ms * var(--gyro-motion-factor, 1));
+  --gyro-duration-220: calc(220ms * var(--gyro-motion-factor, 1));
+  --gyro-duration-240: calc(240ms * var(--gyro-motion-factor, 1));
+  --gyro-duration-280: calc(280ms * var(--gyro-motion-factor, 1));
+  --gyro-ease-out: cubic-bezier(.22, 1, .36, 1);
+  --gyro-ease-spring: cubic-bezier(.34, 1.56, .64, 1);
+}
+
+.gyro-app-shell .gyro-sidebar-list {
+  animation: gyro-sidebar-surface-enter var(--gyro-duration-160) var(--gyro-ease-out);
+}
+
+@keyframes gyro-chat-pane-enter { from { opacity: 0; } }
+@keyframes gyro-sidebar-surface-enter { from { opacity: 0; translate: -4px 0; } }
+@keyframes gyro-composer-trigger-label-enter { from { opacity: 0; filter: blur(4px); translate: 0 3px; } }
+@keyframes gyro-chat-message-send-enter { from { opacity: 0; translate: 0 3px; scale: .992; } }
+
+:root[data-reduce-motion="true"] :is(
+  .gyro-sidebar-list,
+  .gyro-tour-card
+) {
+  animation: none;
+}
+
 /* Specific interactions opt into movement; the shell responsiveness guard stays. */
 :root {
   --gyro-exit-motion-factor: 0.8;
@@ -12,7 +40,7 @@
 }
 :root .gyro-selection-track > button {
   position: relative;
-  z-index: 1;
+  z-index: var(--gyro-z-base);
 }
 :root .gyro-selection-track > .gyro-selection-indicator {
   position: absolute;
@@ -25,9 +53,9 @@
   pointer-events: none;
   visibility: hidden;
   transition:
-    transform var(--gyro-premium-motion) var(--gyro-premium-ease),
-    width var(--gyro-premium-motion) var(--gyro-premium-ease),
-    height var(--gyro-premium-motion) var(--gyro-premium-ease);
+    transform var(--gyro-motion) var(--gyro-ease),
+    width var(--gyro-motion) var(--gyro-ease),
+    height var(--gyro-motion) var(--gyro-ease);
 }
 :root .gyro-selection-track[data-selection-ready] > .gyro-selection-indicator {
   visibility: visible;
@@ -44,27 +72,16 @@
 
 /* Dialog frames arrive without animating any underlying workbench geometry. */
 :root
-  :is(
-    .gyro-project-remove-overlay,
-    .gyro-terminal-terminate-overlay,
-    .gyro-settings-confirm-overlay,
-    .gyro-workflow-overlay,
-    .gyro-project-edit-overlay
-  ) {
+  :is(.gyro-workflow-overlay,
+    .gyro-project-edit-overlay) {
   z-index: var(--gyro-layer-dialog);
-  animation: gyro-dialog-backdrop-in var(--gyro-premium-motion)
-    var(--gyro-premium-ease) both;
+  animation: gyro-dialog-backdrop-in var(--gyro-motion)
+    var(--gyro-ease) both;
 }
 :root
-  :is(
-    .gyro-project-remove-card,
-    .gyro-terminal-terminate-card,
-    .gyro-settings-confirm-overlay > section,
-    .gyro-workflow-overlay > .gyro-workflow-form,
-    .gyro-project-edit-dialog
-  ) {
-  animation: gyro-dialog-in var(--gyro-premium-motion-slow)
-    var(--gyro-premium-ease) both;
+  :is(.gyro-workflow-overlay > .gyro-workflow-form) {
+  animation: gyro-dialog-in var(--gyro-motion-slow)
+    var(--gyro-ease) both;
 }
 @keyframes gyro-dialog-backdrop-in {
   from {
@@ -90,17 +107,11 @@
 
 /* Anchored menus share a quick arrival; specialized model flyouts keep their
    directional animations. Use individual translate, preserving existing transforms. */
-:root :is(.gyro-command-overlay, .gyro-model-standard-overlay) {
-  animation: gyro-dialog-backdrop-in var(--gyro-premium-motion) var(--gyro-premium-ease);
+:root .gyro-model-standard-overlay {
+  animation: gyro-dialog-backdrop-in var(--gyro-motion) var(--gyro-ease);
 }
-:root :is(.gyro-command-palette, .gyro-model-standard-card) {
-  animation: gyro-dialog-in var(--gyro-premium-motion-slow) var(--gyro-premium-ease);
-}
-:root :is(.gyro-branch-name-dialog, .gyro-quit-dialog)[open] {
-  animation: gyro-dialog-in var(--gyro-premium-motion-slow) var(--gyro-premium-ease);
-}
-:root :is(.gyro-branch-name-dialog, .gyro-quit-dialog)::backdrop {
-  animation: gyro-dialog-backdrop-in var(--gyro-premium-motion) var(--gyro-premium-ease);
+:root .gyro-model-standard-card {
+  animation: gyro-dialog-in var(--gyro-motion-slow) var(--gyro-ease);
 }
 
 /* Opacity changes remain interruptible and do not move hit targets. */
@@ -111,9 +122,9 @@
     .gyro-activity-rail-badge
   ) {
   transition:
-    opacity var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
-    background-color var(--gyro-premium-motion-fast) var(--gyro-premium-ease),
-    color var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+    opacity var(--gyro-motion-fast) var(--gyro-ease),
+    background-color var(--gyro-motion-fast) var(--gyro-ease),
+    color var(--gyro-motion-fast) var(--gyro-ease);
 }
 /* Sessions <-> Workspace crossfade (surface-switch-transition.ts). The sidebar
    and main pane glide to their new columns while their contents blend; the
@@ -146,8 +157,8 @@
   animation-duration: 0s;
 }
 ::view-transition-group(*) {
-  animation-duration: var(--gyro-premium-motion-slow);
-  animation-timing-function: var(--gyro-premium-ease);
+  animation-duration: var(--gyro-motion-slow);
+  animation-timing-function: var(--gyro-ease);
 }
 /* Crop rather than stretch while a pane changes width: text never scales. */
 ::view-transition-old(gyro-surface-sidebar),
@@ -177,3 +188,81 @@
   }
 }
 
+/* Feedback paints inside controls; their text, bounds, and hit targets stay put. */
+:root
+  :is(button, summary, a[href], [role="button"]):not(
+    :disabled,
+    [aria-disabled="true"],
+    [aria-busy="true"],
+    [draggable="true"],
+    [inert],
+    [inert] *,
+    .is-dragging *
+  ) {
+  transition:
+    background-color var(--gyro-motion-fast) var(--gyro-ease),
+    border-color var(--gyro-motion-fast) var(--gyro-ease),
+    color var(--gyro-motion-fast) var(--gyro-ease),
+    opacity var(--gyro-motion-fast) var(--gyro-ease);
+}
+
+:root
+  :is(button, summary, a[href], [role="button"]):not(
+    :disabled,
+    [aria-disabled="true"],
+    [aria-busy="true"],
+    [draggable="true"],
+    [inert],
+    [inert] *,
+    .is-dragging *
+  ):active {
+  opacity: var(--gyro-press-opacity);
+  /* A short click must register immediately; release settles over the fast token. */
+  transition-duration: 0s;
+}
+
+:root
+  :is(button, summary, [role="button"]):not(
+    :disabled,
+    [aria-disabled="true"],
+    [aria-busy="true"],
+    [role="tab"],
+    [draggable="true"],
+    [draggable="true"] *,
+    [inert],
+    [inert] *,
+    .is-dragging *
+  )
+  > svg {
+  transition:
+    translate var(--gyro-motion-fast) var(--gyro-ease),
+    transform var(--gyro-motion) var(--gyro-ease),
+    color var(--gyro-motion-fast) var(--gyro-ease);
+}
+
+:root
+  :is(button, summary, [role="button"]):not(
+    :disabled,
+    [aria-disabled="true"],
+    [aria-busy="true"],
+    [role="tab"],
+    [draggable="true"],
+    [draggable="true"] *,
+    [inert],
+    [inert] *,
+    .is-dragging *
+  ):active
+  > svg {
+  translate: 0 var(--gyro-press-distance);
+  transition-duration: 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root :is(button, summary, [role="button"]):active > svg {
+    translate: none !important;
+  }
+  :root :is(button, summary, a[href], [role="button"]),
+  :root :is(button, summary, [role="button"]) > svg {
+    transition-duration: 0s !important;
+  }
+}

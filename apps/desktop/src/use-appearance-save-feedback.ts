@@ -10,6 +10,11 @@ type AppearancePreferences = Pick<
   | "motionSpeed"
   | "mainColor"
   | "secondaryColor"
+  | "themePreset"
+  | "themeOverrides"
+  | "uiFont"
+  | "codeFont"
+  | "windowMaterial"
 >;
 
 export function appearanceSaveKey(preferences: AppearancePreferences) {
@@ -20,6 +25,11 @@ export function appearanceSaveKey(preferences: AppearancePreferences) {
     preferences.motionSpeed,
     preferences.mainColor,
     preferences.secondaryColor,
+    preferences.themePreset,
+    preferences.themeOverrides,
+    preferences.uiFont,
+    preferences.codeFont,
+    preferences.windowMaterial,
   ]);
 }
 

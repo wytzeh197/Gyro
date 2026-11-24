@@ -146,6 +146,7 @@ pub fn run() {
         .manage(menu_bar::MenuBarController::default())
         .manage(quit_confirmation::QuitConfirmation::default())
         .setup(|app| {
+            super::install_reporting::prepare();
             #[cfg(debug_assertions)]
             if crate::features::remote_access::smoke::start(app.handle())? {
                 return Ok(());
@@ -240,6 +241,7 @@ pub fn run() {
             canvas_preview::response(request)
         })
         .invoke_handler(tauri::generate_handler![
+            crate::features::server_runs::server_runs_request,
             crate::features::remote_access::commands::remote_access_status,
             crate::features::remote_access::commands::remote_access_action,
             crate::features::remote_access::commands::remote_host_request,

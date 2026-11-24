@@ -1,4 +1,4 @@
-import { Check, Users, X } from "lucide-react";
+import { Check, Users, X } from "./icons";
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   normalizedCouncilConfig,

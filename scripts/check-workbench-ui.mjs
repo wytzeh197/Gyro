@@ -601,6 +601,7 @@ const appSource = [
   readRepoFile("apps/desktop/src/App.tsx"),
   readRepoFile("apps/desktop/src/use-terminal-launch.ts"),
   readRepoFile("apps/desktop/src/use-workbench-appearance.ts"),
+  readRepoFile("apps/desktop/src/use-workbench-navigation.ts"),
   readRepoFile("apps/desktop/src/editor-presentation.ts"),
   readRepoFile("apps/desktop/src/session-context-events.ts"),
   readRepoFile("apps/desktop/src/browser-capture.ts"),
@@ -1011,25 +1012,22 @@ expect(
   "The Source Control rail icon should badge the change count, and status should refresh from the workspace root.",
 );
 expect(
-  surfaceSource.includes("function scmBranchMenuStyle") &&
-    surfaceSource.includes("function ScmBranchPicker") &&
-    surfaceSource.includes('className="gyro-scm-branch-menu"') &&
-    surfaceSource.includes("createPortal(") &&
+  surfaceSource.includes("function ScmBranchPicker") &&
+    /<Popover\.Content[^>]*className="gyro-scm-branch-menu"/s.test(
+      surfaceSource,
+    ) &&
+    !surfaceSource.includes("function scmBranchMenuStyle") &&
     cssRules(styleSource, ".gyro-scm-branch-menu").some(
       (rule) =>
-        rule.includes("position: fixed") &&
-        rule.includes("isolation: isolate") &&
-        rule.includes("z-index: 80"),
+        /max-block-size:\s*min\(280px,\s*var\(--available-height\)\)/.test(
+          rule,
+        ) && /overflow:\s*auto/.test(rule),
     ) &&
     cssRules(styleSource, ".gyro-scm-branch-item span").some(
       (rule) =>
         rule.includes("overflow-wrap: anywhere") &&
         rule.includes("white-space: normal"),
-    ) &&
-    cssRules(
-      styleSource,
-      ':root[data-theme="light"] .gyro-scm-branch-menu',
-    ).some((rule) => rule.includes("background: #fff")),
+    ),
   "The branch picker menu should portal above the commit form so long names are not clipped.",
 );
 const branchDialogSource = readRepoFile(
@@ -1037,17 +1035,33 @@ const branchDialogSource = readRepoFile(
 );
 const branchDialogCss = readRepoFile("apps/desktop/src/branch-name-dialog.css");
 expect(
-  branchDialogSource.includes('className="gyro-primary-button"') &&
-    branchDialogSource.includes('className="gyro-secondary-button"') &&
+  branchDialogSource.includes("<Dialog.Root") &&
+    branchDialogSource.includes("<Dialog.Content") &&
+    branchDialogSource.includes("initialFocus={inputRef}") &&
+    branchDialogSource.includes('<Button variant="outline"') &&
+    branchDialogSource.includes('type="submit"') &&
+    branchDialogSource.includes("<Input") &&
     branchDialogSource.includes("<code>{startPoint}</code>") &&
-    branchDialogCss.includes("appearance: none") &&
-    branchDialogCss.includes("-webkit-appearance: none") &&
-    branchDialogCss.includes("var(--gyro-premium-panel") &&
-    branchDialogCss.includes("var(--gyro-scrim") &&
-    branchDialogCss.includes("backdrop-filter: blur(6px)") &&
+    !branchDialogSource.includes("<dialog") &&
+    !branchDialogSource.includes("useDialogDismiss") &&
+    !branchDialogCss.includes("::backdrop") &&
+    !branchDialogCss.includes("box-shadow") &&
     !branchDialogCss.includes("background: canvas") &&
     !branchDialogCss.includes("--gyro-topbar"),
-  "The new-branch dialog should use Gyro overlay, type, and buttons instead of native system chrome.",
+  "The new-branch dialog should use the Dialog, Input and Button primitives instead of native system chrome.",
+);
+const quitDialogSource = readRepoFile("apps/desktop/src/quit-confirm-dialog.tsx");
+const configRecoverySource = readRepoFile("apps/desktop/src/config-recovery-dialog.tsx");
+expect(
+  [quitDialogSource, configRecoverySource].every(
+    (source) =>
+      source.includes("<AlertDialog.Root") &&
+      source.includes("initialFocus=") &&
+      source.includes("<Button") &&
+      !source.includes("<dialog") &&
+      !source.includes("showModal"),
+  ),
+  "The quit and config-recovery prompts should use the AlertDialog and Button primitives.",
 );
 expect(
   cssRules(styleSource, ".gyro-settings-topbar").some((rule) =>
@@ -1215,13 +1229,11 @@ expect(
   "Git status should reuse porcelain stamps, count all untracked files within its deadline, and not poll a full scan every 800ms.",
 );
 expect(
-  surfaceSource.includes("function clampWorkspacePreparationPopover") &&
-    surfaceSource.includes("popover.style.transform") &&
-    surfaceSource.includes('window.addEventListener("resize", place)') &&
+  surfaceSource.includes('aria-label="Workspace preparation details"') &&
+    surfaceSource.includes("<Popover.Root open={isOpen} onOpenChange=") &&
     styleSource.includes("gyro-preparation-spin") &&
-    styleSource.includes("max-height: min(420px, calc(100dvh - 16px));") &&
-    styleSource.includes("right: auto;") &&
-    styleSource.includes("bottom: calc(100% + 8px);"),
+    styleSource.includes("max-height: min(26.25rem, var(--available-height));") &&
+    styleSource.includes("width: min(18.25rem, var(--available-width));"),
   "Workspace preparation details should stay on-screen when opened from the sidebar footer.",
 );
 const composerSourceStart = surfaceSource.indexOf("function Composer({");
@@ -2523,9 +2535,10 @@ expect(
     appSource.includes('case "open-workspace-file"') &&
     appSource.includes('case "save-workspace-file"') &&
     appSource.includes("workspaceRootForPath(workspaceRoots, selectedFile)") &&
-    surfaceSource.includes('aria-label="Add folder to workspace"') &&
+    // The Explorer overflow is the shared Menu; its item carries the action.
+    /<Menu\.Item[\s\S]{0,120}onClick=\{onAddWorkspaceFolder\}[\s\S]{0,80}Add folder to workspace/.test(surfaceSource) &&
     surfaceSource.includes("selectedExplorerPaths") &&
-    surfaceSource.includes("gyro-explorer-context-menu") &&
+    /anchor=\{pointAnchor\(\s*explorerMenuTarget\.x,\s*explorerMenuTarget\.y,?\s*\)\}/.test(surfaceSource) &&
     surfaceSource.includes('"Remove folder from workspace"') &&
     surfaceSource.includes("Move…") &&
     surfaceSource.includes("application/x-gyro-explorer-path") &&
@@ -4567,8 +4580,8 @@ expect(
     sourceIncludes(appSource, "isStreamingAssistantSessionEvent") &&
     !sourceIncludes(appSource, "[...events]\n    .reverse()") &&
     sourceIncludes(
-      appSource,
-      "document.documentElement.dataset.density = preferences.density",
+      readRepoFile("packages/ui/src/appearance-runtime.ts"),
+      "root.dataset.density = preferences.density",
     ) &&
     sourceIncludes(
       appSource,
@@ -4696,7 +4709,7 @@ expect(
     // Composer/transcript gutters follow the pane, not the window width.
     styleSource.includes("padding-inline: var(--gyro-chat-gutter)") &&
     // Actual column edges are checked by the rendered chat contract.
-    chatDesignSource.includes("--gyro-chat-gutter: calc(24px * var(--gyro-ui-scale, 1))") &&
+    chatDesignSource.includes("--gyro-chat-gutter: calc(24px * var(--gyro-ui-scale, 1) * var(--gyro-density-scale, 1))") &&
     // Backend reliability: ACP wall clock is 24h; chat CLIs ignore stdout silence.
     sourceIncludes(tauriSource, "PROVIDER_CHAT_MAX_RUNTIME_SECS") &&
     sourceIncludes(
@@ -4711,10 +4724,10 @@ expect(
     sourceIncludes(surfaceSource, "{queue}\n        {/* A question or plan decision") &&
     sourceIncludes(surfaceSource, "gyro-chat-message-queue-more") &&
     !sourceIncludes(surfaceSource, "gyro-chat-message-queue-wrap") &&
-    sourceIncludes(surfaceSource, 'aria-label="Queued message options"') &&
-    sourceIncludes(surfaceSource, "gyro-chat-message-queue-menu") &&
-    sourceIncludes(surfaceSource, "<span>Edit</span>") &&
-    sourceIncludes(surfaceSource, "<span>Delete</span>") &&
+    sourceIncludes(surfaceSource, 'label="Queued message options"') &&
+    sourceIncludes(surfaceSource, "Options for queue position") &&
+    sourceIncludes(surfaceSource, "onClick={() => onEditMessage?.(message.id)}>Edit</Menu.Item>") &&
+    sourceIncludes(surfaceSource, "onClick={() => onRemoveMessage?.(message.id)}>Delete</Menu.Item>") &&
     sourceIncludes(appSource, "const editQueuedChatMessage") &&
     sourceIncludes(appSource, "onEditQueuedMessage={editQueuedChatMessage}") &&
     sourceIncludes(appSource, "const steerQueuedChatMessage") &&
@@ -4729,11 +4742,8 @@ expect(
       "steeringChatSessionsRef.current.add(sessionId)",
     ) &&
     !sourceIncludes(appSource, '"Steering next"') &&
-    styleSource.includes(".gyro-chat-message-queue-menu") &&
+    styleSource.includes(".gyro-chat-message-queue article") &&
     !styleSource.includes(".gyro-chat-message-queue-wrap") &&
-    styleSource.includes(
-      ".gyro-chat-message-queue:has(.gyro-chat-message-queue-menu)",
-    ) &&
     sourceIncludes(appSource, '"Message queued"') &&
     sourceIncludes(appSource, "MAX_QUEUED_CHAT_MESSAGES_PER_SESSION = 8") &&
     sourceIncludes(appSource, "MAX_QUEUED_CHAT_MESSAGES_TOTAL = 24") &&
@@ -5093,10 +5103,10 @@ expect(
     ) &&
     surfaceSource.includes('aria-label="Chat options"') &&
     surfaceSource.includes("<MoreHorizontal size={15} />") &&
-    surfaceSource.includes(
-      '<button onClick={onRename} role="menuitem" type="button">',
-    ) &&
-    surfaceSource.includes("Rename"),
+    // The row menu is the shared Menu primitive; Rename is one of its items.
+    /<Menu\.Item\s+icon=\{<Edit3[^>]*\/>\}\s+onClick=\{onRename\}\s*>\s*Rename/.test(
+      surfaceSource,
+    ),
   "Chat sessions should get first-turn titles and expose rename from the active row three-dot menu.",
 );
 expect(
@@ -5240,11 +5250,11 @@ expect(
 expect(
   surfaceSource.includes("TerminalTerminateConfirmOverlay") &&
     surfaceSource.includes("Terminate terminal?") &&
-    surfaceSource.includes('role="alertdialog"') &&
+    readRepoFile("packages/ui/src/workbench-confirmation.tsx").includes('role="alertdialog"') &&
     appSource.includes('pane.status === "running"') &&
     appSource.includes('pane.status === "waiting"') &&
     appSource.includes("terminalTerminateCandidate") &&
-    styleSource.includes(".gyro-terminal-terminate-card"),
+    styleSource.includes(".gyro-workbench-confirmation"),
   "Running terminal panes should confirm before their PTY is terminated.",
 );
 expect(
@@ -5570,7 +5580,7 @@ expect(
     surfaceSource.includes("appShellRef.current?.style.setProperty") &&
     styleSource.includes(".gyro-ide-sidebar-resizer") &&
     styleSource.includes(
-      "grid-template-columns var(--gyro-premium-motion-slow)",
+      "grid-template-columns var(--gyro-motion-slow)",
     ) &&
     styleSource.includes("will-change: grid-template-columns") &&
     surfaceSource.includes('label="Sessions"') &&
@@ -5645,7 +5655,7 @@ expect(
     appSource.includes('case "configure-cli-launcher"') &&
     styleSource.includes(".gyro-agent-launcher-menu") &&
     styleSource.includes(".gyro-terminal-agent-button") &&
-    styleSource.includes(".gyro-terminal-actions-menu"),
+    surfaceSource.includes('aria-label="Terminal actions"'),
   "CLI launcher should add command profiles in new panes while Sessions keeps its contextual sidebar.",
 );
 
@@ -5657,21 +5667,19 @@ expect(
     !surfaceSource.includes(
       '<span className="gyro-chat-surface-button-label">Panel</span>',
     ) &&
-    surfaceSource.includes(
-      'aria-label={isDockOpen ? "Hide companion" : "Show companion"}',
-    ) &&
+    surfaceSource.includes('aria-label="Show companion"') &&
     surfaceSource.includes('aria-label="Add companion tab"'),
   "The chat header controls should remain icon-only; the companion itself owns the tool launcher.",
 );
 
 expect(
-  surfaceSource.includes("showPanel={false}") &&
+  surfaceSource.includes("onToggleDock={onReopenCompanionDock}") &&
     surfaceSource.includes("showOverflow={false}") &&
     surfaceSource.includes("showEnvironment") &&
     surfaceSource.includes("showToolPanel") &&
     surfaceSource.includes('aria-label="Environment"') &&
     surfaceSource.includes('aria-label="Toggle bottom drawer"') &&
-    surfaceSource.includes("showPanel && !isDockOpen && onToggleDock") &&
+    surfaceSource.includes("!isDockOpen && onToggleDock") &&
     cssRules(
       styleSource,
       ".gyro-sidebar-persistent-header > .gyro-sidebar-windowbar:not(.is-settings)",
@@ -5681,12 +5689,17 @@ expect(
     ) &&
     cssRules(
       styleSource,
-      ".gyro-chat-surface.is-thread > .gyro-chat-thread-topbar",
-    ).some((rule) => rule.includes("border-bottom: 1px solid")) &&
+      ":root[data-theme]\n  .gyro-app-shell.is-thread-layout\n  .gyro-chat-surface\n  > .gyro-chat-thread-topbar",
+    ).some(
+      (rule) =>
+        rule.includes("background: transparent") &&
+        rule.includes("border-bottom-color: transparent") &&
+        rule.includes("box-shadow: none"),
+    ) &&
     styleSource.includes(
       ".gyro-app-shell:has(.gyro-chat-surface.is-thread)\n  .gyro-sidebar-persistent-header",
     ),
-  "The sidebar mode switcher should have no extra divider above it while the thread topbar keeps its own divider.",
+  "Session headers should expose the companion on drafts and blend into the transcript without a divider.",
 );
 
 expect(
@@ -5706,7 +5719,7 @@ expect(
     /gyro-chat-composer-dock \{\n  background: transparent;/.test(
       chatDesignSource,
     ),
-  "The chat thread topbar should match the conversation: pane in light, the start-chat app canvas in dark, and the composer dock stays clear.",
+  "Embedded chat headers should use the theme canvas and the composer dock should stay clear.",
 );
 
 // Run-header pseudo-elements are checked in the rendered chat contract.
@@ -5829,42 +5842,33 @@ const chatSidebarSource = surfaceSource.slice(
   surfaceSource.indexOf("function SidebarSection"),
 );
 expect(
-  cssRules(styleSource, ".gyro-sidebar-new-session-menu").some(
+  cssRules(styleSource, ":where(.gyro-popup)").some(
     (rule) =>
-      rule.includes("border: 1px solid var(--gyro-premium-hairline-soft)") &&
-      /box-shadow:\s*0\s+\d+px\s+\d+px\s+var\(--gyro-premium-shadow-soft\)/.test(
-        rule,
-      ) &&
-      /padding:\s*[4-8]px\s*;/.test(rule) &&
-      /display:\s*grid\s*;/.test(rule) &&
-      /left:\s*0\s*;/.test(rule) &&
-      /right:\s*0\s*;/.test(rule),
+      /border:\s*1px solid var\(--gyro-border/.test(rule) &&
+      /box-shadow:\s*var\(--gyro-shadow-popover\)/.test(rule),
   ) &&
-    surfaceSource.includes("gyro-sidebar-session-group is-chat") &&
-    surfaceSource.includes("gyro-sidebar-session-group is-cli") &&
+    cssRules(styleSource, ".gyro-sidebar-new-session-popup").some((rule) =>
+      /min-inline-size:\s*var\(--anchor-width\)/.test(rule),
+    ) &&
+    surfaceSource.includes('className="gyro-sidebar-new-session-popup"') &&
+    surfaceSource.includes('<Menu.Group aria-label="Open CLI sessions">') &&
     !surfaceSource.includes("gyro-sidebar-cli-location") &&
     !surfaceSource.includes("CLI session location"),
   "The Create menu should keep a compact, grouped surface without a project picker.",
 );
 expect(
-  [
-    ".gyro-sidebar-new-session-menu button strong",
-    ".gyro-sidebar-new-session-menu button small",
-  ].every((selector) =>
-    cssRules(styleSource, selector).some(
-      (rule) =>
-        /white-space:\s*nowrap/.test(rule) &&
-        /overflow:\s*hidden/.test(rule) &&
-        /text-overflow:\s*ellipsis/.test(rule),
-    ),
+  cssRules(styleSource, ":where(.gyro-popup__text)").some(
+    (rule) =>
+      /white-space:\s*nowrap/.test(rule) &&
+      /overflow:\s*hidden/.test(rule) &&
+      /text-overflow:\s*ellipsis/.test(rule),
   ),
   "Launcher rows in the Create menu must stay single-line with ellipsis: a wrapped label grows past the row height and collides with the row below it.",
 );
 expect(
   chatSidebarSource.includes("New Chat") &&
-    chatSidebarSource.includes(
-      '<span className="gyro-sidebar-session-group-label">',
-    ) &&
+    chatSidebarSource.includes("<Menu.GroupLabel>CLI sessions</Menu.GroupLabel>") &&
+    chatSidebarSource.includes("<Menu.SubmenuTrigger") &&
     chatSidebarSource.includes("CLI") &&
     !chatSidebarSource.includes("CLI session location") &&
     !chatSidebarSource.includes("Start in the focused project") &&
@@ -5906,7 +5910,9 @@ expect(
     chatSidebarSource.includes("No recent sessions") &&
     !chatSidebarSource.includes("Local CLI") &&
     !chatSidebarSource.includes("<small>Start one</small>") &&
-    chatSidebarSource.includes("onOpenWorkspace();") &&
+    /onClick=\{onOpenWorkspace\}\s*title="Choose where the CLI should run"/.test(
+      chatSidebarSource,
+    ) &&
     surfaceSource.includes("const unprojectedRecentSessions") &&
     surfaceSource.includes(
       "!isTransientWorkspacePath(session.workspacePath)",
@@ -5948,7 +5954,7 @@ expect(
   styleSource.includes(".gyro-titlebar-switch-option:hover") &&
     styleSource.includes(".gyro-titlebar-switch-option.is-active") &&
     styleSource.includes(
-      "box-shadow: inset 0 0 0 0.5px var(--gyro-premium-hairline-soft)",
+      "box-shadow: inset 0 0 0 0.5px var(--gyro-border-light)",
     ),
   "Sidebar Sessions/Workspace tabs should keep a quiet active/focus state without the underglow.",
 );
@@ -5966,10 +5972,9 @@ expect(
     surfaceSource.includes("Remove from Gyro app?") &&
     surfaceSource.includes("Nothing will be deleted from your Mac.") &&
     surfaceSource.includes("Remove from app") &&
-    styleSource.includes(".gyro-project-remove-overlay") &&
-    styleSource.includes(".gyro-project-remove-note") &&
-    styleSource.includes(".gyro-project-remove-confirm") &&
-    styleSource.includes(".gyro-project-remove-keep"),
+    surfaceSource.includes('<WorkbenchConfirmation') &&
+    surfaceSource.includes('cancelLabel="Keep"') &&
+    styleSource.includes(".gyro-workbench-confirmation"),
   "Projects should expose a remove-from-app action with a screen-level confirmation that does not imply local deletion.",
 );
 expect(
@@ -6355,13 +6360,13 @@ expect(
     sourceIncludes(surfaceSource, 'onOpenTool("terminal")') &&
     sourceIncludes(surfaceSource, 'onOpenTool("browser")') &&
     sourceIncludes(surfaceSource, "onToggleToolPanel={isToolPanelAvailable ? onToggleToolPanel : undefined}") &&
-    sourceIncludes(surfaceSource, "<span>Bottom drawer</span>") &&
+    sourceIncludes(surfaceSource, ">Bottom drawer</Menu.CheckboxItem>") &&
     sourceIncludes(surfaceSource, "aria-pressed={isToolPanelOpen}") &&
     sourceIncludes(appSource, "const toggleChatToolPanel = useCallback") &&
     sourceIncludes(appSource, 'openToolPanel("terminal")') &&
     sourceIncludes(appSource, 'openToolPanel("terminal")') &&
     !sourceIncludes(surfaceSource, '"Open last used panel"') &&
-    sourceIncludes(surfaceSource, "onToggleToolPanel?.();") &&
+    sourceIncludes(surfaceSource, "onCheckedChange={onToggleToolPanel}") &&
     sourceIncludes(surfaceSource, 'onComposerAction?.("open-files")') &&
     sourceIncludes(appSource, 'case "open-files":') &&
     sourceIncludes(appSource, 'layout: "code"') &&
@@ -6534,7 +6539,7 @@ expect(
     styleSource.includes("grid-template-rows: minmax(0, 1fr) auto") &&
     threadSurfaceRules.some((rule) =>
       rule.includes(
-        "grid-template-rows: var(--gyro-chat-header-height, 48px) minmax(0, 1fr)",
+        "grid-template-rows: var(--gyro-chat-header-height, var(--gyro-window-header-height)) minmax(0, 1fr)",
       ),
     ) &&
     threadTopbarRules.some(
@@ -6762,7 +6767,7 @@ expect(
     styleSource.includes(
       '.gyro-update-card[data-level="critical"] .gyro-update-mark',
     ) &&
-    styleSource.includes(".gyro-settings-status.is-info i") &&
+    surfaceSource.includes('<StatusChip className="gyro-settings-status" dot tone={tone}>') &&
     styleSource.includes(
       "@media (prefers-reduced-motion: reduce) {\n  .gyro-update-card .is-spinning",
     ) &&
@@ -6828,7 +6833,7 @@ expect(
     sourceIncludes(surfaceSource, "startProjectLabel") &&
     sourceIncludes(surfaceSource, "What should we work on?") &&
     !sourceIncludes(surfaceSource, ': "Gyro";') &&
-    sourceIncludes(surfaceSource, "gyroLogoTransparentDark") &&
+    sourceIncludes(surfaceSource, "gyro-brand-logo gyro-brand-mark") &&
     sourceIncludes(surfaceSource, "gyroLogoTransparentLight") &&
     sourceIncludes(surfaceSource, "gyro-chat-start-brand-word") &&
     sourceIncludes(surfaceSource, 'style={{ width: "min(860px, 100%)" }}') &&
@@ -6873,7 +6878,7 @@ expect(
     // Workspace-mode picker: card rows with full copy, badge (not trailing
     // "Recommended" that collides with truncated labels in a narrow menu).
     // Whitespace-tolerant: Prettier wraps the tuple once it outgrows a line.
-    /\[\s*"workspace-mode",\s*Laptop,\s*modeChipLabel/.test(surfaceSource) &&
+    /\[\s*"workspace-mode",\s*FolderOpen,\s*modeChipLabel/.test(surfaceSource) &&
     sourceIncludes(surfaceSource, 'kind: "workspace-mode"') &&
     // Labels + optional Recommended only — no redundant title or detail rows.
     !sourceIncludes(surfaceSource, 'title="Where the agent works"') &&
@@ -7533,10 +7538,10 @@ expect(
     surfaceSource.includes(
       "const slashMenuScopeRef = useOutsidePointerDismiss",
     ) &&
-    surfaceSource.includes(
-      '<div className="gyro-session-menu" ref={menuRef}',
-    ) &&
-    surfaceSource.includes("menuMessageId === message.id ? menuTriggerRef") &&
+    // The session row menu is a controlled Base UI Menu, which scopes
+    // dismissal to the popup and its trigger.
+    /<Menu\.Root\s+open=\{isMenuOpen\}\s+onOpenChange=/.test(surfaceSource) &&
+    /<Menu\.Root\s+open=\{menuMessageId === message\.id\}\s+onOpenChange=/.test(surfaceSource) &&
     surfaceSource.includes("ref={popoverScopeRef}"),
   "Dropdown dismissal should be scoped to the open control and its trigger, not the surrounding row.",
 );
@@ -7563,7 +7568,10 @@ expect(
     !sourceIncludes(surfaceSource, 'label: "File"') &&
     !sourceIncludes(surfaceSource, 'label: "Folder"') &&
     !sourceIncludes(surfaceSource, 'label: "Search"') &&
-    sourceIncludes(surfaceSource, 'action: "set-chat-mode-plan"') &&
+    sourceIncludes(
+      surfaceSource,
+      'action: chatMode === "plan" ? "set-chat-mode-normal" : "set-chat-mode-plan"',
+    ) &&
     sourceIncludes(surfaceSource, "icon: ListChecks") &&
     sourceIncludes(surfaceSource, 'title="Add"') &&
     !sourceIncludes(surfaceSource, 'label: "Photos"') &&
@@ -8340,10 +8348,13 @@ expect(
     readRepoFile("packages/ui/src/workspace-sidebar.tsx"),
     "export function SessionDeleteConfirmOverlay",
   ) &&
-    sourceIncludes(surfaceSource, "gyro-chat-delete-card") &&
+    sourceIncludes(
+      readRepoFile("packages/ui/src/workspace-sidebar.tsx"),
+      'title="Delete this chat?"',
+    ) &&
     sourceIncludes(surfaceSource, "Delete this chat?") &&
-    styleSource.includes(".gyro-chat-delete-card") &&
-    styleSource.includes(".gyro-chat-delete-note") &&
+    surfaceSource.includes("confirmDisabled={isWorking}") &&
+    styleSource.includes(".gyro-workbench-confirmation") &&
     sourceIncludes(surfaceSource, "setSessionDeleteCandidate({") &&
     sourceIncludes(surfaceSource, "<SessionDeleteConfirmOverlay") &&
     sourceIncludes(surfaceSource, "onDeleteSession?.(candidate.id)"),
@@ -8397,19 +8408,19 @@ expect(
     styleSource.includes("font-weight: 400") &&
     styleSource.includes("font-weight: 500") &&
     styleSource.includes("line-height: calc(16px * var(--gyro-ui-scale, 1))") &&
-    styleSource.includes("transition: transform var(--gyro-premium-motion)") &&
+    styleSource.includes("transition: transform var(--gyro-motion)") &&
     styleSource.includes("@keyframes gyro-native-surface-enter"),
   "Sessions and Workspace switching should use centered reference typography, the shared sliding indicator, and restrained surface motion.",
 );
 
 expect(
-  (styleSource.match(/--gyro-premium-motion:/g) ?? []).length === 1 &&
+  (styleSource.match(/--gyro-motion:/g) ?? []).length === 1 &&
     styleSource.includes(
       "--gyro-premium-hairline: rgba(255, 255, 255, 0.09)",
     ) &&
     styleSource.includes("--gyro-radius-md: 8px") &&
     styleSource.includes(
-      "--gyro-premium-motion: calc(130ms * var(--gyro-motion-factor, 1))",
+      "--gyro-motion: calc(130ms * var(--gyro-motion-factor, 1))",
     ) &&
     styleSource.includes("--gyro-app: #1e1e1d") &&
     styleSource.includes("--gyro-pane: var(--gyro-app)") &&
@@ -8428,8 +8439,8 @@ expect(
     surfaceSource.includes(
       'detail="Supporting icons, badges, and quiet highlights."',
     ) &&
-    appSource.includes('"--gyro-user-main"') &&
-    appSource.includes('"--gyro-user-secondary"') &&
+    readRepoFile("packages/ui/src/appearance-runtime.ts").includes('"--gyro-user-main"') &&
+    readRepoFile("packages/ui/src/appearance-runtime.ts").includes('"--gyro-user-secondary"') &&
     styleSource.includes("Large surfaces stay neutral") &&
     !styleSource.includes("var(--gyro-secondary-accent) 1.5%") &&
     styleSource.includes("outline: 2px solid var(--gyro-accent)"),
@@ -8559,7 +8570,7 @@ expect(
     ) &&
     workspaceRailFoundation.includes("pointer-events: none") &&
     workspaceRailFoundation.includes(
-      "visibility 0s linear var(--gyro-premium-motion-slow)",
+      "visibility 0s linear var(--gyro-motion-slow)",
     ) &&
     workspaceRailFoundation.includes(
       "@media (prefers-reduced-motion: reduce)",
@@ -8818,7 +8829,7 @@ for (const compactMenuSelector of [
   ".gyro-composer-menu-item:disabled",
   ".gyro-account-menu-row.is-muted",
   ".gyro-agent-launcher-menu strong",
-  ".gyro-terminal-actions-menu button.is-danger",
+  '.gyro-popup__item[data-tone="danger"]',
 ]) {
   expect(
     styleSource.includes(compactMenuSelector),
@@ -8925,10 +8936,16 @@ expect(
 );
 
 expect(
-  surfaceSource.includes('role="switch"') &&
+  readRepoFile("packages/ui/src/settings-controls.tsx").includes(
+    "onCheckedChange={onChange}",
+  ) &&
+    readRepoFile("packages/ui/src/primitives/controls.tsx").includes(
+      "<BaseSwitch.Root",
+    ) &&
     surfaceSource.includes("Require command approval") &&
     surfaceSource.includes("Automatic update checks") &&
-    surfaceSource.includes("gyro-settings-confirm-overlay"),
+    surfaceSource.includes('title="Reset UI state?"') &&
+    surfaceSource.includes('confirmLabel="Reset UI state"'),
   "Settings should use semantic switches for persisted booleans and confirm destructive resets.",
 );
 

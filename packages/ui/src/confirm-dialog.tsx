@@ -1,14 +1,14 @@
 /**
  * The in-app confirmation dialog.
  *
- * Replaces the stock macOS alert (and the browser's `window.confirm`) with a
- * Gyro surface: same card, scrim and buttons as the text prompt, with the
- * confirm button named after what it does ("Discard", "Move to Trash") and
- * tinted red when the action loses work.
+ * Replaces the stock macOS alert (and the browser's `window.confirm`) with the
+ * AlertDialog primitive, with the confirm button named after what it does
+ * ("Discard", "Move to Trash") and tinted red when the action loses work.
  */
-import { useLayoutEffect, useRef } from "react";
+import { useRef } from "react";
 import { createRoot } from "react-dom/client";
-import { AlertTriangle, Info, ShieldAlert } from "lucide-react";
+import { AlertTriangle, Info, ShieldAlert } from "./icons";
+import { AlertDialog, Button } from "./primitives";
 import "./text-prompt.css";
 
 export type ConfirmDialogOptions = {
@@ -64,35 +64,21 @@ export function describeConfirmation(message: string): Required<
 
 function ConfirmDialog({
   options,
+  open,
   onClose,
+  onExited,
 }: {
   options: ConfirmDialogOptions;
+  open: boolean;
   onClose: (value: boolean) => void;
+  onExited: () => void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const confirmButton = useRef<HTMLButtonElement>(null);
   const cancelButton = useRef<HTMLButtonElement>(null);
   const derived = describeConfirmation(options.message);
   const tone = options.tone ?? derived.tone;
   const title = options.title ?? derived.title;
   const acknowledgeOnly = derived.acknowledgeOnly && tone !== "permission";
-
-  useLayoutEffect(() => {
-    const element = dialog.current;
-    if (!element) return;
-    const previousFocus = document.activeElement;
-    if (!element.open) element.showModal();
-    (tone !== "default" && !acknowledgeOnly
-      ? cancelButton.current
-      : confirmButton.current
-    )?.focus();
-    return () => {
-      element.close();
-      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
-        previousFocus.focus();
-      }
-    };
-  }, [acknowledgeOnly, tone]);
 
   const Icon = {
     danger: AlertTriangle,
@@ -101,68 +87,78 @@ function ConfirmDialog({
   }[tone];
 
   return (
-    <dialog
-      aria-describedby={
-        options.detail
-          ? "gyro-confirm-message gyro-confirm-detail"
-          : "gyro-confirm-message"
-      }
-      aria-label={title}
-      className={`gyro-text-prompt gyro-confirm-dialog is-${tone}`}
-      onCancel={(event) => {
-        event.preventDefault();
-        onClose(false);
+    <AlertDialog.Root
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose(false);
       }}
-      ref={dialog}
-      role="alertdialog"
+      onOpenChangeComplete={(next) => {
+        if (!next) onExited();
+      }}
     >
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          onClose(true);
-        }}
+      <AlertDialog.Content
+        aria-describedby={
+          options.detail
+            ? "gyro-confirm-message gyro-confirm-detail"
+            : "gyro-confirm-message"
+        }
+        aria-label={title}
+        className={`gyro-confirm-dialog is-${tone}`}
+        initialFocus={
+          tone !== "default" && !acknowledgeOnly ? cancelButton : confirmButton
+        }
+        size={tone === "permission" ? "md" : "sm"}
       >
-        <div className="gyro-confirm-dialog-head">
-          <span aria-hidden="true" className="gyro-confirm-dialog-icon">
-            <Icon size={15} strokeWidth={2} />
-          </span>
-          <div>
-            <h2 className="gyro-text-prompt-title">{title}</h2>
-            <p className="gyro-text-prompt-message" id="gyro-confirm-message">
-              {options.message}
-            </p>
-            {options.detail ? (
-              <dl
-                className="gyro-confirm-dialog-detail"
-                id="gyro-confirm-detail"
-              >
-                <dt>{options.detail.label}</dt>
-                <dd>{options.detail.value}</dd>
-              </dl>
-            ) : null}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            onClose(true);
+          }}
+        >
+          <div className="gyro-confirm-dialog-head">
+            <span aria-hidden="true" className="gyro-confirm-dialog-icon">
+              <Icon size={15} strokeWidth={2} />
+            </span>
+            <div>
+              <AlertDialog.Title>{title}</AlertDialog.Title>
+              <p className="gyro-dialog__description" id="gyro-confirm-message">
+                {options.message}
+              </p>
+              {options.detail ? (
+                <dl
+                  className="gyro-confirm-dialog-detail"
+                  id="gyro-confirm-detail"
+                >
+                  <dt>{options.detail.label}</dt>
+                  <dd>{options.detail.value}</dd>
+                </dl>
+              ) : null}
+            </div>
           </div>
-        </div>
-        <div className="gyro-text-prompt-actions">
-          {acknowledgeOnly ? null : (
-            <button
-              className="gyro-secondary-button"
-              onClick={() => onClose(false)}
-              ref={cancelButton}
-              type="button"
+          <div className="gyro-confirm-dialog-actions">
+            {acknowledgeOnly ? null : (
+              <Button
+                onClick={() => onClose(false)}
+                ref={cancelButton}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {options.cancelLabel ?? "Cancel"}
+              </Button>
+            )}
+            <Button
+              ref={confirmButton}
+              size="sm"
+              type="submit"
+              variant={tone === "danger" ? "destructive" : "default"}
             >
-              {options.cancelLabel ?? "Cancel"}
-            </button>
-          )}
-          <button
-            className={`gyro-primary-button${tone === "danger" ? " is-danger" : ""}`}
-            ref={confirmButton}
-            type="submit"
-          >
-            {options.confirmLabel ?? derived.confirmLabel}
-          </button>
-        </div>
-      </form>
-    </dialog>
+              {options.confirmLabel ?? derived.confirmLabel}
+            </Button>
+          </div>
+        </form>
+      </AlertDialog.Content>
+    </AlertDialog.Root>
   );
 }
 
@@ -186,17 +182,33 @@ export function askConfirmation(
 
   return new Promise<boolean>((resolve) => {
     let settled = false;
-    const close = (value: boolean) => {
+    let removed = false;
+    const remove = () => {
+      if (removed) return;
+      removed = true;
+      root.unmount();
+      host.remove();
+    };
+    const render = (open: boolean) =>
+      root.render(
+        <ConfirmDialog
+          onClose={close}
+          onExited={() => queueMicrotask(remove)}
+          open={open}
+          options={options}
+        />,
+      );
+    function close(value: boolean) {
       if (settled) return;
       settled = true;
       closeActiveConfirm = null;
       resolve(value);
-      queueMicrotask(() => {
-        root.unmount();
-        host.remove();
-      });
-    };
+      // Play the exit, then unmount; the timer covers a window that never
+      // paints (hidden or minimized), where transitions do not finish.
+      render(false);
+      window.setTimeout(remove, 1000);
+    }
     closeActiveConfirm = close;
-    root.render(<ConfirmDialog onClose={close} options={options} />);
+    render(true);
   });
 }

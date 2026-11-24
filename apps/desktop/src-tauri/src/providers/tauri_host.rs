@@ -1,6 +1,7 @@
 //! Desktop implementation of provider application services.
 
 use super::{
+    catalog::DesktopToolCatalog,
     chat_types::ProviderChatRequest,
     runner::{ProviderHeartbeat, RunEvent, RunnerHost},
 };
@@ -21,6 +22,7 @@ use uuid::Uuid;
 
 pub(crate) struct TauriRunnerHost {
     app: tauri::AppHandle,
+    tool_catalog: DesktopToolCatalog,
     prefetched_history: std::sync::Mutex<Option<PrefetchedHistory>>,
     generated_images: std::sync::Mutex<crate::codex_images::GeneratedImages>,
 }
@@ -52,15 +54,17 @@ impl TauriRunnerHost {
     }
 
     pub(crate) fn new(app: &tauri::AppHandle) -> Self {
-        Self::with_prefetched_history(app, None)
+        Self::with_prefetched_history(app, None, None)
     }
 
     pub(super) fn with_prefetched_history(
         app: &tauri::AppHandle,
         prefetched_history: Option<PrefetchedHistory>,
+        root_count: Option<usize>,
     ) -> Self {
         Self {
             app: app.clone(),
+            tool_catalog: DesktopToolCatalog::for_workspace_roots(root_count),
             prefetched_history: std::sync::Mutex::new(prefetched_history),
             generated_images: std::sync::Mutex::new(Default::default()),
         }
@@ -69,7 +73,7 @@ impl TauriRunnerHost {
 
 impl RunnerHost for TauriRunnerHost {
     fn tool_catalog(&self) -> &dyn gyro_core::provider_runtime::catalog::ToolCatalog {
-        &super::catalog::DESKTOP_TOOL_CATALOG
+        &self.tool_catalog
     }
     fn context_sections(
         &self,
@@ -86,6 +90,7 @@ impl RunnerHost for TauriRunnerHost {
                 self.conversation_history(request).as_deref(),
                 tools,
                 images,
+                self.tool_catalog.workspace_root_count(),
             )
         };
         // The receipt appends a system event. Read history before writing it
@@ -94,6 +99,11 @@ impl RunnerHost for TauriRunnerHost {
         prompt
     }
     fn model_context_window(&self, provider: &str, model: Option<&str>) -> Option<u64> {
+        // The benchmark harness is debug-only; release builds use the catalog window.
+        #[cfg(debug_assertions)]
+        if let Some(window) = crate::efficiency::benchmark::context_window_override() {
+            return Some(window);
+        }
         crate::provider_context::provider_model_context_window(provider, model)
     }
     fn allow_delegation(&self, request: &ProviderChatRequest) -> bool {
@@ -244,6 +254,13 @@ impl RunnerHost for TauriRunnerHost {
         }
     }
 
+    fn save_recovery_checkpoint(&self, request: &ProviderChatRequest) -> Option<String> {
+        let store = open_store().ok()?;
+        efficiency::save_checkpoint(&self.app, &store, request)
+            .ok()??
+            .recovery_context(&request.message)
+    }
+
     fn context_compaction_requested(&self, request: &ProviderChatRequest) -> bool {
         request.internal_purpose.is_none()
             && self
@@ -280,6 +297,20 @@ impl RunnerHost for TauriRunnerHost {
         waiting: bool,
     ) {
         super::retry_recovery::emit_codex_capacity_retry(&self.app, request, retry, waiting);
+    }
+
+    fn note_provider_call(&self, request: &ProviderChatRequest) {
+        let Some((session, turn)) = Uuid::parse_str(&request.session_id).ok().zip(
+            request
+                .turn_id
+                .as_deref()
+                .and_then(|turn| Uuid::parse_str(turn).ok()),
+        ) else {
+            return;
+        };
+        if let Ok(store) = open_store() {
+            let _ = store.note_usage_call(session, turn);
+        }
     }
 
     fn start_heartbeat(

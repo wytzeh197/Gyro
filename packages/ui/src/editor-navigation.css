@@ -1,0 +1,245 @@
+/* Editor breadcrumbs: path, then the symbols around the cursor. */
+.gyro-editor-pane:has(> .gyro-editor-breadcrumbs) {
+  /* Keep the optional breadcrumb row compact and give Monaco the remaining space. */
+  grid-template-rows: var(--gyro-ide-tab-height) auto minmax(0, 1fr);
+}
+
+.gyro-editor-breadcrumbs {
+  align-items: center;
+  border-bottom: 1px solid var(--gyro-border-soft);
+  color: var(--gyro-faint);
+  display: flex;
+  flex: none;
+  font-size: var(--gyro-font-micro);
+  gap: 2px;
+  min-height: 22px;
+  overflow: hidden;
+  padding-inline: 10px;
+  white-space: nowrap;
+}
+
+.gyro-editor-breadcrumbs > span {
+  align-items: center;
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+}
+
+.gyro-editor-breadcrumbs > span > svg {
+  opacity: 0.6;
+}
+
+.gyro-editor-breadcrumbs .gyro-breadcrumb-file {
+  color: var(--gyro-muted);
+}
+
+.gyro-editor-breadcrumbs .gyro-breadcrumb-symbol {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.gyro-breadcrumb-symbol > button {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: var(--gyro-radius-xs);
+  color: var(--gyro-muted);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 1px 4px;
+  text-overflow: ellipsis;
+}
+
+.gyro-breadcrumb-symbol > button:hover {
+  background: var(--gyro-control-hover);
+  color: var(--gyro-text);
+}
+
+/* Explorer Outline section. */
+.gyro-outline {
+  max-height: 38vh;
+  overflow: auto;
+}
+
+.gyro-sidebar-row.gyro-outline-row {
+  grid-template-columns: 12px 16px minmax(0, 1fr) auto;
+  gap: 4px;
+}
+
+.gyro-outline-row.is-on-path .gyro-outline-name {
+  color: var(--gyro-text);
+}
+
+.gyro-outline-row.is-active {
+  background: var(--gyro-control-hover);
+}
+
+.gyro-outline-twisty {
+  display: inline-flex;
+  justify-content: center;
+}
+
+.gyro-outline-kind {
+  color: var(--gyro-faint);
+  font-family: var(--gyro-font-mono, ui-monospace, monospace);
+  font-size: var(--gyro-font-micro);
+  text-align: center;
+}
+
+.gyro-outline-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gyro-outline-detail {
+  color: var(--gyro-faint);
+  font-size: var(--gyro-font-micro);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* IDE polish pass -----------------------------------------------------------
+   The workbench chrome already states its hierarchy: a hairline under the tab
+   strip, muted inactive tabs, and an accent rule on the selected explorer row.
+   This pass only removes noise and adds the affordances that were missing:
+   tabs read as file names until the pointer or keyboard arrives, status
+   metrics stop jittering, hover and keyboard focus become visible, empty
+   editors read as captions, and motion is optional. */
+
+/* A tab is a file name first. Its close affordance appears with the pointer,
+   for the active tab, or while the tab holds keyboard focus; the 20px hit
+   target is unchanged, so nothing moves when it appears. */
+.gyro-editor-tab-strip > button {
+  transition: background-color 120ms ease;
+}
+
+.gyro-editor-tab-strip > button .gyro-editor-tab-close {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.gyro-editor-tab-strip > button:hover .gyro-editor-tab-close,
+.gyro-editor-tab-strip > button.is-active .gyro-editor-tab-close,
+.gyro-editor-tab-strip > button:focus-within .gyro-editor-tab-close {
+  opacity: 0.85;
+}
+
+.gyro-editor-tab-strip > button .gyro-editor-tab-close:hover {
+  background: color-mix(in srgb, var(--gyro-text) 14%, transparent);
+  opacity: 1;
+}
+
+/* Hovering an inactive tab previews the switch without competing with the
+   active tab accent underline. */
+.gyro-editor-tab-strip > button:hover:not(.is-active) {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+}
+
+.gyro-editor-tab-strip > button:focus-visible,
+.gyro-editor-tab-close:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--gyro-accent) 70%, transparent);
+  outline-offset: -1px;
+}
+
+/* Status metrics are compared, not just read: tabular figures stop the column
+   from shifting as the cursor crosses a digit boundary. */
+.gyro-editor-statusbar {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The explorer row already marks selection. It still needs a hover hint that
+   the row is a target, and a visible ring when it is reached from the
+   keyboard. */
+.gyro-app-shell:has(.gyro-workspace-route.is-code)
+  .gyro-sidebar-row.gyro-sidebar-explorer-row:hover:not(
+    [aria-selected="true"]
+  ) {
+  background: color-mix(in srgb, var(--gyro-text) 5%, transparent);
+}
+
+.gyro-app-shell:has(.gyro-workspace-route.is-code)
+  .gyro-sidebar-row.gyro-sidebar-explorer-row:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--gyro-accent) 60%, transparent);
+  outline-offset: -1px;
+}
+
+/* An empty editor is a caption, not loose text pinned to the top-left. */
+.gyro-code-empty {
+  color: var(--gyro-ide-secondary-foreground);
+  line-height: 1.5;
+  margin-inline: auto;
+  max-width: 44ch;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gyro-editor-tab-strip > button,
+  .gyro-editor-tab-strip > button .gyro-editor-tab-close {
+    transition: none;
+  }
+}
+
+/* Workspace titlebar: one quiet strip above the rail and editor. A single
+   editor group needs no focus rim running through the window controls. */
+.gyro-app-shell.is-workspace-chrome-active
+  .gyro-workspace-route.is-code
+  .gyro-editor-groups[data-group-count="1"]
+  > .gyro-editor-pane.is-active-group {
+  box-shadow: none;
+}
+
+.gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
+  > .gyro-workspace-activity-rail::after {
+  top: 48px;
+}
+
+.gyro-app-shell.is-workspace-chrome-active.is-sidebar-hidden
+  .gyro-workspace-route.is-code
+  .gyro-editor-pane:first-child
+  > .gyro-editor-tabs {
+  background: var(--gyro-workspace-chrome);
+  padding-left: calc(210px + 108px * (var(--gyro-ui-scale, 1) - 1));
+}
+
+.gyro-app-shell.is-workspace-chrome-active .gyro-titlebar-switch {
+  border-radius: var(--gyro-radius-md);
+  height: calc(26px * var(--gyro-ui-scale, 1));
+  padding: 2px;
+}
+
+.gyro-app-shell.is-workspace-chrome-active .gyro-titlebar-switch-option {
+  border-radius: var(--gyro-radius-sm);
+  height: calc(26px * var(--gyro-ui-scale, 1) - 6px);
+}
+
+:root
+  .gyro-app-shell.is-workspace-chrome-active
+  .gyro-titlebar-switch
+  > .gyro-selection-indicator {
+  border-radius: var(--gyro-radius-sm);
+  box-shadow: none;
+}
+
+.gyro-app-shell.is-workspace-chrome-active
+  .gyro-workspace-route.is-code
+  .gyro-editor-tab-strip
+  > button.is-empty {
+  border-right: 0;
+  color: var(--gyro-faint);
+  gap: 8px;
+  font-weight: 400;
+}
+
+.gyro-app-shell.is-workspace-chrome-active
+  .gyro-workspace-route.is-code
+  .gyro-editor-tab-strip
+  > button.is-empty
+  > svg {
+  opacity: 0.65;
+}

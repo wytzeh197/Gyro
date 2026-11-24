@@ -42,6 +42,10 @@ pub struct EfficiencyEvents {
     pub spill_failures: u64,
     pub repeated_call_notices: u64,
     pub repeated_call_pauses: u64,
+    pub checkpoint_recoveries: u64,
+    /// Completed requests that retained a preceding completed request's full
+    /// message prefix and tool settings. Provider cache hits are separate.
+    pub confirmed_prefix_reuses: u64,
 }
 impl EfficiencyEvents {
     pub fn combine(&mut self, other: &Self) {
@@ -62,6 +66,12 @@ impl EfficiencyEvents {
         self.repeated_call_pauses = self
             .repeated_call_pauses
             .saturating_add(other.repeated_call_pauses);
+        self.checkpoint_recoveries = self
+            .checkpoint_recoveries
+            .saturating_add(other.checkpoint_recoveries);
+        self.confirmed_prefix_reuses = self
+            .confirmed_prefix_reuses
+            .saturating_add(other.confirmed_prefix_reuses);
     }
 }
 
@@ -355,7 +365,7 @@ pub fn compact_duplicate_reads(messages: &mut [Value]) -> usize {
     // hashing what is often a full source excerpt in a one-tool round.
     if exchange
         .iter()
-        .filter_map(duplicate_read_candidate)
+        .filter_map(large_tool_result)
         .nth(1)
         .is_none()
     {
@@ -364,7 +374,7 @@ pub fn compact_duplicate_reads(messages: &mut [Value]) -> usize {
     let mut latest = HashMap::<[u8; 32], String>::new();
     let mut saved = 0;
     for message in exchange.iter_mut().rev() {
-        let Some(text) = duplicate_read_candidate(message) else {
+        let Some(text) = large_tool_result(message) else {
             continue;
         };
         let Ok(mut payload) = serde_json::from_str::<Value>(text) else {
@@ -429,7 +439,7 @@ pub fn compact_duplicate_reads(messages: &mut [Value]) -> usize {
     saved
 }
 
-fn duplicate_read_candidate(message: &Value) -> Option<&str> {
+fn large_tool_result(message: &Value) -> Option<&str> {
     if message["role"] != "tool" {
         return None;
     }
@@ -507,7 +517,67 @@ pub fn retire_stale_tool_results(messages: &mut [Value]) -> usize {
     retire_with_policy(messages, EvidencePolicy::Preview, "")
 }
 
-pub(super) fn retire_with_policy(
+/// Fit a rejected native-tool request by shortening older successful workspace
+/// observations. Keep the call, result identity and exact session-scoped copy.
+pub(crate) fn shorten_rejected_workspace_evidence(messages: &mut [Value]) -> usize {
+    if !super::spill::has_session_scope() {
+        return 0;
+    }
+    let Some(latest_tool_exchange) = messages.iter().rposition(|message| {
+        message["role"] == "assistant"
+            && message["tool_calls"]
+                .as_array()
+                .is_some_and(|calls| !calls.is_empty())
+    }) else {
+        return 0;
+    };
+    let mut saved = 0;
+    for message in messages.iter_mut().take(latest_tool_exchange).skip(2) {
+        let Some(text) = large_tool_result(message) else {
+            continue;
+        };
+        let Ok(mut payload) = serde_json::from_str::<Value>(text) else {
+            continue;
+        };
+        if payload["status"] != "completed"
+            || !payload["error"].is_null()
+            || payload["compatible"] == false
+        {
+            continue;
+        }
+        let Some(
+            capability @ ("workspace-read"
+            | "workspace-read-range"
+            | "workspace-list"
+            | "workspace-search"),
+        ) = payload["result"]["capabilityId"].as_str()
+        else {
+            continue;
+        };
+        let data = &payload["result"]["data"];
+        let compact = if already_omitted(&payload) {
+            data["spill"].as_str().and_then(|address| {
+                let window = super::spill::read_scoped_window(address, 0, 1).ok()??;
+                Some(tight_spill_data(data, address, window.total_bytes))
+            })
+        } else {
+            tight_data(data, capability, super::spill::persist)
+        };
+        let Some(compact) = compact else {
+            continue;
+        };
+        payload["result"]["data"] = compact;
+        if let Ok(next) = serde_json::to_string(&payload) {
+            if next.len() < text.len() {
+                saved += text.len() - next.len();
+                message["content"] = Value::String(next);
+            }
+        }
+    }
+    saved
+}
+
+pub(crate) fn retire_with_policy(
     messages: &mut [Value],
     policy: EvidencePolicy,
     task: &str,
@@ -946,6 +1016,10 @@ fn tight_data(
         });
         return None;
     }
+    Some(tight_spill_data(data, &address, text.len()))
+}
+
+fn tight_spill_data(data: &Value, address: &str, original_bytes: usize) -> Value {
     let mut kept = serde_json::Map::new();
     for key in [
         "path",
@@ -985,14 +1059,14 @@ fn tight_data(
         }
     }
     kept.insert("evidenceOmitted".into(), true.into());
-    kept.insert("elidedBytes".into(), text.len().into());
+    kept.insert("elidedBytes".into(), original_bytes.into());
     kept.insert("spill".into(), address.into());
     kept.insert(
         "retrievalHint".into(),
         "Read spill with gyro_workspace_read and offset. Historical copy; revalidate before editing."
             .into(),
     );
-    Some(Value::Object(kept))
+    Value::Object(kept)
 }
 
 fn slim_window(value: &Value) -> Option<Value> {
@@ -1141,6 +1215,50 @@ mod tests {
 
     fn parsed(message: &Value) -> Value {
         serde_json::from_str(message["content"].as_str().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn overflow_recovery_keeps_failed_actions_and_unavailable_evidence() {
+        use serde_json::json;
+
+        let body = "exact observation\n".repeat(300);
+        let edit = tool_body(
+            "edit",
+            "workspace-edit",
+            "Applied edit",
+            json!({"diff": body}),
+        );
+        let mut failed = read_message("failed", "rev", 1, &body);
+        let mut payload = parsed(&failed);
+        payload["status"] = "failed".into();
+        failed["content"] = payload.to_string().into();
+        let mut missing = read_message("missing", "rev", 1, &body);
+        let mut payload = parsed(&missing);
+        payload["result"]["data"]["evidenceOmitted"] = true.into();
+        payload["result"]["data"]["spill"] =
+            "spill://workspace-read/result-data/0000000000000000".into();
+        missing["content"] = payload.to_string().into();
+        let fresh = read_message("new", "rev", 2, &body);
+        let mut messages = vec![
+            json!({"role": "system", "content": "rules"}),
+            json!({"role": "user", "content": "task"}),
+            json!({"role": "assistant", "tool_calls": [{"id": "edit"}, {"id": "failed"}, {"id": "missing"}, {"id": "read"}]}),
+            edit,
+            failed,
+            missing,
+            read_message("read", "rev", 1, &body),
+            json!({"role": "assistant", "tool_calls": [{"id": "new"}]}),
+            fresh,
+        ];
+        let original = messages.clone();
+        assert_eq!(shorten_rejected_workspace_evidence(&mut messages), 0);
+        let temp = tempfile::tempdir().unwrap();
+        let paths = crate::GyroPaths::from_base_dir(temp.path().join("private"));
+        let _spill = super::super::spill::SessionScope::start(&paths, uuid::Uuid::new_v4());
+        assert!(shorten_rejected_workspace_evidence(&mut messages) > 4_000);
+        assert_eq!(&messages[..6], &original[..6]);
+        assert_eq!(&messages[7..], &original[7..]);
+        assert_eq!(shorten_rejected_workspace_evidence(&mut messages), 0);
     }
 
     #[test]

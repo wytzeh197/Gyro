@@ -406,3 +406,39 @@ fn anthropic_account_usage_only_reports_windows_the_plan_meters() {
         .is_empty()
     );
 }
+
+/// A reading that left the 5-hour window unmeasured, or whose window has
+/// since rolled over, is asked again after a minute instead of held for five.
+#[test]
+fn anthropic_reading_with_an_open_level_is_held_briefly() {
+    use crate::usage::{
+        fetch::anthropic_usage_has_unmeasured_window_at, types::ProviderUsageSnapshot,
+    };
+    let now = chrono::DateTime::parse_from_rfc3339("2026-11-22T15:30:00Z")
+        .unwrap()
+        .to_utc();
+    let snapshot = |payload: serde_json::Value| ProviderUsageSnapshot {
+        provider_id: "anthropic".into(),
+        windows: provider_usage_windows_from_anthropic_usage(&payload),
+        fetched_at: "2026-11-22T15:00:00Z".into(),
+        stale: false,
+        error: None,
+    };
+    let idle = snapshot(serde_json::json!({
+        "five_hour": null,
+        "seven_day": { "utilization": 94.0, "resets_at": "2026-11-22T18:00:00Z" }
+    }));
+    assert!(anthropic_usage_has_unmeasured_window_at(&idle, now));
+
+    let measured = snapshot(serde_json::json!({
+        "five_hour": { "utilization": 4.0, "resets_at": "2026-11-22T20:30:00Z" },
+        "seven_day": { "utilization": 94.0, "resets_at": "2026-11-22T18:00:00Z" }
+    }));
+    assert!(!anthropic_usage_has_unmeasured_window_at(&measured, now));
+
+    let rolled_over = snapshot(serde_json::json!({
+        "five_hour": { "utilization": 61.0, "resets_at": "2026-11-22T15:29:00Z" },
+        "seven_day": { "utilization": 94.0, "resets_at": "2026-11-22T18:00:00Z" }
+    }));
+    assert!(anthropic_usage_has_unmeasured_window_at(&rolled_over, now));
+}

@@ -14,7 +14,7 @@ import {
   Network,
   Table2,
   Terminal,
-} from "lucide-react";
+} from "./icons";
 import type { ChatArtifact, SessionEvent, WorkbenchPaneTab } from "./types";
 
 const MAX_ARTIFACTS = 8;

@@ -147,7 +147,7 @@
   padding: 18px 18px 16px;
   position: absolute;
   width: min(340px, calc(100vw - 32px));
-  z-index: 140;
+  z-index: var(--gyro-z-popover);
 }
 
 :root[data-theme="light"] .gyro-installed-update-card {

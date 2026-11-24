@@ -75,9 +75,9 @@
   line-height: 1.2;
   z-index: 2;
   pointer-events: none;
-  transition: opacity var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
-  animation: gyro-sidebar-awaiting-in var(--gyro-premium-motion-slow)
-    var(--gyro-premium-ease) both;
+  transition: opacity var(--gyro-motion-fast) var(--gyro-ease);
+  animation: gyro-sidebar-awaiting-in var(--gyro-motion-slow)
+    var(--gyro-ease) both;
 }
 
 /* Status glyphs retain the waiting color instead of the sidebar icon neutral. */
@@ -169,7 +169,7 @@
 }
 
 :root[data-theme] .gyro-command-palette.is-global-search > header {
-  min-height: calc(60px * var(--gyro-ui-scale, 1));
+  min-height: calc(var(--gyro-row-height) * 60 / 28);
   grid-template-columns: 20px minmax(0, 1fr) auto;
   gap: var(--gyro-space-comfortable);
   padding-inline: var(--gyro-space-panel);
@@ -208,7 +208,7 @@
   .gyro-command-palette.is-global-search
   .gyro-command-list
   button {
-  min-height: calc(44px * var(--gyro-ui-scale, 1));
+  min-height: calc(var(--gyro-row-height) * 44 / 28);
   grid-template-columns: 20px minmax(0, 1fr) auto;
   gap: var(--gyro-space-comfortable);
   padding: var(--gyro-space-compact) var(--gyro-space-comfortable);
@@ -249,7 +249,7 @@
 }
 
 :root[data-theme] .gyro-global-search-footer {
-  min-height: calc(38px * var(--gyro-ui-scale, 1));
+  min-height: calc(var(--gyro-row-height) * 38 / 28);
   padding-inline: var(--gyro-space-panel);
   border-top-color: var(--gyro-border-soft);
 }
@@ -403,13 +403,12 @@
     .gyro-session-row,
     .gyro-footer-button
   ).is-active:hover {
-  background: transparent;
+  background: var(--gyro-row-selected);
   color: var(--gyro-text);
   box-shadow: none;
 }
 
-/* The selected row carries no fill; brighter, heavier text marks it, and it
-   still answers the pointer like its neighbours. */
+/* The active row keeps its selected fill and label weight on hover. */
 :root[data-theme]
   .gyro-sidebar
   :is(
@@ -419,7 +418,7 @@
     .gyro-session-row,
     .gyro-footer-button
   ).is-active {
-  font-weight: 600;
+  font-weight: var(--gyro-weight-semibold);
 }
 
 :root[data-theme]
@@ -431,7 +430,7 @@
     .gyro-session-row,
     .gyro-footer-button
   ).is-active:hover {
-  background: var(--gyro-shell-row-hover);
+  background: var(--gyro-row-selected);
 }
 
 :root[data-theme] .gyro-sidebar .gyro-session-row {
@@ -586,7 +585,7 @@
   )
   svg {
   color: var(--gyro-muted);
-  stroke-width: 1.6;
+  stroke-width: 1.75;
 }
 
 /* The surface switch speaks the sidebar's language: a barely-there track with
@@ -611,7 +610,7 @@
 }
 
 :root[data-theme] .gyro-titlebar-switch-option svg {
-  transition: color var(--gyro-premium-motion) var(--gyro-premium-ease);
+  transition: color var(--gyro-motion) var(--gyro-ease);
 }
 
 :root[data-theme] .gyro-titlebar-switch-option:not(.is-active):hover {
@@ -934,15 +933,6 @@
   margin: var(--gyro-space-compact) 0 0 var(--gyro-space-standard);
 }
 
-:root[data-theme] .gyro-sidebar .gyro-session-row .gyro-sidebar-thread-main {
-  min-height: calc(32px * var(--gyro-ui-scale, 1));
-}
-
-:root[data-theme] .gyro-sidebar .gyro-session-row.is-active,
-:root[data-theme] .gyro-sidebar .gyro-session-row.is-active:hover {
-  background: var(--gyro-shell-row-hover);
-}
-
 :root[data-theme]
   .gyro-sidebar
   :is(
@@ -1174,3 +1164,169 @@
 ):focus-within {
   border-color: var(--gyro-focus-ring);
 }
+
+/* Small shared details: preserve surface geometry and use the existing theme,
+   density, scale, and semantic colors throughout. */
+:root[data-theme]
+  :is(
+    .gyro-sidebar-shortcut,
+    .gyro-settings-key,
+    .gyro-account-menu-row kbd,
+    .gyro-command-palette kbd,
+    .gyro-global-search-footer kbd,
+    .gyro-slash-command-list kbd
+  ) {
+  background: color-mix(in srgb, var(--gyro-text) 4%, transparent);
+  border: 1px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-xs);
+  box-shadow: inset 0 -1px 0
+    color-mix(in srgb, var(--gyro-text) 5%, transparent);
+  color: var(--gyro-muted);
+  font-family: var(--gyro-font-sans);
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Give short action menus one icon gutter; long labels stay on one line. */
+:root[data-theme] .gyro-session-menu {
+  box-sizing: border-box;
+  left: 0;
+  right: auto;
+  width: min(212px, calc(188px * var(--gyro-ui-scale, 1)));
+  max-width: min(calc(100vw - 24px), 100%);
+  border-radius: var(--gyro-radius-lg);
+}
+:root[data-theme] .gyro-session-menu > button {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+  padding-inline: 6px;
+  white-space: nowrap;
+}
+:root[data-theme]
+  :is(.gyro-session-menu, .gyro-editor-action-menu, .gyro-explorer-context-menu)
+  > button {
+  font-weight: 400;
+  min-height: max(28px, calc(28px * var(--gyro-ui-scale, 1)));
+}
+:root[data-theme]
+  :is(.gyro-session-menu, .gyro-editor-action-menu, .gyro-explorer-context-menu)
+  > button
+  > svg {
+  flex: none;
+  color: var(--gyro-muted);
+  stroke-width: 1.9;
+}
+:root[data-theme]
+  :is(.gyro-session-menu, .gyro-editor-action-menu, .gyro-explorer-context-menu)
+  > button:not(:disabled):is(:hover, :focus-visible) {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+}
+:root[data-theme]
+  :is(.gyro-session-menu, .gyro-editor-action-menu, .gyro-explorer-context-menu)
+  > button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
+:root[data-theme]
+  :is(.gyro-session-menu, .gyro-editor-action-menu, .gyro-explorer-context-menu)
+  > button.is-danger
+  > svg {
+  color: var(--gyro-danger);
+}
+
+/* Utility icons have the same optical weight without altering brand marks. */
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-sidebar-section-heading:has(.gyro-sidebar-explorer-toolbar) {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: calc(var(--gyro-space-compact) / 2);
+  row-gap: 0;
+}
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-sidebar-section-heading:has(.gyro-sidebar-explorer-toolbar)
+  > .gyro-nav-label {
+  flex: 1 0 auto;
+  padding-inline: 0;
+}
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-sidebar-section-heading
+  .gyro-sidebar-explorer-toolbar {
+  flex: none;
+  flex-wrap: wrap;
+  max-width: 100%;
+  margin-left: auto;
+}
+:root[data-theme]
+  .gyro-sidebar
+  .gyro-sidebar-section-heading
+  .gyro-sidebar-explorer-toolbar
+  button {
+  flex: none;
+  width: max(24px, calc(22px * var(--gyro-ui-scale, 1)));
+  height: max(24px, calc(22px * var(--gyro-ui-scale, 1)));
+}
+
+/* Identity is shared with Explorer; de-emphasize directories, not filenames. */
+:root[data-theme] .gyro-file-identity {
+  color: var(--gyro-file-tone, var(--gyro-file-default));
+  flex: none;
+}
+/* A long path gives way from the left, so the filename always stays in view.
+   The directory is laid out right to left only to move its ellipsis to the
+   front; the <bdi> inside keeps the path itself reading left to right. */
+
+:root[data-theme] .gyro-settings-select-field:has(select:disabled) > svg {
+  opacity: 0.45;
+}
+:root[data-theme]
+  .gyro-settings-surface
+  .gyro-settings-select:not(:disabled):hover {
+  border-color: var(--gyro-border-strong);
+}
+:root[data-theme] .gyro-copy-value:not(:disabled):hover {
+  color: var(--gyro-text);
+}
+
+/* Counts should keep a stable rhythm as work updates. */
+
+/* Shared finish for the approved UI upgrade. Native geometry and scroll owners
+   remain in their existing components; these rules only refine visible hierarchy. */
+/* Keep the companion tab row aligned with the adjacent conversation header. */
+:root[data-theme]
+  .gyro-sidebar
+  :is(.gyro-sidebar-action, .gyro-sidebar-project-toggle, .gyro-footer-button)
+  > svg {
+  color: var(--gyro-muted);
+  stroke-width: 1.9;
+}
+:root[data-theme]
+  .gyro-sidebar
+  :is(
+    .gyro-sidebar-action,
+    .gyro-sidebar-project-toggle,
+    .gyro-footer-button
+  ):focus-visible {
+  background: var(--gyro-shell-row-hover);
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: -2px;
+}
+:root[data-theme]
+  .gyro-sidebar
+  :is(.gyro-sidebar-time-group, .gyro-sidebar-section > .gyro-nav-label) {
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+/* Pane selection never paints an edge or dims a reply; only the inactive
+   pane's title falls back to muted (styles.css). */
+
+/* Retain the compact composer without shrinking its smallest hit targets. */
+
+/* Completed work is quiet; decisions and recovery keep explicit semantic color. */

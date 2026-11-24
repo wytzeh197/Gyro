@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use crate::capabilities::{CapabilityId, CapabilityResponse, CapabilityStatus};
+use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
@@ -6,6 +7,7 @@ use std::collections::VecDeque;
 const MAX_CYCLE: usize = 4;
 const NOTICE_REPETITIONS: usize = 3;
 const PAUSE_REPETITIONS: usize = 6;
+pub const OUTSIDE_WORKSPACE_INSPECTION_PATH: &str = "outside-workspace-inspection-path";
 type Fingerprint = [u8; 32];
 
 /// SHA-256 of the same compact JSON `serde_json::to_vec` would produce.
@@ -13,12 +15,56 @@ type Fingerprint = [u8; 32];
 /// Progress detection runs on every finished tool call, and the outcome can
 /// be a whole file. The buffer existed only to be hashed. A failed write
 /// hashes nothing, matching the previous `unwrap_or_default` fallback.
-fn fingerprint(tool: &str, args: &Value, state: &Value, outcome: &Value) -> Fingerprint {
+fn fingerprint(tool: &str, args: &Value, state: &Value, outcome: &impl Serialize) -> Fingerprint {
     let mut hasher = Sha256::new();
     if serde_json::to_writer(&mut hasher, &(tool, args, state, outcome)).is_ok() {
         hasher.finalize().into()
     } else {
         Sha256::digest([]).into()
+    }
+}
+
+/// Only repeatable workspace evidence errors can affect an active turn.
+pub fn is_repeatable_read_failure(capability: CapabilityId, response: &CapabilityResponse) -> bool {
+    matches!(
+        capability,
+        CapabilityId::WorkspaceList
+            | CapabilityId::WorkspaceSearch
+            | CapabilityId::WorkspaceRead
+            | CapabilityId::WorkspaceReadRange
+            | CapabilityId::WorkspaceReadEditor
+    ) && response.status == CapabilityStatus::Failed
+        && response.error.as_ref().is_some_and(|error| {
+            matches!(
+                error.code.as_str(),
+                "execution-failed"
+                    | "invalid-arguments"
+                    | "invalid-root"
+                    | "root-required"
+                    | OUTSIDE_WORKSPACE_INSPECTION_PATH
+            )
+        })
+}
+
+struct StableResult<'a>(&'a Value);
+
+impl Serialize for StableResult<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let Some(fields) = self.0.as_object() else {
+            return self.0.serialize(serializer);
+        };
+        // Drop per-execution metadata while hashing, without copying large
+        // file contents into a temporary result.
+        let mut stable = serializer.serialize_map(None)?;
+        for (field, value) in fields {
+            if !matches!(
+                field.as_str(),
+                "id" | "finishedAt" | "capturedAt" | "owner" | "contextRevision"
+            ) {
+                stable.serialize_entry(field, value)?;
+            }
+        }
+        stable.end()
     }
 }
 
@@ -29,18 +75,68 @@ pub enum Decision {
     Correct,
     Pause,
 }
+impl Decision {
+    pub fn notice(self, failed_read: bool) -> Option<&'static str> {
+        match self {
+            Self::Continue => None,
+            Self::Correct if failed_read => Some("Repeated failed lookup. Call gyro_workspace_list before answering, then read the path it returns."),
+            Self::Correct => Some("The same tool-call sequence returned unchanged evidence three times. Save a checkpoint and choose a different approach; required verification still applies."),
+            Self::Pause => Some("The same tool-call sequence returned unchanged evidence six times. Gyro paused this turn. Review the checkpoint and resume with a changed approach."),
+        }
+    }
+}
 #[derive(Default)]
 pub struct Detector {
     history: VecDeque<Fingerprint>,
     warned_cycle: Option<Vec<Fingerprint>>,
 }
 impl Detector {
+    pub fn observe_capability(
+        &mut self,
+        capability: CapabilityId,
+        args: &Value,
+        state: &Value,
+        response: &CapabilityResponse,
+    ) -> Decision {
+        if let Some(result) = response.result.as_ref() {
+            self.observe_outcome(
+                capability.as_str(),
+                args,
+                state,
+                &(response.status, StableResult(&result.data)),
+            )
+        } else if let Some(error) = response
+            .error
+            .as_ref()
+            .filter(|_| is_repeatable_read_failure(capability, response))
+        {
+            self.observe_outcome(
+                capability.as_str(),
+                args,
+                state,
+                &(response.status, &error.code, &error.message),
+            )
+        } else {
+            Decision::Continue
+        }
+    }
+
     pub fn observe(
         &mut self,
         tool: &str,
         args: &Value,
         state: &Value,
         outcome: &Value,
+    ) -> Decision {
+        self.observe_outcome(tool, args, state, outcome)
+    }
+
+    fn observe_outcome(
+        &mut self,
+        tool: &str,
+        args: &Value,
+        state: &Value,
+        outcome: &impl Serialize,
     ) -> Decision {
         if matches!(
             tool,
@@ -103,6 +199,99 @@ impl Detector {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn repeatable_read_errors_warn_then_pause_and_new_evidence_resets_them() {
+        let mut detector = Detector::default();
+        let args = json!({"path":"missing.rs"});
+        for (call, decision) in [
+            Decision::Continue,
+            Decision::Continue,
+            Decision::Correct,
+            Decision::Continue,
+            Decision::Continue,
+            Decision::Pause,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let outcome = CapabilityResponse::failed(
+                "test",
+                uuid::Uuid::new_v4(),
+                "execution-failed",
+                "No file at missing.rs",
+            );
+            assert_eq!(
+                detector.observe_capability(
+                    CapabilityId::WorkspaceRead,
+                    &args,
+                    &json!(1),
+                    &outcome
+                ),
+                decision,
+                "call {call}"
+            );
+        }
+        let different = CapabilityResponse::failed(
+            "test",
+            uuid::Uuid::new_v4(),
+            "execution-failed",
+            "No file at missing.rs",
+        );
+        assert_eq!(
+            detector.observe_capability(CapabilityId::WorkspaceRead, &args, &json!(2), &different),
+            Decision::Continue
+        );
+    }
+
+    #[test]
+    fn unrelated_or_ineligible_errors_cannot_start_a_progress_pause() {
+        for (capability, code) in [
+            (CapabilityId::WorkspaceRead, "invalid-run"),
+            (CapabilityId::WorkspaceRead, "cancelled"),
+            (CapabilityId::WorkspaceRead, "policy-denied"),
+            (CapabilityId::WorkspaceRead, "workspace-changed"),
+            (CapabilityId::TerminalWait, "execution-failed"),
+            (CapabilityId::WorkspaceRunCommand, "execution-failed"),
+        ] {
+            let response = CapabilityResponse::failed("test", uuid::Uuid::new_v4(), code, "Failed");
+            let mut detector = Detector::default();
+            for _ in 0..8 {
+                assert_eq!(
+                    detector.observe_capability(capability, &json!({}), &json!(1), &response),
+                    Decision::Continue
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn success_fingerprint_tracks_file_evidence_across_volatile_result_fields() {
+        let mut detector = Detector::default();
+        let capability = CapabilityId::WorkspaceRead;
+        let args = json!({"path":"source.rs"});
+        for (call, content_hash) in ["a", "a", "b", "b", "b"].into_iter().enumerate() {
+            let result = CapabilityResponse::completed(
+                "test",
+                crate::capabilities::CapabilityResult {
+                    call_id: uuid::Uuid::new_v4(),
+                    capability_id: capability,
+                    summary: "Read".into(),
+                    resource: None,
+                    data: json!({"contentHash":content_hash,"id":call,"finishedAt":call,"contextRevision":call}),
+                },
+            );
+            let expected = if call == 4 {
+                Decision::Correct
+            } else {
+                Decision::Continue
+            };
+            assert_eq!(
+                detector.observe_capability(capability, &args, &json!(1), &result),
+                expected
+            );
+        }
+    }
     #[test]
     fn correct_then_pause_and_reset() {
         let mut d = Detector::default();

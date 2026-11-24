@@ -5,21 +5,6 @@
   --gyro-window-tint-color: var(--gyro-sidebar);
   --gyro-window-blur: blur(32px) saturate(0);
   --gyro-sidebar-material-radius: 14px;
-  /* Remove only the two corner wedges; the large outer boundary preserves
-     menus that legitimately extend outside the content pane. */
-  --gyro-native-pane-clip: polygon(evenodd,
-    -100vw -100vh, calc(100% + 100vw) -100vh,
-    calc(100% + 100vw) calc(100% + 100vh), -100vw calc(100% + 100vh),
-    -100vw -100vh,
-    0 0, 14px 0, 11.27px 0.27px, 8.64px 1.06px, 6.22px 2.36px,
-    4.1px 4.1px, 2.36px 6.22px, 1.06px 8.64px, 0.27px 11.27px,
-    0 14px, 0 0, -100vw -100vh,
-    0 100%, 0 calc(100% - 14px), 0.27px calc(100% - 11.27px),
-    1.06px calc(100% - 8.64px), 2.36px calc(100% - 6.22px),
-    4.1px calc(100% - 4.1px), 6.22px calc(100% - 2.36px),
-    8.64px calc(100% - 1.06px), 11.27px calc(100% - 0.27px),
-    14px 100%, 0 100%, -100vw -100vh
-  );
   --gyro-sidebar-material: color-mix(
     in srgb, var(--gyro-window-tint-color, var(--gyro-sidebar)) var(--gyro-window-tint), transparent
   );
@@ -86,25 +71,13 @@
   > .gyro-sidebar:has(
     :is(.gyro-installed-update-card, .gyro-workspace-preparation-popover)
   ) {
-  z-index: 1;
+  z-index: var(--gyro-z-base);
 }
 
 :root[data-native-material="sidebar"][data-theme]
   .gyro-app-shell:not(.is-workspace-chrome-active)
   .gyro-sidebar :is(.gyro-sidebar-windowbar, .gyro-sidebar-footer) {
   background: transparent;
-}
-
-/* The content curves into one continuous material instead of adding an
-   opaque patch at the seam. */
-:root[data-native-material="sidebar"][data-theme]
-  .gyro-app-shell:not(.is-workspace-chrome-active):not(.is-sidebar-hidden) > .gyro-main {
-  clip-path: var(--gyro-native-pane-clip);
-}
-
-:root[data-native-material="sidebar"][data-theme]
-  .gyro-app-shell:not(.is-workspace-chrome-active) > .gyro-main > .gyro-seam-corner {
-  display: none;
 }
 
 /* Scrolling section labels share the continuous material. Project titles
@@ -123,8 +96,7 @@
   position: relative;
 }
 
-/* Sample the backdrop once across the entire L-shaped chrome. Separate blur
-   layers can pick up different neighboring surfaces at the editor seam. */
+/* One backdrop covers the surround and both navigation columns. */
 :root[data-native-material="sidebar"][data-theme]
   .gyro-app-shell.is-workspace-chrome-active::before {
   -webkit-backdrop-filter: var(--gyro-window-blur);
@@ -132,16 +104,7 @@
   background: var(--gyro-chrome-material);
   content: "";
   inset: 0;
-  -webkit-mask:
-    linear-gradient(#000, #000) top / 100% 48px no-repeat,
-    linear-gradient(#000, #000) left / var(--gyro-workspace-activity-rail-width) 100% no-repeat,
-    radial-gradient(circle at right bottom, transparent 10px, #000 10px)
-      var(--gyro-workspace-activity-rail-width) 48px / 10px 10px no-repeat;
-  mask:
-    linear-gradient(#000, #000) top / 100% 48px no-repeat,
-    linear-gradient(#000, #000) left / var(--gyro-workspace-activity-rail-width) 100% no-repeat,
-    radial-gradient(circle at right bottom, transparent 10px, #000 10px)
-      var(--gyro-workspace-activity-rail-width) 48px / 10px 10px no-repeat;
+  clip-path: var(--gyro-glass-cutout, none);
   pointer-events: none;
   position: absolute;
   z-index: -1;
@@ -155,8 +118,6 @@
 
 :root[data-native-material="sidebar"][data-theme]
   .gyro-app-shell.is-workspace-chrome-active > .gyro-sidebar::before {
-  -webkit-backdrop-filter: var(--gyro-window-blur);
-  backdrop-filter: var(--gyro-window-blur);
   background: var(--gyro-workspace-panel-material);
   height: auto;
   inset: 0;
@@ -208,8 +169,6 @@
 
 :root[data-native-material="sidebar"][data-theme]
   .gyro-app-shell.is-workspace-chrome-active .gyro-editor-tabs::before {
-  -webkit-backdrop-filter: var(--gyro-window-blur);
-  backdrop-filter: var(--gyro-window-blur);
   background: var(--gyro-topbar-material);
   content: "";
   inset: 0;

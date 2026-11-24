@@ -174,18 +174,24 @@ try {
       ),
     "SSH missing host validation",
   );
-  await evaluate(
-    `(() => { const select = document.querySelector('.gyro-remote-ssh-form select'); select.value = 'fixture-offline'; select.dispatchEvent(new Event('change', {bubbles:true})); })()`,
-  );
+  const chooseSshHost = async (host) => {
+    await evaluate('document.querySelector(\'.gyro-remote-ssh-form [role="combobox"][id$="-host"]\').click()');
+    const option = `[...document.querySelectorAll('[role="option"]')].find(el => el.textContent.trim() === ${JSON.stringify(host)})`;
+    await until(() => evaluate(`!!(${option})`), `SSH host option ${host}`);
+    await evaluate(`(${option}).click()`);
+    await until(
+      () => evaluate(`document.querySelector('.gyro-remote-ssh-form [role="combobox"][id$="-host"]').textContent.includes(${JSON.stringify(host)})`),
+      `selected SSH host ${host}`,
+    );
+  };
+  await chooseSshHost("fixture-offline");
   await click("Connect");
   await until(
     () =>
       evaluate("document.body.innerText.includes('SSH connection refused')"),
     "SSH connection error",
   );
-  await evaluate(
-    `(() => { const select = document.querySelector('.gyro-remote-ssh-form select'); select.value = 'fixture-ssh-host'; select.dispatchEvent(new Event('change', {bubbles:true})); })()`,
-  );
+  await chooseSshHost("fixture-ssh-host");
   await click("Connect");
   await until(
     () => evaluate("document.body.innerText.includes('Connected to SSH Mac')"),
@@ -963,6 +969,10 @@ try {
     "less restores compact project list",
   );
   await click("New session");
+  await until(
+    () => evaluate(`!!document.querySelector('button[aria-label="New Chat"]')?.checkVisibility()`),
+    "new session menu becomes visible",
+  );
   await click("New Chat");
   await until(
     () =>

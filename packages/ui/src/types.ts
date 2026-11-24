@@ -1,4 +1,5 @@
 import type { DocumentSymbol } from "./document-symbols";
+import type { ThemePreferences } from "./theme/theme-engine";
 
 export type SessionOrigin = "cli" | "desktop";
 
@@ -40,7 +41,7 @@ export type WorkbenchPaneTab =
 export type InterfaceSize = "small" | "default" | "large";
 export type MotionSpeed = "slower" | "default" | "faster";
 
-export type WorkbenchDensity = "comfortable" | "compact";
+export type WorkbenchDensity = "comfortable" | "compact" | "spacious";
 
 export type WorkbenchMode = "local" | "worktree";
 
@@ -310,6 +311,7 @@ export type CapabilityResult = {
 export type CapabilityError = {
   code: string;
   message: string;
+  progressAction?: "continue" | "correct" | "pause";
 };
 
 export type CapabilityCallEvent = {
@@ -869,7 +871,7 @@ export type BrowserAnnotationResult = {
 export type BrowserScreenshotAction =
   | "capture" | "reveal" | "feedback"
   | "annotate-start" | "annotate-read" | "annotate-stop"
-  | "annotate-point" | "annotate-add" | "annotate-capture" | "annotate-send";
+  | "annotate-point" | "annotate-add" | "annotate-capture" | "annotate-send" | "annotate-native-send";
 export type BrowserScreenshotResult = void | boolean | BrowserAnnotationResult;
 export type BrowserScreenshotHandler = (
   action?: BrowserScreenshotAction,
@@ -882,6 +884,11 @@ export type BrowserFeedback = {
   annotationToken?: string;
   annotation?: BrowserElementAnnotation;
   annotationCapture?: BrowserAnnotationCapture;
+  nativeCapture?: {
+    targetTitle: string;
+    capturedAt: string;
+    region: import("./app-preview-panel").PixelRegion;
+  };
   /** Rectangle in normalized screenshot coordinates (0–1). */
   region: { x: number; y: number; width: number; height: number };
 };
@@ -1418,7 +1425,7 @@ export type OnboardingState = {
   completedSteps: OnboardingStepId[];
 };
 
-export type WorkbenchPreferences = {
+export type WorkbenchPreferences = ThemePreferences & {
   settingsSections?: Record<string, boolean>;
   defaultChatProviderId?: ProviderId;
   defaultChatEffort?: string;
@@ -2678,6 +2685,17 @@ export type EfficiencyConfig = {
   batchReads?: boolean;
   compactCliCatalog?: boolean;
   retainToolCatalog?: boolean;
+  stableApiPrefix?: boolean;
+  toolRecoveryFeedback?: boolean;
+  checkpointRecovery?: boolean;
+  harnessRoutes?: Record<
+    string,
+    {
+      stableApiPrefix?: boolean;
+      toolRecoveryFeedback?: boolean;
+      checkpointRecovery?: boolean;
+    }
+  >;
 };
 
 export type GyroConfig = {

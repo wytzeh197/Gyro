@@ -230,6 +230,9 @@ fn explicit_in_app_browser_requests_route_models_to_gyro_browser_tools() {
         "Check out usegyro.io.",
         "Inspect https://example.com/docs.",
         "Take a look at this website.",
+        "Check www.example.rs/docs.",
+        "Test the website's navigation in the browser.",
+        "Use the Gyro Browser to check the page after running sum.test.mjs.",
     ] {
         assert!(user_requests_gyro_browser(message), "expected: {message}");
         let mut request = anthropic_provider_request();
@@ -251,10 +254,22 @@ fn browser_implementation_discussion_does_not_force_a_live_browse() {
         "Explain how the Gyro Browser capability works.",
         "Do not open the in-app browser.",
         "Check package.json and src/main.ts.",
+        "Read src/main.mjs, then run node --test sum.test.mjs from the workspace.",
+        "Inspect website.css and update the composite renderer.",
+        "Check the composite renderer.",
+        "Inspect settings.cjs and routes.mts.",
+        "Inspect gyro_browser.ts and check how it handles navigation.",
     ] {
         assert!(
             !user_requests_gyro_browser(message),
             "unexpected: {message}"
+        );
+        let mut request = anthropic_provider_request();
+        request.message = message.into();
+        let context = provider_context_message(&request);
+        assert!(
+            !context.contains(browser_knowledge::SIDE_PANEL_GUIDE),
+            "{message}"
         );
     }
 }

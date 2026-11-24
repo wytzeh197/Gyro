@@ -8,8 +8,10 @@ import {
   type ReactNode,
 } from "react";
 import { SettingsDisclosure } from "./settings-disclosure";
-import { SelectionTrack } from "./selection-track";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { SegmentedControl, Switch } from "./primitives/controls";
+import { Empty } from "./primitives/feedback";
+import { Select } from "./primitives/popup";
+import { ChevronDown, ChevronRight } from "./icons";
 import "./settings-design.css";
 
 const SettingsRowDescription = createContext<string | undefined>(undefined);
@@ -50,6 +52,65 @@ export function SettingsSelect(props: ComponentProps<"select">) {
       />
       <ChevronDown aria-hidden="true" size={13} />
     </span>
+  );
+}
+
+type ChoiceOption = { value: string; label: ReactNode; disabled?: boolean };
+type ChoiceGroup = { id: string; label: string; items: ChoiceOption[] };
+
+export function SettingsChoice({
+  value,
+  onValueChange,
+  options,
+  disabled,
+  ...trigger
+}: {
+  value: string | null;
+  onValueChange: (value: string) => void;
+  options: readonly (ChoiceOption | ChoiceGroup)[];
+  disabled?: boolean;
+  id?: string;
+  "aria-label"?: string;
+  "aria-describedby"?: string;
+}) {
+  const descriptionId = useContext(SettingsRowDescription);
+  const items = options.flatMap((option) =>
+    "items" in option ? option.items : [option],
+  );
+  const selected =
+    items.find((option) => option.value === value) ??
+    items.find((option) => !option.disabled);
+  const renderItem = ({ value, label, disabled }: ChoiceOption) => (
+    <Select.Item key={value} value={value} disabled={disabled}>
+      {label}
+    </Select.Item>
+  );
+  return (
+    <Select.Root
+      items={items}
+      value={selected?.value ?? null}
+      onValueChange={(next) => {
+        if (next !== null) onValueChange(next);
+      }}
+      disabled={disabled || !items.length}
+    >
+      <Select.Trigger
+        {...trigger}
+        aria-describedby={trigger["aria-describedby"] ?? descriptionId}
+        className="gyro-settings-choice"
+        size="sm"
+      />
+      <Select.Content>
+        {options.map((option) =>
+          "items" in option ? (
+            <Select.Group key={option.id}>
+              <Select.GroupLabel>{option.label}</Select.GroupLabel>
+              {option.items.map(renderItem)}
+            </Select.Group>
+          ) : renderItem(option),
+        )}
+      </Select.Content>
+    </Select.Root>
   );
 }
 
@@ -207,12 +268,7 @@ export function SettingsEmptyState({
   children?: ReactNode;
 }) {
   return (
-    <div className="gyro-settings-empty-state">
-      {icon ? <span aria-hidden="true">{icon}</span> : null}
-      <strong>{title}</strong>
-      {description ? <p>{description}</p> : null}
-      {children}
-    </div>
+    <Empty icon={icon} title={title} description={description} actions={children} />
   );
 }
 
@@ -257,25 +313,15 @@ export function SettingsSegmented<T extends string>({
 }) {
   const descriptionId = useContext(SettingsRowDescription);
   return (
-    <SelectionTrack
-      label={label}
+    <SegmentedControl
+      aria-label={label}
+      aria-describedby={descriptionId}
       className="gyro-settings-segmented"
       value={value}
-    >
-      {options.map((option) => (
-        <button
-          aria-describedby={descriptionId}
-          aria-pressed={value === option.value}
-          className={value === option.value ? "is-active" : ""}
-          disabled={disabled}
-          key={option.value}
-          onClick={() => onChange(option.value)}
-          type="button"
-        >
-          {option.label}
-        </button>
-      ))}
-    </SelectionTrack>
+      options={options}
+      onValueChange={onChange}
+      disabled={disabled}
+    />
   );
 }
 
@@ -292,17 +338,13 @@ export function SettingsSwitch({
 }) {
   const descriptionId = useContext(SettingsRowDescription);
   return (
-    <button
+    <Switch
       aria-describedby={descriptionId}
-      aria-checked={checked}
       aria-label={label}
-      className={`gyro-settings-switch${checked ? " is-on" : ""}`}
+      checked={checked}
+      className="gyro-settings-switch"
       disabled={disabled}
-      onClick={() => onChange(!checked)}
-      role="switch"
-      type="button"
-    >
-      <span />
-    </button>
+      onCheckedChange={onChange}
+    />
   );
 }

@@ -1,6 +1,7 @@
 import { BILLING_SCENES, useBillingPreview } from "./billing-preview";
 import { useUsageSettingsPreview } from "./usage-settings-preview";
 import { createInitialWorkbenchState, workbenchReducer, type WorkbenchAction } from "@gyro-dev/ui";
+import { normalizeThemePreferences } from "@gyro-dev/ui/theme";
 // Standalone production components. Preferences persist in fixture-only storage;
 // accounts, updater state, and workspace data are simulated.
 import React, {
@@ -72,7 +73,7 @@ function loadPreviewAppearance(): PreviewAppearance {
     );
     if (["system", "light", "dark"].includes(stored.theme))
       initial.theme = stored.theme;
-    if (["compact", "comfortable"].includes(stored.density))
+    if (["compact", "comfortable", "spacious"].includes(stored.density))
       initial.density = stored.density;
     if (["small", "default", "large"].includes(stored.interfaceSize))
       initial.interfaceSize = stored.interfaceSize;
@@ -89,7 +90,7 @@ function loadPreviewAppearance(): PreviewAppearance {
     /* Malformed fixture storage restores the defaults. */
   }
   if (["light", "dark"].includes(params.get("theme") ?? "")) initial.theme = params.get("theme") as ThemeMode;
-  if (["compact", "comfortable"].includes(params.get("density") ?? "")) initial.density = params.get("density") as PreviewAppearance["density"];
+  if (["compact", "comfortable", "spacious"].includes(params.get("density") ?? "")) initial.density = params.get("density") as PreviewAppearance["density"];
   if (["small", "default", "large"].includes(params.get("size") ?? "")) initial.interfaceSize = params.get("size") as PreviewAppearance["interfaceSize"];
   return initial;
 }
@@ -240,7 +241,7 @@ function Preview() {
   const [updateScene, setUpdateScene] = useState(
     () => new URLSearchParams(location.search).get("state") ?? "available",
   );
-  const [density, setDensity] = useState<"compact" | "comfortable">(
+  const [density, setDensity] = useState<WorkbenchPreferences["density"]>(
     initial.density,
   );
   const [interfaceSize, setInterfaceSize] = useState<InterfaceSize>(
@@ -320,8 +321,9 @@ function Preview() {
       motionSpeed,
       mainColor: colors[0]!,
       secondaryColor: colors[1]!,
+      ...normalizeThemePreferences(extraPreferences),
     }),
-    [theme, density, interfaceSize, motionSpeed, colors],
+    [theme, density, interfaceSize, motionSpeed, colors, extraPreferences],
   );
   const { appearanceSaveStatus, onAppearancePersisted, retryAppearanceSave } =
     useAppearanceSaveFeedback(previewAppearance);
@@ -346,22 +348,8 @@ function Preview() {
   document.documentElement.dataset.theme = resolvedTheme;
   applyAppearancePreferences(
     document.documentElement,
-    {
-      interfaceSize,
-      motionSpeed,
-      mainColor: colors[0]!,
-      secondaryColor: colors[1]!,
-    },
+    previewAppearance,
     resolvedTheme,
-  );
-  document.documentElement.dataset.density = density;
-  // The running app applies the chosen accent at the root, so the preview has
-  // to as well — otherwise it cannot show which surfaces follow
-  // Appearance → Colors and which carry a colour of their own.
-  document.documentElement.style.setProperty("--gyro-user-main", colors[0]!);
-  document.documentElement.style.setProperty(
-    "--gyro-user-secondary",
-    colors[1]!,
   );
   return (
     <div className="gyro-settings-preview" data-reduced-motion={reduceMotion} data-capture={params.has("capture") || undefined}>

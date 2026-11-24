@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Square, ChevronRight } from "lucide-react";
+import { Square, ChevronRight } from "./icons";
 import subagentMark from "./assets/subagent-mark.png";
 import { ChatRun } from "./chat-run-view";
 import { buildRunModel, formatRunDuration } from "./chat-run";

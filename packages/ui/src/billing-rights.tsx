@@ -1,6 +1,6 @@
 import { SettingsGroup, SettingsRow } from "./settings-controls";
 import { openExternalLink } from "./external-links";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight } from "./icons";
 
 /** Public rights routes remain available without paid access or sign-in. */
 export function BillingRights() {

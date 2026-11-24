@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::{borrow::Cow, cell::OnceCell};
 
 const MIN_FIELD_BYTES: usize = 2_048;
+const REPLACEMENT_FIELDS: &[&str] = &["oldString", "newString"];
 
 /// Only completed, known edit tools may omit bulk arguments from old exchanges.
 /// Keep identifiers, commands, unknown tools, failures and malformed JSON exact.
@@ -58,19 +59,27 @@ pub(super) fn retire(
             };
             let (capability, fields): (&str, &[&str]) = match tool {
                 "gyro_workspace_propose_edit" => ("workspace-propose-edit", &["content"]),
-                "gyro_workspace_edit" => ("workspace-edit", &["oldString", "newString"]),
+                "gyro_workspace_edit" => ("workspace-edit", REPLACEMENT_FIELDS),
                 _ => continue,
             };
-            let fields: Vec<String> = fields
+            let edit = parsed.pointer(prefix).unwrap_or(&Value::Null);
+            let mut fields: Vec<String> = fields
                 .iter()
+                .filter(|field| is_large_string(&edit[**field]))
                 .map(|field| format!("{prefix}/{field}"))
-                .filter(|pointer| {
-                    parsed
-                        .pointer(pointer)
-                        .and_then(Value::as_str)
-                        .is_some_and(|text| text.len() >= MIN_FIELD_BYTES)
-                })
                 .collect();
+            if capability == "workspace-edit" {
+                for (index, replacement) in
+                    edit["edits"].as_array().into_iter().flatten().enumerate()
+                {
+                    fields.extend(
+                        REPLACEMENT_FIELDS
+                            .iter()
+                            .filter(|field| is_large_string(&replacement[**field]))
+                            .map(|field| format!("{prefix}/edits/{index}/{field}")),
+                    );
+                }
+            }
             if fields.is_empty() {
                 continue;
             }
@@ -142,6 +151,12 @@ pub(super) fn retire(
         }
     }
     saved
+}
+
+fn is_large_string(value: &Value) -> bool {
+    value
+        .as_str()
+        .is_some_and(|text| text.len() >= MIN_FIELD_BYTES)
 }
 
 #[cfg(test)]
@@ -353,6 +368,75 @@ mod tests {
             original.to_string().len(),
             args(&messages).to_string().len()
         );
+    }
+
+    #[test]
+    fn batched_edits_recover_large_nested_strings_from_one_copy() {
+        let edit = json!({ "path":"src/main.rs", "expectedHash":"base-hash",
+            "oldString":"draft", "newString":"ready",
+            "edits":[
+                {"oldString":"ancien café\n".repeat(600), "newString":"nouveau café\n".repeat(600), "replaceAll":true},
+                {"oldString":"before", "newString":"after"}
+            ]
+        });
+        for encoded in [false, true] {
+            for wrapped in [false, true] {
+                let original = if wrapped {
+                    json!({"name":"gyro_workspace_edit", "arguments":edit})
+                } else {
+                    edit.clone()
+                };
+                let wire = if encoded {
+                    Value::String(original.to_string())
+                } else {
+                    original.clone()
+                };
+                let name = if wrapped {
+                    "gyro_tool_invoke"
+                } else {
+                    "gyro_workspace_edit"
+                };
+                let mut messages = exchange(name, wire);
+                messages[3]["content"] =
+                    json!({"status":"completed","result":{"capabilityId":"workspace-edit"}})
+                        .to_string()
+                        .into();
+                let before = messages.clone();
+                assert_eq!(retire(&mut messages, 4, |_, _| false), 0);
+                assert_eq!(messages, before);
+
+                let copy = OnceCell::new();
+                let saved = retire(&mut messages, 4, |address, text| {
+                    assert!(copy.set((address.to_owned(), text.to_owned())).is_ok());
+                    true
+                });
+                let (address, text) = copy.into_inner().unwrap();
+                assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), original);
+                let prepared = if encoded {
+                    serde_json::from_str::<Value>(args(&messages).as_str().unwrap()).unwrap()
+                } else {
+                    args(&messages).clone()
+                };
+                let prefix = if wrapped { "/arguments" } else { "" };
+                let patch = prepared.pointer(prefix).unwrap();
+                for field in ["path", "expectedHash", "oldString", "newString"] {
+                    assert_eq!(patch[field], edit[field]);
+                }
+                for field in REPLACEMENT_FIELDS {
+                    let marker = patch["edits"][0][*field].as_str().unwrap();
+                    assert!(marker.contains(&address));
+                    assert!(marker.contains(&format!("{prefix}/edits/0/{field}")));
+                }
+                assert_eq!(patch["edits"][0]["replaceAll"], true);
+                assert_eq!(patch["edits"][1], edit["edits"][1]);
+                assert_eq!(saved, text.len() - prepared.to_string().len());
+                assert!(saved > 10_000);
+                assert_eq!(
+                    retire(&mut messages, 4, |_, _| panic!("already retired")),
+                    0
+                );
+            }
+        }
     }
 
     #[test]

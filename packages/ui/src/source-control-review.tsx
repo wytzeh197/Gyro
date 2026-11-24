@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, FileCode2, RefreshCw } from "lucide-react";
+import { ArrowDown, ArrowUp, FileCode2, RefreshCw } from "./icons";
 
 export function comparisonScopeLabel(
   comparison?: "working-tree" | "index" | "branch",

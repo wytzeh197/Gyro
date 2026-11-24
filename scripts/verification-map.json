@@ -654,5 +654,14 @@
   },
   "check-workspace-recovery-browser.mjs": {
     "kind": "behavioral"
+  },
+  "check-efficiency-harness.mjs": {
+    "kind": "behavioral"
+  },
+  "check-primitives-browser.mjs": {
+    "kind": "behavioral"
+  },
+  "check-theme-engine.mjs": {
+    "kind": "behavioral"
   }
 }

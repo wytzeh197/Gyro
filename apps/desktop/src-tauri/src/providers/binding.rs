@@ -478,6 +478,11 @@ pub(crate) fn local_conversation_history_for_request(
     {
         return None;
     }
+    if matches!(request.provider_id.as_str(), "openai" | "anthropic")
+        && crate::efficiency::config().checkpoint_recovery_for(&request.provider_id)
+    {
+        return crate::conversation_history::native_checkpoint_history(request, prefetched_history);
+    }
     conversation_history_text_for_session(&request.session_id, prefetched_history)
 }
 

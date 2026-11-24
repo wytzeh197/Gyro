@@ -1,8 +1,7 @@
-import { SurfacePresence } from "./surface-presence";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { MoreHorizontal, Trash2 } from "lucide-react";
+import { MoreHorizontal, Trash2 } from "./icons";
 
 import { confirmAction } from "./confirm-action";
+import { Menu } from "./primitives";
 
 export function ScmFileActions({
   path,
@@ -11,107 +10,29 @@ export function ScmFileActions({
   path: string;
   onDiscard?: (path: string) => void | Promise<void>;
 }) {
-  const trigger = useRef<HTMLButtonElement>(null);
-  const menu = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState<{ top: number; left: number }>();
-  const close = () => setPosition(undefined);
-  const toggle = () => {
-    if (position) {
-      close();
-      return;
-    }
-    const rect = trigger.current?.getBoundingClientRect();
-    if (!rect) return;
-    setPosition({
-      left: Math.max(8, Math.min(rect.left, window.innerWidth - 204)),
-      top:
-        rect.bottom + 48 <= window.innerHeight - 8
-          ? rect.bottom + 4
-          : Math.max(8, rect.top - 44),
-    });
-  };
-  useLayoutEffect(() => {
-    if (!position) return;
-    const rect = trigger.current?.getBoundingClientRect();
-    if (!rect) return;
-    const next = {
-      left: Math.max(8, Math.min(rect.left, window.innerWidth - 204)),
-      top: rect.bottom + 48 <= window.innerHeight - 8 ? rect.bottom + 4 : Math.max(8, rect.top - 44),
-    };
-    if (next.left !== position.left || next.top !== position.top) setPosition(next);
-  }, [position]);
-  useEffect(() => {
-    if (!position) return;
-    menu.current?.querySelector<HTMLButtonElement>("button")?.focus();
-    const pointer = (event: PointerEvent) => {
-      if (
-        !menu.current?.contains(event.target as Node) &&
-        !trigger.current?.contains(event.target as Node)
-      )
-        close();
-    };
-    const key = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        close();
-        trigger.current?.focus();
-      }
-      if (event.key === "Tab") close();
-    };
-    window.addEventListener("pointerdown", pointer);
-    window.addEventListener("keydown", key);
-    window.addEventListener("resize", close);
-    window.addEventListener("scroll", close, true);
-    return () => {
-      window.removeEventListener("pointerdown", pointer);
-      window.removeEventListener("keydown", key);
-      window.removeEventListener("resize", close);
-      window.removeEventListener("scroll", close, true);
-    };
-  }, [position]);
+  const label = `Actions for ${path}`;
   return (
-    <>
-      <button
-        ref={trigger}
-        type="button"
-        className="gyro-scm-file-actions-trigger"
-        aria-label={`Actions for ${path}`}
-        aria-haspopup="menu"
-        aria-expanded={!!position}
-        onClick={toggle}
-      >
-        <MoreHorizontal size={14} />
-      </button>
-      <SurfacePresence portal="body">
-        {position ? (
-          <div
-            ref={menu}
-            className="gyro-scm-file-actions-menu"
-            style={position}
-            role="menu"
-            aria-label={`Actions for ${path}`}
-          >
-            <button
-              type="button"
-              role="menuitem"
-              disabled={!onDiscard}
-              onClick={async () => {
-                close();
-                trigger.current?.focus();
-                if (
-                  await confirmAction(
-                    `Discard all local changes in ${path}? This cannot be undone.`,
-                  )
-                )
-                  void onDiscard?.(path);
-              }}
-            >
-              <Trash2 size={14} />
-              <span>Discard local changes</span>
-            </button>
-          </div>
-        ) : null}
-      </SurfacePresence>
-    </>
+    <Menu.Root>
+      <Menu.Trigger aria-label={label} className="gyro-scm-file-actions-trigger">
+        <MoreHorizontal aria-hidden="true" size={14} />
+      </Menu.Trigger>
+      <Menu.Content aria-label={label} className="gyro-scm-file-actions-menu">
+        <Menu.Item
+          disabled={!onDiscard}
+          icon={<Trash2 aria-hidden="true" size={14} />}
+          onClick={async () => {
+            if (
+              await confirmAction(
+                `Discard all local changes in ${path}? This cannot be undone.`,
+              )
+            )
+              void onDiscard?.(path);
+          }}
+          tone="danger"
+        >
+          Discard local changes
+        </Menu.Item>
+      </Menu.Content>
+    </Menu.Root>
   );
 }

@@ -6,6 +6,7 @@ import type { WorkspaceEditorSettings } from "@gyro-dev/ui";
 export function workspaceEditorOptions({
   scale,
   reduceMotion,
+  codeFont,
   minimapEnabled,
   limited,
   readOnly,
@@ -13,6 +14,7 @@ export function workspaceEditorOptions({
 }: {
   scale: number;
   reduceMotion: boolean;
+  codeFont?: string;
   minimapEnabled: boolean;
   limited: boolean;
   readOnly: boolean;
@@ -27,7 +29,7 @@ export function workspaceEditorOptions({
     readOnly,
     "semanticHighlighting.enabled": !limited,
     maxTokenizationLineLength: 20000,
-    fontFamily:
+    fontFamily: codeFont ??
       "SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, monospace",
     fontLigatures: false,
     fontSize,

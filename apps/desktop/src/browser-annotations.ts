@@ -313,3 +313,43 @@ export async function requestBrowserAnnotation({
     return { error: String(error) };
   }
 }
+
+
+export async function prepareNativeAppAnnotation(
+  runtime: import("../../../packages/ui/src/app-preview-panel").AppPreviewRuntime | undefined,
+  owner: { sessionId: string; workspaceKey: string },
+  feedback?: BrowserFeedback,
+): ReturnType<typeof requestBrowserAnnotation> {
+  try {
+    const native = feedback?.nativeCapture;
+    const comment = feedback?.comment.trim();
+    if (!runtime?.crop || !native || !comment || !feedback?.captureId) {
+      throw new Error("Select an app region and describe what should change.");
+    }
+    const snapshot = await runtime.crop(feedback.captureId, native.region);
+    const sessionId = owner.sessionId === "workbench" || owner.sessionId.startsWith("workbench:")
+      ? "new" : owner.sessionId;
+    const image = await invoke<ChatAttachment>("prepare_chat_attachment", {
+      request: { sessionId, workspacePath: owner.workspaceKey || undefined,
+        path: snapshot.path, kind: "image", name: "App annotation.png" },
+    });
+    const metadata = {
+      schema: "gyro.app-preview-annotation.v1",
+      target: native.targetTitle, capturedAt: native.capturedAt, region: native.region,
+      evidence: { screenshotCaptured: true, screenshotModelVisible: false },
+      attachedImage: image,
+    };
+    const attachment = await invoke<ChatAttachment>("prepare_chat_attachment", {
+      request: { sessionId, path: "", kind: "browser-snapshot", name: "App annotation.json",
+        relativePath: "App annotation", bytes: Array.from(new TextEncoder().encode(JSON.stringify(metadata))) },
+    });
+    const { x, y, width, height } = native.region;
+    const target = native.targetTitle.replace(/[\r\n]/g, " ").slice(0, 120);
+    return {
+      message: `${comment.slice(0, 1000)}\n\nApp preview: ${target}, captured ${native.capturedAt}. Selected ${width} × ${height} px at (${x}, ${y}).`,
+      attachments: [{ ...attachment, previewUrl: convertFileSrc(image.path) }],
+    };
+  } catch (error) {
+    return { error: String(error) };
+  }
+}

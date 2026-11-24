@@ -1,7 +1,10 @@
 //! Desktop integration for local, inspectable efficiency policies.
+
+#[cfg(debug_assertions)]
+#[path = "efficiency_benchmark.rs"]
+pub(crate) mod benchmark;
 use crate::{
     app::{config::load_config_blocking, limits::MAX_WORKSPACE_FILE_EDIT_BYTES},
-    capabilities::bridge::active_provider_capability_context,
     capability_output_budget,
     capability_workspace_helpers::workspace_result_bytes_schema,
     ide::task_discovery::content_hash,
@@ -12,17 +15,14 @@ use crate::{
     },
     state::{
         managers::{with_ide_evidence, CapabilityIdeEvidenceManager, ProviderCancellationManager},
-        provider_run::{
-            stop_provider_run, BoundProviderCapabilityContext, ProviderRunControl,
-            ProviderStopReason,
-        },
+        provider_run::{BoundProviderCapabilityContext, ProviderRunControl, ProviderStopReason},
     },
     stores::{open_store, parse_uuid, to_string},
     workspace_capability_list,
 };
 use gyro_core::efficiency::{
-    checkpoint::{AgentNotes, FileEvidence, TaskCheckpoint},
-    progress::Decision,
+    checkpoint::{AgentNotes, FileEvidence, TaskCheckpoint, VerificationEvidence},
+    progress::{is_repeatable_read_failure, Decision},
 };
 use gyro_core::{
     timing, CapabilityId, CapabilityRequest, CapabilityResourceRef, CapabilityResponse, GyroConfig,
@@ -180,9 +180,12 @@ pub(super) fn save_checkpoint(
     app: &tauri::AppHandle,
     store: &SessionStore,
     request: &ProviderChatRequest,
-) -> anyhow::Result<()> {
-    if !config().policies() || !config().task_state {
-        return Ok(());
+) -> anyhow::Result<Option<TaskCheckpoint>> {
+    let config = config();
+    if !(config.policies() && config.task_state
+        || (request.internal_purpose.is_none() && config.checkpoint_recovery_for(&request.provider_id)))
+    {
+        return Ok(None);
     }
     let _measure = timing::EfficiencyTimer::start(timing::EfficiencyComponent::Checkpoint);
     let session = parse_uuid(&request.session_id).map_err(anyhow::Error::msg)?;
@@ -208,7 +211,9 @@ pub(super) fn save_checkpoint(
             if pending.task_id == current.task_id {
                 current.progress_notice = pending.progress_notice;
                 current.files = pending.files;
-                current.verification = pending.verification;
+                if pending.workspace == current.workspace {
+                    current.merge_earlier_verification(pending.verification);
+                }
                 current.repository_signals = pending.repository_signals;
                 current.agent_assertions = pending.agent_assertions;
             }
@@ -228,7 +233,7 @@ pub(super) fn save_checkpoint(
             .as_deref()
             .and_then(|s| Uuid::parse_str(s).ok()),
     )?;
-    Ok(())
+    Ok(Some(current))
 }
 pub(super) fn capability_schema(id: CapabilityId) -> Option<Value> {
     match id {
@@ -299,7 +304,9 @@ pub(super) fn execute(
             {
                 if pending.task_id == record.task_id {
                     record.files = pending.files;
-                    record.verification = pending.verification;
+                    if pending.workspace == record.workspace {
+                        record.merge_earlier_verification(pending.verification);
+                    }
                     record.repository_signals = pending.repository_signals;
                     record.agent_assertions = pending.agent_assertions;
                 }
@@ -509,7 +516,7 @@ fn revalidate_outputs(
                 "retained"
             }
         } else {
-            "expired; rerun the relevant check"
+            "output unavailable; rerun if current verification is required"
         }
         .into();
     }
@@ -566,22 +573,47 @@ pub(super) fn observe(
     app: &tauri::AppHandle,
     request: &CapabilityRequest,
     response: &mut CapabilityResponse,
+    cfg: &gyro_core::efficiency::Config,
 ) {
-    let cfg = config();
-    let checkpoints = cfg.policies() && (cfg.task_state || cfg.repository_retrieval);
-    let progress = cfg.progress_active();
-    if !(checkpoints || progress) || response.result.is_none() {
+    let recovery = cfg.checkpoint_recovery_for(&request.context.provider_id)
+        && response.result.as_ref().is_some_and(|result| {
+            result.data["contentHash"].is_string()
+                || (matches!(
+                    request.capability_id,
+                    CapabilityId::WorkspaceRunTask
+                        | CapabilityId::WorkspaceRunTest
+                        | CapabilityId::WorkspaceRunCommand
+                        | CapabilityId::TerminalWait
+                ) && result.data["exitCode"].is_number())
+        });
+    let checkpoints = response.result.is_some()
+        && (recovery || (cfg.policies() && (cfg.task_state || cfg.repository_retrieval)));
+    let progress = cfg.progress_active()
+        && (response.result.is_some()
+            || is_repeatable_read_failure(request.capability_id, response));
+    if !(checkpoints || progress) {
         return;
     }
-    let Ok(bound) = active_provider_capability_context(app, &request.context.session_id) else {
-        return;
-    };
-    let pending_control = app
+    let control = app
         .state::<ProviderCancellationManager>()
         .flags
         .lock()
         .ok()
-        .and_then(|f| f.get(&bound.session_id).cloned());
+        .and_then(|flags| flags.get(&request.context.session_id).cloned());
+    let Some(control) =
+        control.filter(|control| control.approval_nonce == request.context.run_nonce)
+    else {
+        return;
+    };
+    let progress = progress && !control.cancellation.is_cancelled();
+    let bound = control
+        .capability_context
+        .lock()
+        .ok()
+        .and_then(|context| context.clone());
+    let Some(bound) = bound.filter(|bound| bound.turn_id == request.context.turn_id) else {
+        return;
+    };
     if checkpoints {
         let _measure = timing::EfficiencyTimer::start(timing::EfficiencyComponent::Checkpoint);
         if let Some(result) = response.result.as_ref() {
@@ -593,11 +625,12 @@ pub(super) fn observe(
                         &bound.workspace_key,
                         bound.workspace_context.revision,
                     ) {
-                        if let Some(pending) = pending_control.as_ref().and_then(|c| {
-                            c.efficiency_checkpoint.lock().ok().and_then(|p| p.clone())
-                        }) {
-                            if pending.task_id == record.task_id {
-                                record = pending;
+                        let mut pending = control.efficiency_checkpoint.lock().ok();
+                        if let Some(previous) = pending.as_deref().and_then(Option::as_ref) {
+                            if previous.task_id == record.task_id
+                                && previous.workspace == record.workspace
+                            {
+                                record = previous.clone();
                             }
                         }
                         let signals_changed = matches!(
@@ -635,27 +668,44 @@ pub(super) fn observe(
                                 }
                             }
                         }
-                        if matches!(
-                            request.capability_id,
-                            CapabilityId::WorkspaceRunTask | CapabilityId::WorkspaceRunTest
-                        ) {
-                            record.verification.push(gyro_core::efficiency::checkpoint::VerificationEvidence{event_id:request.context.call_id,output_id:result.data["id"].as_str().map(str::to_owned),outcome:json!({"status":result.data["status"],"exitCode":result.data["exitCode"],"evidence":result.data["evidenceSummary"]}),source_truncated:result.data["sourceTruncated"].as_bool().unwrap_or(false),availability:"revalidate".into()});
-                            if record.verification.len() > 16 {
-                                record.verification.remove(0);
-                            }
+                        let verification =
+                            VerificationEvidence::workspace_task(result).or_else(|| {
+                                (recovery && result.data["exitCode"].is_number()).then(|| {
+                                    let output_id = result.data["id"]
+                                        .as_str()
+                                        .map(str::to_owned)
+                                        .or_else(|| {
+                                            result
+                                                .resource
+                                                .as_ref()
+                                                .map(|resource| resource.id.clone())
+                                        });
+                                    VerificationEvidence {
+                                        event_id: request.context.call_id,
+                                        output_id,
+                                        outcome: json!({
+                                            "status": result.data["status"],
+                                            "exitCode": result.data["exitCode"],
+                                            "evidence": result.data["evidenceSummary"],
+                                        }),
+                                        source_truncated: result.data["sourceTruncated"]
+                                            .as_bool()
+                                            .unwrap_or(false),
+                                        availability: "revalidate".into(),
+                                    }
+                                })
+                            });
+                        let verification_changed = verification.is_some();
+                        if let Some(verification) = verification {
+                            record.add_verification(verification);
                         }
                         if (signals_changed
                             || result.data.get("contentHash").is_some()
-                            || matches!(
-                                request.capability_id,
-                                CapabilityId::WorkspaceRunTask | CapabilityId::WorkspaceRunTest
-                            ))
+                            || verification_changed)
                             && record.validate().is_ok()
                         {
-                            if let Some(control) = pending_control.as_ref() {
-                                if let Ok(mut pending) = control.efficiency_checkpoint.lock() {
-                                    *pending = Some(record);
-                                }
+                            if let Some(slot) = pending.as_deref_mut() {
+                                *slot = Some(record);
                             }
                         }
                     }
@@ -667,41 +717,22 @@ pub(super) fn observe(
         return;
     }
     let _measure = timing::EfficiencyTimer::start(timing::EfficiencyComponent::Progress);
-    let control = app
-        .state::<ProviderCancellationManager>()
-        .flags
-        .lock()
-        .ok()
-        .and_then(|f| f.get(&bound.session_id).cloned());
-    let Some(control) = control else {
-        return;
-    };
-    let outcome = response
-        .result
-        .as_ref()
-        .map(|r| r.data.clone())
-        .unwrap_or_else(|| json!({"error":response.error}));
-    let state = json!({"workspace":bound.workspace_key,"rootRevision":bound.workspace_identity_revision,"revision":bound.workspace_context.revision});
-    let mut outcome = outcome;
-    if let Some(object) = outcome.as_object_mut() {
-        for field in ["id", "finishedAt", "capturedAt", "owner", "contextRevision"] {
-            object.remove(field);
-        }
-    }
+    let state = json!({"turnId":bound.turn_id,"workspace":bound.workspace_key,"rootRevision":bound.workspace_identity_revision,"revision":bound.workspace_context.revision});
     let decision = control
         .efficiency_progress
         .lock()
         .ok()
         .map(|mut d| {
-            d.observe(
-                request.capability_id.as_str(),
-                &request.arguments,
-                &state,
-                &outcome,
-            )
+            d.observe_capability(request.capability_id, &request.arguments, &state, response)
         })
         .unwrap_or(Decision::Continue);
-    if decision != Decision::Continue {
+    let failed_file_read = matches!(
+        request.capability_id,
+        CapabilityId::WorkspaceRead
+            | CapabilityId::WorkspaceReadRange
+            | CapabilityId::WorkspaceReadEditor
+    ) && is_repeatable_read_failure(request.capability_id, response);
+    if let Some(message) = decision.notice(failed_file_read) {
         if let Ok(store) = open_store() {
             if let Ok(session) = Uuid::parse_str(&bound.session_id) {
                 if let Ok(mut record) = checkpoint(
@@ -736,21 +767,12 @@ pub(super) fn observe(
                 }
             }
         }
-        let message = if decision == Decision::Correct {
-            "The same tool-call sequence returned unchanged evidence three times. Save a checkpoint and choose a different approach; required verification still applies."
-        } else {
-            "The same tool-call sequence returned unchanged evidence six times. Gyro paused this turn. Review the checkpoint and resume with a changed approach."
-        };
-        if let Some(result) = response.result.as_mut() {
-            result.data["progressNotice"] = json!(message);
-            result.data["progressAction"] = json!(if decision == Decision::Correct {
-                "correct"
-            } else {
-                "pause"
-            });
-        }
+        append_progress_notice(response, decision, message);
         if let Ok(request) = control.request.lock() {
-            if let Some(request) = request.as_ref() {
+            if let Some(request) = request
+                .as_ref()
+                .filter(|request| request.turn_id == bound.turn_id)
+            {
                 let activity = ProviderActivity {
                     id: format!("efficiency-progress-{}", Uuid::new_v4()),
                     kind: "context".into(),
@@ -772,8 +794,77 @@ pub(super) fn observe(
             }
         }
         if decision == Decision::Pause {
-            stop_provider_run(app, &bound.session_id, ProviderStopReason::NoProgress);
+            let manager = app.state::<ProviderCancellationManager>();
+            let Ok(flags) = manager.flags.lock() else {
+                return;
+            };
+            if flags
+                .get(&bound.session_id)
+                .is_some_and(|active| Arc::ptr_eq(active, &control))
+            {
+                let Ok(context) = control.capability_context.lock() else {
+                    return;
+                };
+                if context
+                    .as_ref()
+                    .is_some_and(|current| current.turn_id == bound.turn_id)
+                {
+                    if let Ok(mut reason) = control.stop_reason.lock() {
+                        reason.get_or_insert(ProviderStopReason::NoProgress);
+                    }
+                    control.cancellation.cancel();
+                }
+            }
         }
+    }
+}
+
+fn append_progress_notice(response: &mut CapabilityResponse, decision: Decision, message: &str) {
+    if let Some(result) = response.result.as_mut() {
+        result.data["progressNotice"] = json!(message);
+        result.data["progressAction"] = json!(if decision == Decision::Correct {
+            "correct"
+        } else {
+            "pause"
+        });
+    } else if let Some(error) = response.error.as_mut() {
+        error.progress_action = Some(decision);
+        error.message =
+            gyro_core::sanitize_capability_summary(&format!("{message}\n{}", error.message));
+    }
+}
+
+#[test]
+fn failed_read_notice_reaches_api_and_native_tool_consumers() {
+    let mut response = CapabilityResponse::failed(
+        "test",
+        Uuid::new_v4(),
+        "execution-failed",
+        "No file at src/missing.rs",
+    );
+    let notice = Decision::Correct.notice(true).unwrap();
+    append_progress_notice(&mut response, Decision::Correct, notice);
+    let api: Value = serde_json::from_str(
+        &gyro_core::provider_runtime::tool_batch::model_response_text(&response).unwrap(),
+    )
+    .unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let mcp = crate::capabilities::mcp_server::capability_mcp_response(
+        &GyroPaths::from_base_dir(temp.path().to_path_buf()),
+        response,
+        false,
+    )
+    .unwrap();
+    assert_eq!(api["status"], "failed");
+    assert_eq!(mcp["isError"], true);
+    let native: Value = serde_json::from_str(mcp["content"][0]["text"].as_str().unwrap()).unwrap();
+    for reply in [api, native] {
+        assert_eq!(reply["error"]["code"], "execution-failed");
+        assert_eq!(reply["error"]["progressAction"], "correct");
+        assert_eq!(
+            reply["error"]["message"],
+            format!("{notice}\nNo file at src/missing.rs")
+        );
     }
 }
 

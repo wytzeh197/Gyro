@@ -1,3 +1,4 @@
+import { Button, Dialog } from "@gyro-dev/ui";
 import {
   lazy,
   Suspense,
@@ -51,7 +52,6 @@ export function RemoteWorkspaceRoot({
   );
   const refreshSequence = useRef(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const dialog = useRef<HTMLDialogElement>(null);
   const refresh = useCallback(async () => {
     if (!native() && !suppliedPorts) return;
     const sequence = ++refreshSequence.current;
@@ -94,10 +94,6 @@ export function RemoteWorkspaceRoot({
       unlisten?.();
     };
   }, [refresh, ports, suppliedPorts]);
-  useEffect(() => {
-    if (settingsOpen) dialog.current?.showModal();
-    else dialog.current?.close();
-  }, [settingsOpen]);
   const openSettings = useCallback(() => setSettingsOpen(true), []);
   const selectHost = useCallback((host?: Peer) => {
     setSelectedHost(host);
@@ -268,29 +264,23 @@ export function RemoteWorkspaceRoot({
         }}
       >
         {children}
-        <dialog
-          className="gyro-remote-dialog"
-          ref={dialog}
-          aria-labelledby="gyro-remote-settings-title"
-          onClose={() => setSettingsOpen(false)}
-          onCancel={() => setSettingsOpen(false)}
+        <Dialog.Root
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          disablePointerDismissal
         >
-          <header className="gyro-remote-dialog-header">
-            <h2 id="gyro-remote-settings-title" className="gyro-sr-only">
-              Remote access
-            </h2>
-            <button
-              type="button"
-              className="gyro-secondary-button"
-              onClick={() => setSettingsOpen(false)}
-            >
-              Close
-            </button>
-          </header>
-          <div className="gyro-settings-surface is-minimal-settings">
-            {settingsOpen ? settings : null}
-          </div>
-        </dialog>
+          <Dialog.Content className="gyro-remote-dialog" size="lg">
+            <header className="gyro-remote-dialog-header">
+              <Dialog.Title className="gyro-sr-only">Remote access</Dialog.Title>
+              <Dialog.Close render={<Button variant="outline" size="sm" />}>
+                Close
+              </Dialog.Close>
+            </header>
+            <div className="gyro-settings-surface is-minimal-settings">
+              {settings}
+            </div>
+          </Dialog.Content>
+        </Dialog.Root>
       </RemoteAccessSlots.Provider>
     </RemoteAccessContext.Provider>
   );

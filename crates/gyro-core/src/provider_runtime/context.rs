@@ -9,6 +9,28 @@ pub struct OllamaTurnUsage {
     output: u64,
 }
 
+/// Retry an explicit context rejection only when shortening the replay leaves
+/// its older evidence retrievable by a tool offered on the same request.
+pub(super) fn retry_with_workspace_evidence(
+    messages: &mut [Value],
+    tools: &[Value],
+    cancellation: &crate::CancellationToken,
+) -> bool {
+    if cancellation.is_cancelled()
+        || !tools.iter().any(|tool| {
+            tool["function"]["name"] == crate::CapabilityId::WorkspaceRead.provider_tool_name()
+        })
+    {
+        return false;
+    }
+    let saved = crate::efficiency::context::shorten_rejected_workspace_evidence(messages);
+    if saved == 0 || !crate::provider_retry::compatibility_retry() {
+        return false;
+    }
+    crate::provider_observation::retired_context(saved);
+    true
+}
+
 /// Marker that opens the live context note, so a runner can recognize the
 /// note it wrote earlier in its own message list and rewrite that entry
 /// instead of appending a fresh copy every round.
@@ -23,6 +45,28 @@ pub fn context_checkpoint_note(
     model_context_window: Option<u64>,
     auto_compact_percent: u32,
 ) -> Option<String> {
+    let (input_tokens, window, remaining) = context_pressure(
+        input_tokens,
+        output_tokens,
+        model_context_window,
+        auto_compact_percent,
+    )?;
+    let reading = match output_tokens {
+        Some(output_tokens) => format!("{input_tokens} prompt + {output_tokens} output tokens"),
+        None => format!("{input_tokens} prompt tokens"),
+    };
+    Some(format!(
+        "{CONTEXT_CHECKPOINT_MARKER} Previous request measured: {reading} of its {window}-token window ({}% free). Size reads to the remaining space; this checkpoint is replaced each request.",
+        remaining.saturating_mul(100) / window
+    ))
+}
+
+fn context_pressure(
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    model_context_window: Option<u64>,
+    auto_compact_percent: u32,
+) -> Option<(u64, u64, u64)> {
     let input_tokens = input_tokens?;
     let window = model_context_window.filter(|window| *window > 0)?;
     let occupancy = input_tokens.saturating_add(output_tokens.unwrap_or_default());
@@ -37,14 +81,7 @@ pub fn context_checkpoint_note(
     if remaining > 2_048 && occupancy.saturating_mul(100) / window < u64::from(warn_at) {
         return None;
     }
-    let reading = match output_tokens {
-        Some(output_tokens) => format!("{input_tokens} prompt + {output_tokens} output tokens"),
-        None => format!("{input_tokens} prompt tokens"),
-    };
-    Some(format!(
-        "{CONTEXT_CHECKPOINT_MARKER} Previous request measured: {reading} of its {window}-token window ({}% free). Size reads to the remaining space; this checkpoint is replaced each request.",
-        remaining.saturating_mul(100) / window
-    ))
+    Some((input_tokens, window, remaining))
 }
 
 /// Rewrite -- never stack -- the live context note in a runner's message list.
@@ -61,12 +98,7 @@ pub fn refresh_context_checkpoint(
     model_context_window: Option<u64>,
     auto_compact_percent: u32,
 ) {
-    let mut index = 0;
-    messages.retain(|message| {
-        index += 1;
-        // The first two entries are the system prompt and the user's request.
-        index <= 2 || !is_context_checkpoint(message)
-    });
+    clear_context_checkpoint(messages);
     if let Some(note) = context_checkpoint_note(
         input_tokens,
         output_tokens,
@@ -75,6 +107,78 @@ pub fn refresh_context_checkpoint(
     ) {
         messages.push(serde_json::json!({ "role": "user", "content": note }));
     }
+}
+
+/// Reuse one advisory throughout a measured high-occupancy interval. A
+/// changing token count would rewrite the model's already-sent messages on
+/// every round. Keep exact counts on the live meter and show the same guidance
+/// while its condition still holds.
+pub(super) fn refresh_cacheable_context_checkpoint(
+    messages: &mut Vec<Value>,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    model_context_window: Option<u64>,
+    auto_compact_percent: u32,
+) {
+    if context_pressure(
+        input_tokens,
+        output_tokens,
+        model_context_window,
+        auto_compact_percent,
+    )
+    .is_none()
+    {
+        clear_context_checkpoint(messages);
+    } else if !messages.iter().skip(2).any(is_context_checkpoint) {
+        messages.push(serde_json::json!({
+            "role": "user",
+            "content": format!("{CONTEXT_CHECKPOINT_MARKER} Recent measured context was near its limit. Use targeted file ranges and keep new tool output small. Reopen older evidence only when needed.")
+        }));
+    }
+}
+
+fn clear_context_checkpoint(messages: &mut Vec<Value>) {
+    let mut index = 0;
+    messages.retain(|message| {
+        index += 1;
+        // The first two entries are the system prompt and the user's request.
+        index <= 2 || !is_context_checkpoint(message)
+    });
+}
+
+#[test]
+fn sustained_pressure_keeps_the_advisory_in_the_already_sent_prefix() {
+    use crate::efficiency::cache_plan::appended_only;
+    use serde_json::json;
+
+    let mut ordinary = vec![
+        json!({"role":"system","content":"rules"}),
+        json!({"role":"user","content":"task"}),
+    ];
+    let mut cacheable = ordinary.clone();
+    refresh_context_checkpoint(&mut ordinary, Some(76_000), Some(20), Some(100_000), 85);
+    refresh_cacheable_context_checkpoint(&mut cacheable, Some(76_000), Some(20), Some(100_000), 85);
+    let sent_ordinary = ordinary.clone();
+    let sent_cacheable = cacheable.clone();
+    let results = [
+        json!({"role":"assistant","tool_calls":[{"id":"read"}]}),
+        json!({"role":"tool","tool_call_id":"read","content":"source evidence"}),
+    ];
+    ordinary.extend(results.clone());
+    cacheable.extend(results.clone());
+    refresh_context_checkpoint(&mut ordinary, Some(81_000), Some(20), Some(100_000), 85);
+    refresh_cacheable_context_checkpoint(&mut cacheable, Some(81_000), Some(20), Some(100_000), 85);
+    assert!(!appended_only(&sent_ordinary, &ordinary));
+    assert!(appended_only(&sent_cacheable, &cacheable));
+    assert_eq!(
+        cacheable
+            .iter()
+            .filter(|m| is_context_checkpoint(m))
+            .count(),
+        1
+    );
+    refresh_cacheable_context_checkpoint(&mut cacheable, None, None, Some(100_000), 85);
+    assert_eq!(&cacheable[2..], &results);
 }
 
 pub fn is_context_checkpoint(message: &Value) -> bool {
@@ -91,6 +195,7 @@ pub fn is_context_checkpoint(message: &Value) -> bool {
 /// Kept apart from [`CONTEXT_CHECKPOINT_MARKER`] on purpose: the live context
 /// note is rewritten every round, and this one has to survive that rewrite.
 pub const CONTEXT_COMPACTION_MARKER: &str = "[gyro.compact]";
+const RECOVERY_SEPARATOR: &str = "\n\n";
 
 /// What one automatic compaction removed, for the activity that reports it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,7 +204,7 @@ pub struct ContextCompaction {
     pub exchanges: usize,
     /// Estimated text characters removed; encoded image bytes are excluded.
     pub characters: u64,
-    /// Measured fill of the window when the compaction fired.
+    /// Window fill that triggered compaction.
     pub percent: u64,
 }
 
@@ -143,6 +248,24 @@ pub fn auto_compaction_fill(
     (fill >= u64::from(percent.min(100))).then_some(fill)
 }
 
+fn compaction_fill_with_replay(
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    replay_characters: u64,
+    window: Option<u64>,
+    percent: u32,
+) -> Option<u64> {
+    // The replay estimate already includes any previous output still present
+    // in the next prompt. Check both readings independently.
+    let measured_input = input_tokens.or_else(|| output_tokens.map(|_| 0));
+    auto_compaction_fill(measured_input, output_tokens, window, percent).max(auto_compaction_fill(
+        Some(estimated_tokens(replay_characters)),
+        None,
+        window,
+        percent,
+    ))
+}
+
 /// Compact a tool loop's in-flight messages once the previous request has
 /// filled the configured share of the model's window.
 ///
@@ -183,18 +306,16 @@ pub fn auto_compact_messages(
         .iter()
         .map(|message| message_size(message).0)
         .sum::<u64>();
-    let input_tokens = Some(
-        input_tokens
-            .unwrap_or_default()
-            .max(estimated_tokens(characters)),
-    )
-    .filter(|tokens| *tokens > 0);
-    let fill = auto_compaction_fill(input_tokens, output_tokens, Some(window), percent)?;
+    let fill = compaction_fill_with_replay(
+        input_tokens,
+        output_tokens,
+        characters,
+        Some(window),
+        percent,
+    )?;
     let percent = percent.clamp(1, 100);
-    let previous_note = messages
-        .iter()
-        .position(is_context_compaction)
-        .map(|index| (index, messages.remove(index)));
+    let previous_note =
+        compaction_note_index(messages).map(|index| (index, messages.remove(index)));
     // The head is the system prompt plus this turn's context message: identity,
     // the workspace briefing and the standing instructions. It is what the turn
     // is, so it is budgeted for but never elided.
@@ -260,14 +381,100 @@ pub fn auto_compact_messages(
         characters: characters - head_characters - used - previous_note_characters,
         percent: fill,
     };
+    let mut note = auto_compaction_note(&compaction, window, percent);
+    if let Some((_, recovery)) = previous_note
+        .as_ref()
+        .and_then(|(_, message)| message["content"].as_str())
+        .and_then(|text| text.split_once(RECOVERY_SEPARATOR))
+    {
+        // A fresh checkpoint is attached when available. Until then, keep
+        // the previously bounded historical recovery evidence in the note.
+        note.push_str(RECOVERY_SEPARATOR);
+        note.push_str(recovery);
+    }
     messages.splice(
         2..split,
         [serde_json::json!({
             "role": "user",
-            "content": auto_compaction_note(&compaction, window, percent),
+            "content": note,
         })],
     );
     Some(compaction)
+}
+
+#[test]
+fn tool_loop_compaction_uses_each_fill_without_adding_the_output_twice() {
+    use serde_json::json;
+    let mut messages = vec![
+        json!({"role":"system", "content":"rules"}),
+        json!({"role":"user","content":"task"}),
+        json!({"role":"assistant","tool_calls":[{"id":"old"}]}),
+        json!({"role":"tool","tool_call_id":"old","content":"x".repeat(12_000)}),
+        json!({"role":"assistant","tool_calls":[{"id":"new"}]}),
+        json!({"role":"tool","tool_call_id":"new","content":"y".repeat(12_000)}),
+    ];
+    let original = messages.clone();
+    assert!(
+        auto_compact_messages(&mut messages, Some(3_000), Some(1_000), Some(8_000), 85).is_none()
+    );
+    assert_eq!(messages, original);
+    let compacted =
+        auto_compact_messages(&mut messages, Some(6_000), Some(1_000), Some(8_000), 85).unwrap();
+    assert_eq!(compacted.exchanges, 1);
+    assert_eq!(&messages[3..], &original[4..]);
+}
+
+#[test]
+fn duplicate_tool_replies_do_not_displace_earlier_evidence() {
+    use serde_json::json;
+
+    let read = |call: &str, path: &str, content: &str| {
+        json!({"role": "tool", "tool_call_id": call, "content": json!({
+            "status": "completed", "callId": call, "result": {
+                "capabilityId": "workspace-read", "summary": format!("Read {path}"),
+                "data": {"path": path, "contentHash": path, "content": content}
+            }
+        }).to_string()})
+    };
+    let earlier = read("old", "checks.rs", "assert_eq!(result, expected);");
+    let source = "line of unique source evidence\n".repeat(250);
+    let replies = (0..6)
+        .map(|index| read(&format!("read-{index}"), "feature.rs", &source))
+        .collect::<Vec<_>>();
+    let calls = replies
+        .iter()
+        .map(|reply| json!({"id": reply["tool_call_id"]}))
+        .collect::<Vec<_>>();
+    let mut messages = vec![
+        json!({"role": "system", "content": "rules"}),
+        json!({"role": "user", "content": "Compare the implementation with its assertion"}),
+        json!({"role": "assistant", "tool_calls": [{"id": "old"}]}),
+        earlier.clone(),
+        json!({"role": "assistant", "tool_calls": calls}),
+    ];
+
+    let mut unfolded = messages.clone();
+    unfolded.extend(replies.iter().cloned());
+    let compaction =
+        auto_compact_messages(&mut unfolded, Some(2_000), Some(100), Some(12_000), 85).unwrap();
+    assert_eq!(compaction.exchanges, 1);
+    assert!(!unfolded.contains(&earlier));
+
+    super::tool_batch::append_ordered_tool_messages(
+        &mut messages,
+        replies.iter().cloned().map(Some).collect(),
+    )
+    .unwrap();
+    assert!(
+        auto_compact_messages(&mut messages, Some(2_000), Some(100), Some(12_000), 85).is_none()
+    );
+    assert_eq!(messages[3], earlier);
+    assert_eq!(messages.last(), replies.last());
+    for (message, original) in messages[5..10].iter().zip(&replies) {
+        assert_eq!(message["tool_call_id"], original["tool_call_id"]);
+        let payload: Value = serde_json::from_str(message["content"].as_str().unwrap()).unwrap();
+        assert_eq!(payload["result"]["data"]["sameEvidenceAsCallId"], "read-5");
+    }
 }
 
 fn exchange_size(messages: &[Value]) -> (u64, bool) {
@@ -294,10 +501,107 @@ pub fn estimated_tokens(characters: u64) -> u64 {
 }
 
 pub fn is_context_compaction(message: &Value) -> bool {
-    message
-        .get("content")
-        .and_then(Value::as_str)
-        .is_some_and(|content| content.starts_with(CONTEXT_COMPACTION_MARKER))
+    message_role(message) == Some("user")
+        && message
+            .get("content")
+            .and_then(Value::as_str)
+            .is_some_and(|content| content.starts_with(CONTEXT_COMPACTION_MARKER))
+}
+
+fn compaction_note_index(messages: &[Value]) -> Option<usize> {
+    // Host notes live between the original request and the first exchange.
+    // The tool catalog may add another entry in this preamble.
+    messages
+        .iter()
+        .enumerate()
+        .skip(2)
+        .take_while(|(_, message)| message_role(message) == Some("user"))
+        .find_map(|(index, message)| is_context_compaction(message).then_some(index))
+}
+
+pub(super) fn attach_recovery_to_compaction_note(messages: &mut [Value], checkpoint: &str) {
+    if let Some(index) = compaction_note_index(messages) {
+        let note = &mut messages[index];
+        let text = note["content"].as_str().expect("compaction note has text");
+        let heading = text
+            .split_once(RECOVERY_SEPARATOR)
+            .map_or(text, |(heading, _)| heading);
+        note["content"] = serde_json::json!(format!("{heading}{RECOVERY_SEPARATOR}{checkpoint}"));
+        crate::provider_observation::efficiency_event(|events| {
+            events.checkpoint_recoveries = events.checkpoint_recoveries.saturating_add(1);
+        });
+    }
+}
+
+#[test]
+fn harness_compaction_retains_checkpoint_with_latest_tool_exchange() {
+    use serde_json::json;
+    let mut messages = vec![
+        json!({"role": "system", "content": "Instructions"}),
+        json!({"role": "user", "content": "Current task"}),
+        json!({"role": "assistant", "tool_calls": [{"id": "old"}]}),
+        json!({"role": "tool", "tool_call_id": "old", "content": "old".repeat(10_000)}),
+        json!({"role": "assistant", "tool_calls": [{"id": "new"}]}),
+        json!({"role": "tool", "tool_call_id": "new", "content": "Latest evidence"}),
+    ];
+    auto_compact_messages(&mut messages, Some(6_144), None, Some(6_144), 85).unwrap();
+    attach_recovery_to_compaction_note(
+        &mut messages,
+        "Earlier correction with exact reference: :42",
+    );
+    let note = messages
+        .iter()
+        .find(|message| is_context_compaction(message))
+        .unwrap();
+    assert!(note["content"]
+        .as_str()
+        .unwrap()
+        .contains("exact reference: :42"));
+    assert_eq!(messages.last().unwrap()["content"], "Latest evidence");
+    assert!(!messages
+        .iter()
+        .any(|message| message["tool_call_id"] == "old"));
+
+    // Catalog retention can move the compaction note one slot deeper into
+    // the preamble. Another compaction may not get a fresh checkpoint.
+    messages.insert(2, json!({"role":"user","content":"Retained tool schemas"}));
+    messages.extend([
+        json!({"role":"assistant","tool_calls":[{"id":"next"}]}),
+        json!({"role":"tool","tool_call_id":"next","content":"next".repeat(10_000)}),
+        json!({"role":"assistant","tool_calls":[{"id":"last"}]}),
+        json!({"role":"tool","tool_call_id":"last","content":"new evidence"}),
+    ]);
+    auto_compact_messages(&mut messages, Some(6_144), None, Some(6_144), 85).unwrap();
+    assert!(messages[2]["content"]
+        .as_str()
+        .unwrap()
+        .contains("exact reference: :42"));
+    attach_recovery_to_compaction_note(&mut messages, "Refreshed checkpoint: :81");
+    let note = messages[2]["content"].as_str().unwrap();
+    assert!(note.contains("Refreshed checkpoint: :81"));
+    assert!(!note.contains("exact reference: :42"));
+    assert_eq!(messages.last().unwrap()["content"], "new evidence");
+}
+
+#[test]
+fn compaction_preserves_current_instructions_and_tool_exchanges_that_quote_its_marker() {
+    use serde_json::json;
+    let head =
+        json!({"role":"user","content":"[gyro.compact] Keep the current task and constraints."});
+    let newest_call = json!({"role":"assistant","content":"[gyro.compact] quoted marker", "tool_calls":[{"id":"new"}]});
+    let newest_result = json!({"role":"tool","tool_call_id":"new","content":"Latest evidence"});
+    let mut messages = vec![
+        json!({"role":"system","content":"Instructions"}),
+        head.clone(),
+        json!({"role":"assistant","tool_calls":[{"id":"old"}]}),
+        json!({"role":"tool","tool_call_id":"old","content":"old".repeat(10_000)}),
+        newest_call.clone(),
+        newest_result.clone(),
+    ];
+    auto_compact_messages(&mut messages, Some(6_144), None, Some(6_144), 85).unwrap();
+    assert_eq!(messages[1], head);
+    assert!(is_context_compaction(&messages[2]));
+    assert_eq!(&messages[3..], &[newest_call, newest_result]);
 }
 
 /// One provider reading of how full the window is.
@@ -337,9 +641,7 @@ pub struct SessionContextSignal {
 /// estimated from the stored events. A silent adapter -- a local server, a
 /// gateway, a CLI that never says how full its window is -- reports no count,
 /// and on the reported number alone those sessions grew until the provider
-/// truncated them. The estimate is a lower bound, so it can only bring
-/// compaction forward to where the transcript itself already reached the
-/// share. A switched-off setting, an unknown window (a share of an unknown
+/// truncated them. A switched-off setting, an unknown window (a share of an unknown
 /// window is not a measurement), or a compaction that already rewrote the
 /// transcript since the last reading still decline. The catalog fills in when
 /// the reading named tokens but not a size.
@@ -397,23 +699,44 @@ pub fn should_auto_compact_session_with_transcript(
         .and_then(|reading| reading.model_context_window)
         .filter(|window| *window > 0)
         .or(catalog_window.filter(|window| *window > 0));
-    // The transcript is a lower bound of the next prompt: it leaves out the
-    // system prompt and the provider's own tools. Taking the larger of the two
-    // fills therefore never compacts earlier than the session itself has
-    // reached the share, and it keeps a silent adapter from never compacting.
-    let carried = transcript_characters.unwrap_or(carried);
-    let estimated = (carried > 0).then(|| estimated_tokens(carried));
-    let input_tokens = match (measured, estimated) {
-        (Some(measured), Some(estimated)) => Some(measured.max(estimated)),
-        (measured, estimated) => measured.or(estimated),
-    };
-    auto_compaction_fill(
-        input_tokens,
+    compaction_fill_with_replay(
+        measured,
         reading.as_ref().and_then(|reading| reading.output_tokens),
+        transcript_characters.unwrap_or(carried),
         window,
         percent,
     )
     .is_some()
+}
+
+#[test]
+fn session_compaction_does_not_add_previous_output_to_the_replayed_history() {
+    let mut signals = vec![SessionContextSignal {
+        provider_id: None,
+        model_id: None,
+        reading: Some(AutoCompactReading {
+            input_tokens: Some(20_000),
+            output_tokens: Some(8_000),
+            model_context_window: Some(32_000),
+        }),
+        session_compaction: false,
+        characters: 115_000,
+    }];
+    let needs_compaction = |signals: &[SessionContextSignal]| {
+        should_auto_compact_session(92, "fixture", None, None, signals)
+    };
+    // The completed provider request occupied 28,000 tokens. The transcript
+    // that already includes its answer estimates 28,750. Both are under 92%.
+    assert!(!needs_compaction(&signals));
+    signals[0].reading.as_mut().unwrap().output_tokens = Some(10_000);
+    assert!(needs_compaction(&signals));
+    signals[0].reading.as_mut().unwrap().input_tokens = None;
+    assert!(!needs_compaction(&signals));
+    signals[0].characters = 119_000;
+    assert!(needs_compaction(&signals));
+    signals[0].characters = 0;
+    signals[0].reading.as_mut().unwrap().output_tokens = Some(30_000);
+    assert!(needs_compaction(&signals));
 }
 
 pub fn signal_is_for_other_model(

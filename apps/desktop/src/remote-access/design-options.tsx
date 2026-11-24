@@ -19,7 +19,7 @@ import {
   ShieldCheck,
   SquareTerminal,
   WifiOff,
-} from "../../../../packages/ui/node_modules/lucide-react";
+} from "@gyro-dev/ui/icons";
 import {
   SettingsEmptyState,
   SettingsGroup,

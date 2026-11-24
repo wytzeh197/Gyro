@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { Copy, Plus, RotateCcw, Trash2, X } from "./icons";
 import {
   COUNCIL_MAX_SEATS,
   councilPresetProblem,
@@ -17,7 +17,7 @@ import {
 import {
   SettingsGroup,
   SettingsRow,
-  SettingsSelect,
+  SettingsChoice,
   SettingsSwitch,
 } from "./settings-controls";
 import type {
@@ -211,51 +211,47 @@ function SeatSelect({
   label: string;
   onChange: (providerId: string, modelId: string | null) => void;
 }) {
+  const options = providers
+    .filter((provider) => !exclude?.includes(provider.id))
+    .map((provider) => {
+      const fallback = providerDefaultModel(provider);
+      return {
+        id: provider.id,
+        label: provider.authStatus === "connected"
+          ? provider.displayName
+          : `${provider.displayName} (not connected)`,
+        items: [
+          {
+            value: `${provider.id}${SEAT_SEPARATOR}`,
+            label: fallback
+              ? `${fallback.displayName} (default)`
+              : `${provider.displayName} default`,
+          },
+          ...provider.models
+            .filter((model) =>
+              model.id !== fallback?.id &&
+              ((provider.id === providerId && model.id === modelId) ||
+                !isPickerHiddenModel(provider.id, model.id)),
+            )
+            .map((model) => ({
+              value: `${provider.id}${SEAT_SEPARATOR}${model.id}`,
+              label: model.displayName,
+            })),
+        ],
+      };
+    });
   return (
     <span className="gyro-council-seat-pick">
-    <ProviderLogo providerId={providerId as ProviderId} />
-    <SettingsSelect
-      aria-label={label}
-      onChange={(event) => {
-        const [nextProvider = "", nextModel = ""] =
-          event.target.value.split(SEAT_SEPARATOR);
-        onChange(nextProvider, nextModel || null);
-      }}
-      value={`${providerId}${SEAT_SEPARATOR}${modelId ?? ""}`}
-    >
-      {providers
-        .filter((provider) => !exclude?.includes(provider.id))
-        .map((provider) => {
-          const fallback = providerDefaultModel(provider);
-          const models = provider.models.filter(
-            (model) =>
-              (provider.id === providerId && model.id === modelId) ||
-              !isPickerHiddenModel(provider.id, model.id),
-          );
-          return (
-            <optgroup
-              key={provider.id}
-              label={`${provider.displayName}${
-                provider.authStatus === "connected" ? "" : " (not connected)"
-              }`}
-            >
-              <option value={`${provider.id}${SEAT_SEPARATOR}`}>
-                {fallback ? `${fallback.displayName} (default)` : `${provider.displayName} default`}
-              </option>
-              {models
-                .filter((model) => model.id !== fallback?.id)
-                .map((model) => (
-                  <option
-                    key={model.id}
-                    value={`${provider.id}${SEAT_SEPARATOR}${model.id}`}
-                  >
-                    {model.displayName}
-                  </option>
-                ))}
-            </optgroup>
-          );
-        })}
-    </SettingsSelect>
+      <ProviderLogo providerId={providerId as ProviderId} />
+      <SettingsChoice
+        aria-label={label}
+        onValueChange={(value) => {
+          const [nextProvider = "", nextModel = ""] = value.split(SEAT_SEPARATOR);
+          onChange(nextProvider, nextModel || null);
+        }}
+        value={`${providerId}${SEAT_SEPARATOR}${modelId ?? ""}`}
+        options={options}
+      />
     </span>
   );
 }

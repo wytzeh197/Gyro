@@ -13,9 +13,11 @@ pub(crate) use gyro_core::provider_runtime::runners::ollama::{
 use gyro_core::CapabilityId;
 #[cfg(test)]
 use gyro_core::CapabilityResponse;
+#[cfg(test)]
 use gyro_core::CapabilityRunMode;
 #[cfg(test)]
 use uuid::Uuid;
+#[cfg(test)]
 pub(crate) fn ollama_compatibility_catalog(
     mode: CapabilityRunMode,
     prefix: Option<&str>,

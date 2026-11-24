@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { syncNativeAppearance } from "./native-appearance";
+import { syncNativeAppearance, syncNativeMaterial } from "./native-appearance";
+import { fontStack } from "@gyro-dev/ui/theme";
 import {
   applyAppearancePreferences,
   interfaceScales,
@@ -35,8 +36,12 @@ export function useWorkbenchAppearance(preferences: WorkbenchPreferences) {
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false,
   );
   const appearance = useMemo(
-    () => ({ scale: interfaceScales[preferences.interfaceSize], reduceMotion }),
-    [preferences.interfaceSize, reduceMotion],
+    () => ({
+      scale: interfaceScales[preferences.interfaceSize],
+      reduceMotion,
+      codeFont: preferences.codeFont ? fontStack(preferences.codeFont, "code") : undefined,
+    }),
+    [preferences.interfaceSize, preferences.codeFont, reduceMotion],
   );
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -58,26 +63,22 @@ export function useWorkbenchAppearance(preferences: WorkbenchPreferences) {
   }, [themePreference]);
 
   useLayoutEffect(() => {
+    document.documentElement.dataset.reduceMotion = String(reduceMotion);
+  }, [reduceMotion]);
+
+  useLayoutEffect(() => {
     document.documentElement.dataset.theme = resolvedTheme;
-    document.documentElement.dataset.density = preferences.density;
-    applyAppearancePreferences(
+    syncNativeMaterial(preferences.windowMaterial);
+    const themeColor = applyAppearancePreferences(
       document.documentElement,
       preferences,
       resolvedTheme,
-    );
-    document.documentElement.style.setProperty(
-      "--gyro-user-main",
-      preferences.mainColor,
-    );
-    document.documentElement.style.setProperty(
-      "--gyro-user-secondary",
-      preferences.secondaryColor,
     );
     document
       .querySelector('meta[name="theme-color"]')
       ?.setAttribute(
         "content",
-        resolvedTheme === "light" ? "#f9f8f7" : "#1e1e1d",
+        themeColor ?? (resolvedTheme === "light" ? "#f9f8f7" : "#1e1e1d"),
       );
     try {
       window.localStorage.setItem(THEME_STORAGE_KEY, themePreference);
@@ -87,11 +88,7 @@ export function useWorkbenchAppearance(preferences: WorkbenchPreferences) {
   }, [
     resolvedTheme,
     themePreference,
-    preferences.density,
-    preferences.interfaceSize,
-    preferences.motionSpeed,
-    preferences.mainColor,
-    preferences.secondaryColor,
+    preferences,
   ]);
 
   return { resolvedTheme, reduceMotion, appearance };

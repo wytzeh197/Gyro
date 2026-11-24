@@ -1,5 +1,5 @@
 import { Folder } from "./workspace-folder-icons";
-import { Check, FileText, ShieldCheck, X } from "lucide-react";
+import { Check, FileText, ShieldCheck, X } from "./icons";
 import { useId, type ReactNode } from "react";
 
 type ApprovalStatus =

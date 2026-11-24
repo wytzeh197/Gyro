@@ -160,6 +160,12 @@ assert.equal(
   );
 }
 
+assert.deepEqual(
+  diffHunks("@@ -1,2 +1,2 @@\n-before\n+after\n \n")[0].lines.at(-1),
+  { text: " ", kind: "context" },
+  "A trailing blank context line belongs to the recorded hunk",
+);
+
 assert.equal(shouldUsePlainDiff("short\n", "also short\n"), false);
 
 {

@@ -10,9 +10,10 @@ import {
 export function checkChatStyles() {
   const failures = [];
   const sources = readUiStyleSources();
-  const file = sources.find((file) => file.path.endsWith("/chat.css"));
-  if (!file)
-    return ["Chat styling must have one owner: packages/ui/src/chat.css."];
+  const owners = new Set(["chat.css", "chat-composer.css", "chat-companion.css"]);
+  const chatFiles = sources.filter((file) => owners.has(file.path.split("/").at(-1)));
+  if (chatFiles.length !== owners.size)
+    return ["Chat styling requires the transcript, composer, and companion stylesheets."];
   const policyTokens = [
     "content-width",
     "gutter",
@@ -38,12 +39,12 @@ export function checkChatStyles() {
   let rules = 0;
   for (const source of sources) {
     const tree = postcss.parse(source.source, { from: source.path });
-    const isChat = source === file;
+    const isChat = chatFiles.includes(source);
     tree.walkRules((rule) => {
       if (isChat) rules++;
       else if (chatSelectorPattern.test(rule.selector))
         failures.push(
-          `${source.path}:${rule.source.start.line}: chat selectors belong in chat.css.`,
+          `${source.path}:${rule.source.start.line}: chat selectors belong in a chat stylesheet.`,
         );
     });
     tree.walkDecls((declaration) => {
@@ -139,7 +140,7 @@ export function checkChatStyles() {
       count: 0,
     },
   ];
-  postcss.parse(file.source).walkRules((rule) => {
+  postcss.parse(chatFiles.map(({ source }) => source).join("\n")).walkRules((rule) => {
     for (const selector of postcss.list.comma(rule.selector)) {
       const subject = chatSelectorSubject(selector);
       if (subject.includes("::")) continue;

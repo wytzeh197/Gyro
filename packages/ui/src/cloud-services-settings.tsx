@@ -1,9 +1,11 @@
-import { CloudUpload, Laptop, Layers, Link, Sparkles } from "lucide-react";
+import { Input, Textarea } from "./primitives/controls";
+import { Button } from "./primitives/button";
+import { CloudUpload, Laptop, Layers, Link, Sparkles } from "./icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   SettingsGroup,
   SettingsRow,
-  SettingsSelect,
+  SettingsChoice,
 } from "./settings-controls";
 import "./cloud-services-settings.css";
 import {
@@ -96,14 +98,14 @@ export function CloudReportLinkRow({
         }
         value={state.label}
       />
-      <button
+      <Button
         type="button"
-        className="gyro-secondary-button"
+        variant="outline"
         disabled={busy || !state.revocable}
         onClick={onRevoke}
       >
         Revoke link
-      </button>
+      </Button>
     </div>
   );
 }
@@ -173,14 +175,14 @@ export function CloudMemoryDraftCard({
           ) : (
             <p>Read the complete draft to load its proposed text.</p>
           )}
-          <button
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             disabled={busy}
             onClick={onRead}
           >
             Read draft
-          </button>
+          </Button>
         </>
       ) : null}
       <h3>Source revisions used for this extraction</h3>
@@ -214,28 +216,28 @@ export function CloudMemoryDraftCard({
       ) : null}
       <div className="gyro-settings-transfer-actions">
         {state.readable ? (
-          <button
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             disabled={busy || !canReview || !reviewed}
             onClick={() => onReview("accept")}
           >
             Accept reviewed draft
-          </button>
+          </Button>
         ) : null}
         {onRefreshRequest ? (
-          <button
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             disabled={busy}
             onClick={onRefreshRequest}
           >
             Check existing request & refresh drafts
-          </button>
+          </Button>
         ) : null}
-        <button
+        <Button
           type="button"
-          className="gyro-secondary-button"
+          variant="outline"
           disabled={
             busy ||
             !["prepared", "conflict", "proposal"].includes(
@@ -245,7 +247,7 @@ export function CloudMemoryDraftCard({
           onClick={() => onReview("reject")}
         >
           Reject draft
-        </button>
+        </Button>
       </div>
       {proposal.status === "prepared" ? (
         <p>
@@ -588,9 +590,9 @@ export function CloudServicesSettings({
                       </p>
                     ) : null}
                   </details>
-                  <button
+                  <Button
                     type="button"
-                    className="gyro-secondary-button"
+                    variant="outline"
                     disabled={busy}
                     onClick={(event) => {
                       sourceReaderTrigger.current = event.currentTarget;
@@ -598,7 +600,7 @@ export function CloudServicesSettings({
                     }}
                   >
                     Read source revision
-                  </button>
+                  </Button>
                 </>
               ) : (
                 <p role="alert">
@@ -702,9 +704,9 @@ export function CloudServicesSettings({
         </details>
         {blockFeedback("sync")}
         <div className="gyro-settings-transfer-actions">
-          <button
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             disabled={busy}
             onClick={() =>
               void perform("sync", async () => {
@@ -720,10 +722,10 @@ export function CloudServicesSettings({
             {loaded.local
               ? "Refresh chats and backups"
               : "Show chats and backups"}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             disabled={busy}
             onClick={() =>
               void perform("sync", async () => {
@@ -738,7 +740,7 @@ export function CloudServicesSettings({
             }
           >
             Retry queued uploads
-          </button>
+          </Button>
         </div>
         {loaded.local && !localChats.length ? (
           <p>
@@ -755,25 +757,22 @@ export function CloudServicesSettings({
         {localChats.length ? (
           <label className="gyro-cloud-text-field">
             Local chat{" "}
-            <SettingsSelect
+            <SettingsChoice
               aria-label="Chat to review for Cloud sync"
               value={selected}
               disabled={busy}
-              onChange={(e) => setSelected(e.currentTarget.value)}
-            >
-              <option value="">Choose a chat</option>
-              {localChats.map((chat) => (
-                <option key={chat.localId} value={chat.localId}>
-                  {chat.title}
-                </option>
-              ))}
-            </SettingsSelect>
+              onValueChange={setSelected}
+              options={[
+                { value: "", label: "Choose a chat" },
+                ...localChats.map((chat) => ({ value: chat.localId, label: chat.title })),
+              ]}
+            />
           </label>
         ) : null}
         <div className="gyro-settings-transfer-actions">
-          <button
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             disabled={busy || !selected}
             onClick={() =>
               void perform("sync", async () => {
@@ -788,10 +787,10 @@ export function CloudServicesSettings({
             }
           >
             Review selected chat
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             disabled={busy}
             onClick={() =>
               void perform("sync", async () => {
@@ -806,10 +805,10 @@ export function CloudServicesSettings({
             }
           >
             Review appearance settings
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             disabled={busy}
             onClick={() =>
               void perform("sync", async () => {
@@ -824,7 +823,7 @@ export function CloudServicesSettings({
             }
           >
             Choose an attachment to review
-          </button>
+          </Button>
         </div>
         {preview ? (
           <div>
@@ -875,9 +874,9 @@ export function CloudServicesSettings({
               I reviewed this selected content
             </label>
             <div className="gyro-settings-transfer-actions">
-              <button
+              <Button
                 type="button"
-                className="gyro-primary-button"
+                size="md"
                 disabled={busy || !reviewed}
                 onClick={() =>
                   void perform("sync", async () => {
@@ -907,14 +906,14 @@ export function CloudServicesSettings({
                 {preview.kind === "restore-settings"
                   ? "Apply reviewed appearance"
                   : "Upload reviewed content"}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 onClick={() => setPreview(undefined)}
               >
                 Discard selection
-              </button>
+              </Button>
             </div>
           </div>
         ) : null}
@@ -956,18 +955,18 @@ export function CloudServicesSettings({
               }
             />
             <div className="gyro-settings-transfer-actions">
-              <button
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 disabled={busy || !o.headRevisionId}
                 onClick={() => void perform("sync", () => readObject(o))}
               >
                 {o.kind === "report" ? "Read report" : "Restore separate copy"}
-              </button>
+              </Button>
               {o.kind === "report" && o.headRevisionId ? (
-                <button
+                <Button
                   type="button"
-                  className="gyro-secondary-button"
+                  variant="outline"
                   disabled={busy}
                   onClick={() =>
                     void perform("sync", async () => {
@@ -983,11 +982,11 @@ export function CloudServicesSettings({
                   }
                 >
                   Create report link for 7 days
-                </button>
+                </Button>
               ) : null}
-              <button
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 disabled={busy}
                 onClick={() =>
                   void perform("sync", async () => {
@@ -1003,10 +1002,10 @@ export function CloudServicesSettings({
                 }
               >
                 Version history
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 disabled={busy}
                 onClick={() =>
                   void perform("sync", async () => {
@@ -1020,7 +1019,7 @@ export function CloudServicesSettings({
                 }
               >
                 {o.pinned ? "Unpin Cloud object" : "Protect from cleanup"}
-              </button>
+              </Button>
             </div>
             {versions[o.objectId]?.map((version) => (
               <div key={String(version.revisionId)}>
@@ -1028,9 +1027,9 @@ export function CloudServicesSettings({
                   {new Date(String(version.createdAt)).toLocaleString()}{" "}
                   {version.conflict ? "· preserved conflict copy" : ""}
                 </p>
-                <button
+                <Button
                   type="button"
-                  className="gyro-secondary-button"
+                  variant="outline"
                   disabled={busy}
                   onClick={() =>
                     void perform("sync", () =>
@@ -1042,10 +1041,10 @@ export function CloudServicesSettings({
                   }
                 >
                   Read this version separately
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="gyro-secondary-button"
+                  variant="outline"
                   disabled={busy || version.revisionId === o.headRevisionId}
                   onClick={() =>
                     void perform("sync", async () => {
@@ -1063,7 +1062,7 @@ export function CloudServicesSettings({
                   }
                 >
                   Restore as Cloud head
-                </button>
+                </Button>
               </div>
             ))}
           </div>
@@ -1078,9 +1077,9 @@ export function CloudServicesSettings({
               waits for you to press Send.
             </p>
             {archive.projectId ? (
-              <button
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 disabled={busy}
                 onClick={() =>
                   void perform("sync", async () => {
@@ -1090,7 +1089,7 @@ export function CloudServicesSettings({
                 }
               >
                 Open this Cloud project's memory
-              </button>
+              </Button>
             ) : null}
             {archive.messages.map((message, index) => (
               <p key={index}>
@@ -1101,7 +1100,7 @@ export function CloudServicesSettings({
               <>
                 <label className="gyro-cloud-text-field">
                   Reviewed context for the new local chat
-                  <textarea
+                  <Textarea
                     className="gyro-cloud-content-input"
                     rows={8}
                     aria-label="Reviewed context for a new local chat"
@@ -1117,9 +1116,9 @@ export function CloudServicesSettings({
                   Shorten long context before continuing; the full archive is
                   preserved. Existing local drafts are preserved too.
                 </p>
-                <button
+                <Button
                   type="button"
-                  className="gyro-primary-button"
+                  size="md"
                   disabled={
                     busy ||
                     !continuationContext.trim() ||
@@ -1140,7 +1139,7 @@ export function CloudServicesSettings({
                   }
                 >
                   Continue as new local chat
-                </button>
+                </Button>
               </>
             ) : null}
           </details>
@@ -1153,13 +1152,13 @@ export function CloudServicesSettings({
               permissions.
             </p>
             <pre className="gyro-cloud-read-only-text">{readOnlyReport}</pre>
-            <button
+            <Button
               type="button"
-              className="gyro-secondary-button"
+              variant="outline"
               onClick={() => setReadOnlyReport(undefined)}
             >
               Close report
-            </button>
+            </Button>
           </details>
         ) : null}
       </SettingsGroup>
@@ -1180,18 +1179,18 @@ export function CloudServicesSettings({
           backups. Anyone with the link can read the report until it expires or
           you revoke it. Downloaded copies remain with the recipient.
         </p>
-        <button
+        <Button
           type="button"
-          className="gyro-secondary-button"
+          variant="outline"
           disabled={busy}
           onClick={() => void perform("links", loadShares)}
         >
           Refresh report links
-        </button>
+        </Button>
         {link ? (
           <label className="gyro-cloud-text-field">
             New report link{" "}
-            <input
+            <Input
               className="gyro-cloud-content-input"
               aria-label="New report link"
               value={link}
@@ -1259,14 +1258,14 @@ export function CloudServicesSettings({
             and editing memory do not create a new AI request.
           </p>
         ) : null}
-        <button
+        <Button
           type="button"
-          className="gyro-secondary-button"
+          variant="outline"
           disabled={busy || !selected}
           onClick={() => void perform("memory", openMemory)}
         >
           Open selected project's memory
-        </button>
+        </Button>
         {projectId ? (
           <>
             <label>
@@ -1284,7 +1283,7 @@ export function CloudServicesSettings({
             </label>
             <label>
               Project memory{" "}
-              <textarea
+              <Textarea
                 className="gyro-cloud-content-input"
                 rows={6}
                 aria-label="Editable project memory"
@@ -1307,9 +1306,9 @@ export function CloudServicesSettings({
               </details>
             ) : null}
             <div className="gyro-settings-transfer-actions">
-              <button
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 disabled={busy}
                 onClick={() =>
                   void perform("memory", async () => {
@@ -1333,10 +1332,10 @@ export function CloudServicesSettings({
                 }
               >
                 Save edited memory
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 disabled={busy}
                 onClick={() =>
                   void perform("memory", async () => {
@@ -1350,10 +1349,10 @@ export function CloudServicesSettings({
                 {memoryDirty
                   ? "Reload saved memory (replaces unsaved edits)"
                   : "Refresh memory & drafts"}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 disabled={
                   busy ||
                   !selectedObjectIds.length ||
@@ -1402,11 +1401,11 @@ export function CloudServicesSettings({
                 {memoryMorePending
                   ? "Process next memory batch after review"
                   : "Prepare memory draft"}
-              </button>
+              </Button>
               {rescanSources.length ? (
-                <button
+                <Button
                   type="button"
-                  className="gyro-secondary-button"
+                  variant="outline"
                   disabled={
                     busy ||
                     !managedAvailable ||
@@ -1437,7 +1436,7 @@ export function CloudServicesSettings({
                   }
                 >
                   Review changes and rescan selected sources
-                </button>
+                </Button>
               ) : null}
             </div>
             {memoryRequestPending ? (
@@ -1525,16 +1524,16 @@ export function CloudServicesSettings({
                 </pre>
               )}
             </details>
-            <button
+            <Button
               type="button"
-              className="gyro-secondary-button"
+              variant="outline"
               onClick={() => {
                 setSourceReader(undefined);
                 sourceReaderTrigger.current?.focus();
               }}
             >
               Close source revision
-            </button>
+            </Button>
           </section>
         ) : null}
         {proposals.map((proposal, index) => (
@@ -1670,35 +1669,29 @@ export function CloudServicesSettings({
         </p>
         <label className="gyro-cloud-text-field">
           Task{" "}
-          <SettingsSelect
+          <SettingsChoice
             aria-label="Managed assistance task"
             value={task}
             disabled={busy || !managedAvailable || (jobAmbiguous && !job)}
-            onChange={(e) => {
-              setTask(e.currentTarget.value);
+            onValueChange={(value) => {
+              setTask(value);
               setJobRequest(id());
               setJobAmbiguous(false);
               setJob(undefined);
             }}
-          >
-            {CLOUD_TASKS.map((definition) => (
-              <option
-                key={definition.id}
-                value={definition.id}
-                disabled={
-                  !managedAvailable ||
-                  (definition.premium && plan !== "premium")
-                }
-              >
-                {definition.label}
-                {definition.premium && plan !== "premium" ? " · Premium" : ""}
-              </option>
-            ))}
-          </SettingsSelect>
+            options={CLOUD_TASKS.map((definition) => {
+              const unavailableOnPlan = definition.premium && plan !== "premium";
+              return {
+                value: definition.id,
+                label: definition.label + (unavailableOnPlan ? " · Premium" : ""),
+                disabled: !managedAvailable || unavailableOnPlan,
+              };
+            })}
+          />
         </label>
         <label className="gyro-cloud-text-field">
           Selected text to send{" "}
-          <textarea
+          <Textarea
             className="gyro-cloud-content-input"
             rows={6}
             aria-label="Selected context for managed assistance"
@@ -1737,9 +1730,9 @@ export function CloudServicesSettings({
           Check evidence or a passing Check result.
         </p>
         <div className="gyro-settings-transfer-actions">
-          <button
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             disabled={
               busy ||
               !taskAvailability.allowed ||
@@ -1767,10 +1760,10 @@ export function CloudServicesSettings({
             }
           >
             Send reviewed text
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             disabled={busy}
             onClick={() =>
               void perform("ai", async () => {
@@ -1780,11 +1773,11 @@ export function CloudServicesSettings({
             }
           >
             Recover latest request
-          </button>
+          </Button>
           {jobAmbiguous && !job ? (
-            <button
+            <Button
               type="button"
-              className="gyro-secondary-button"
+              variant="outline"
               disabled={busy}
               onClick={() =>
                 void perform("ai", async () => {
@@ -1807,12 +1800,12 @@ export function CloudServicesSettings({
               }
             >
               Recover request status without resubmitting
-            </button>
+            </Button>
           ) : null}
           {job?.id ? (
-            <button
+            <Button
               type="button"
-              className="gyro-secondary-button"
+              variant="outline"
               disabled={busy}
               onClick={() =>
                 void perform("ai", async () =>
@@ -1821,13 +1814,13 @@ export function CloudServicesSettings({
               }
             >
               Refresh request status
-            </button>
+            </Button>
           ) : null}
           {job &&
           ["succeeded", "failed", "cancelled"].includes(String(job.status)) ? (
-            <button
+            <Button
               type="button"
-              className="gyro-secondary-button"
+              variant="outline"
               disabled={busy}
               onClick={() => {
                 setJob(undefined);
@@ -1840,7 +1833,7 @@ export function CloudServicesSettings({
               }}
             >
               Prepare another reviewed request
-            </button>
+            </Button>
           ) : null}
         </div>
         {!job && !jobAmbiguous ? (
@@ -1879,14 +1872,14 @@ export function CloudServicesSettings({
             summary="Revoke a Cloud session without affecting local data"
           >
             {blockFeedback("devices")}
-            <button
+            <Button
               type="button"
-              className="gyro-secondary-button"
+              variant="outline"
               disabled={busy}
               onClick={() => void perform("devices", loadDevices)}
             >
               Refresh devices
-            </button>
+            </Button>
             {loaded.devices && !devices.length ? (
               <p>No registered Cloud devices were returned.</p>
             ) : null}
@@ -1906,9 +1899,9 @@ export function CloudServicesSettings({
                   }
                   value={device.revokedAt ? "Revoked" : "Registered"}
                 />
-                <button
+                <Button
                   type="button"
-                  className="gyro-secondary-button"
+                  variant="outline"
                   disabled={
                     busy || !!device.revokedAt || !cloudDeviceId(device)
                   }
@@ -1939,7 +1932,7 @@ export function CloudServicesSettings({
                   }
                 >
                   Revoke device
-                </button>
+                </Button>
               </div>
             ))}
           </SettingsGroup>
@@ -1950,9 +1943,9 @@ export function CloudServicesSettings({
             summary="Export or deliberately delete hosted data"
           >
             {blockFeedback("account")}
-            <button
+            <Button
               type="button"
-              className="gyro-secondary-button"
+              variant="outline"
               disabled={busy}
               onClick={() =>
                 void perform("account", async () => {
@@ -1966,7 +1959,7 @@ export function CloudServicesSettings({
               }
             >
               Export account data
-            </button>
+            </Button>
             <p>
               Cloud deletion leaves local chats and provider credentials on this
               Mac. Financial records may be retained separately under the
@@ -1974,16 +1967,16 @@ export function CloudServicesSettings({
             </p>
             <label className="gyro-cloud-text-field">
               Type DELETE CLOUD DATA to request deletion{" "}
-              <input
+              <Input
                 className="gyro-cloud-content-input"
                 aria-label="Cloud deletion confirmation"
                 value={deleteConfirmation}
                 onChange={(e) => setDeleteConfirmation(e.currentTarget.value)}
               />
             </label>
-            <button
+            <Button
               type="button"
-              className="gyro-secondary-button"
+              variant="outline"
               disabled={busy || deleteConfirmation !== "DELETE CLOUD DATA"}
               onClick={() =>
                 void perform("account", async () => {
@@ -1999,7 +1992,7 @@ export function CloudServicesSettings({
               }
             >
               Request Cloud deletion
-            </button>
+            </Button>
           </SettingsGroup>
         </>
       ) : null}

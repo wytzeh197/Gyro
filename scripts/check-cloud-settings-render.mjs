@@ -44,15 +44,36 @@ const compiled = await build({
   },
   logLevel: "silent",
 });
+// The task list lives in a popup. Capture the options passed to the real
+// control because closed popup content is absent from the server render.
+let managedTaskOptions = [];
+const jsxRuntime = requireUi("react/jsx-runtime");
+const recordTaskOptions = (create) => (type, props, ...rest) => {
+  if (props?.["aria-label"] === "Managed assistance task" && Array.isArray(props.options)) {
+    managedTaskOptions = props.options;
+  }
+  return create(type, props, ...rest);
+};
+const fixtureRequire = (name) =>
+  name === "react/jsx-runtime"
+    ? {
+        ...jsxRuntime,
+        jsx: recordTaskOptions(jsxRuntime.jsx),
+        jsxs: recordTaskOptions(jsxRuntime.jsxs),
+      }
+    : requireUi(name);
 const componentModule = { exports: {} };
 new Function("require", "module", "exports", compiled.outputFiles[0].text)(
-  requireUi,
+  fixtureRequire,
   componentModule,
   componentModule.exports,
 );
 const ui = componentModule.exports;
 const renderWarnings = [];
+const disabledBackupSwitch =
+  /<button\b(?=[^>]*\saria-label="Automatically back up chats")(?=[^>]*\sdisabled(?:[=\s]|>))[^>]*>/;
 const render = (Component, props = {}) => {
+  managedTaskOptions = [];
   const originalError = console.error;
   console.error = (...args) => {
     // Shared SettingsDisclosure runs a layout effect in the desktop app. SSR
@@ -91,12 +112,10 @@ const button = (html, label) => {
 };
 const isDisabled = (control) =>
   /\bdisabled(?:=""|="disabled")?(?:\s|$)/.test(control.attributes);
-const option = (html, value) => {
-  const match = [
-    ...html.matchAll(/<option\b([^>]*)>([\s\S]*?)<\/option>/g),
-  ].find((candidate) => candidate[1].includes(`value="${value}"`));
-  assert.ok(match, `Expected task option: ${value}`);
-  return { attributes: match[1], label: text(match[2]) };
+const option = (value) => {
+  const result = managedTaskOptions.find((candidate) => candidate.value === value);
+  assert.ok(result, `Expected task option: ${value}`);
+  return result;
 };
 let checks = 0;
 const check = (name, fn) => {
@@ -178,7 +197,7 @@ check(
     const content = text(html);
     assert.match(content, /Cloud is not enabled in this build/);
     assert.match(content, /local workspace and your own providers remain available/);
-    assert.match(html, /aria-label="Automatically back up chats"[^>]*disabled/);
+    assert.match(html, disabledBackupSwitch);
     assert.doesNotMatch(
       html,
       /role="progressbar"|Managed assistance task|Selected sync &amp; backups/,
@@ -237,7 +256,7 @@ check(
     );
     assert.ok(isDisabled(button(html, "Send reviewed text")));
     assert.ok(
-      isDisabled(option(html, "failure-explanation")),
+      option("failure-explanation").disabled,
       "Stale allowed=true cannot enable a new request",
     );
     assert.match(text(html), /offline/i);
@@ -470,9 +489,10 @@ check("sign-in uses labelled local controls and proof is concealed", () => {
 check("Plus and Premium offer only included managed task options", () => {
   for (const snapshot of [plus, premium]) {
     const html = render(ui.CloudSettings, { snapshot, actions });
+    assert.match(html, /aria-label="Managed assistance task"/);
     for (const task of ["memory-update", "check-plan", "failure-explanation"]) {
       assert.ok(
-        !isDisabled(option(html, task)),
+        !option(task).disabled,
         `${snapshot.plan} should include ${task}`,
       );
     }
@@ -482,7 +502,7 @@ check("Plus and Premium offer only included managed task options", () => {
       "check-comparison",
     ]) {
       assert.equal(
-        isDisabled(option(html, task)),
+        option(task).disabled,
         snapshot.plan === "plus",
         `${task} inclusion for ${snapshot.plan}`,
       );
@@ -962,7 +982,7 @@ check("app-only release shows Account and Cloud while blocking hosted controls",
   assert.doesNotMatch(billingHtml, /type="email"|Send sign-in email|Manage billing/);
   const cloudHtml = render(ui.CloudSettings, { snapshot, actions });
   assert.match(text(cloudHtml), /Cloud is not enabled in this build/);
-  assert.match(cloudHtml, /aria-label="Automatically back up chats"[^>]*disabled/);
+  assert.match(cloudHtml, disabledBackupSwitch);
   assert.doesNotMatch(cloudHtml, /type="email"|Send sign-in email|fixture-paid-period/);
   assert.equal(actionCalls, 0);
 });

@@ -14,6 +14,7 @@ pub mod retrieval;
 pub mod routing;
 pub mod spill;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -142,6 +143,12 @@ pub struct Config {
     /// Keep owned API message prefixes stable between bounded retirement checkpoints.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub stable_api_prefix: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub tool_recovery_feedback: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub checkpoint_recovery: bool,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub harness_routes: BTreeMap<String, HarnessRoute>,
     pub task_state: bool,
     pub repository_retrieval: bool,
     pub progress_detection: bool,
@@ -168,6 +175,9 @@ impl Default for Config {
             fresh_read_inline_bytes: 0,
             repeated_work_detection: false,
             stable_api_prefix: false,
+            tool_recovery_feedback: false,
+            checkpoint_recovery: false,
+            harness_routes: BTreeMap::new(),
             task_state: true,
             repository_retrieval: true,
             progress_detection: true,
@@ -184,7 +194,43 @@ const FRESH_READ_CAPABILITIES: &[&str] = &[
     "workspace.read_range",
     "workspace.read_editor",
 ];
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct HarnessRoute {
+    pub tool_recovery_feedback: bool,
+    pub checkpoint_recovery: bool,
+    pub stable_api_prefix: bool,
+}
+
 impl Config {
+    pub fn tool_feedback_for(&self, provider: &str) -> bool {
+        self.enabled
+            && harness_upgrade_provider(provider)
+            && self
+                .harness_routes
+                .get(provider)
+                .map_or(self.tool_recovery_feedback, |route| {
+                    route.tool_recovery_feedback
+                })
+    }
+
+    pub fn checkpoint_recovery_for(&self, provider: &str) -> bool {
+        self.enabled
+            && harness_upgrade_provider(provider)
+            && self
+                .harness_routes
+                .get(provider)
+                .map_or(self.checkpoint_recovery, |route| route.checkpoint_recovery)
+    }
+
+    pub fn stable_prefix_for(&self, provider: &str) -> bool {
+        self.enabled
+            && self
+                .harness_routes
+                .get(provider)
+                .map_or(self.stable_api_prefix, |route| route.stable_api_prefix)
+    }
+
     pub fn policies(&self) -> bool {
         self.enabled && self.experimental
     }
@@ -217,6 +263,11 @@ impl Config {
         }
     }
 }
+
+fn harness_upgrade_provider(provider: &str) -> bool {
+    matches!(provider, "openai" | "anthropic")
+        || (provider != "ollama" && controls(provider).owns_requests)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,6 +275,7 @@ mod tests {
     fn defaults_preserve_selection() {
         assert!(!Config::default().policies());
         assert!(!Config::default().compact_tool_catalog);
+        assert!(!Config::default().focused_workspace_catalog);
         assert!(!Config::default().recoverable_evidence);
         assert!(!Config::default().retain_tool_catalog);
         assert!(!Config::default().tight_evidence);
@@ -249,6 +301,7 @@ mod tests {
         // An installed older build shares this config and rejects unknown keys.
         let saved = serde_json::to_value(Config::default()).unwrap();
         for key in [
+            "focusedWorkspaceCatalog",
             "tightEvidence",
             "batchReads",
             "compactCliCatalog",

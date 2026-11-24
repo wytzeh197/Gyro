@@ -32,7 +32,12 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 // the longest silence tolerated between bytes, not a limit on the whole answer.
 const CHAT_IDLE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const MAX_DISCOVERED_MODELS: usize = 500;
+const MAX_ERROR_BODY_BYTES: u64 = 8192;
 const MAX_ERROR_BODY_CHARS: usize = 400;
+
+#[derive(Debug, thiserror::Error)]
+#[error("provider returned HTTP 400: {0}")]
+pub(crate) struct OpenAiCompatContextOverflow(String);
 
 /// Finishing generation and receiving its final usage are separate events.
 /// A private transport cancellation lets us bound the receipt phase without
@@ -307,12 +312,13 @@ where
     F: FnMut(&str),
     U: FnMut(UsageTokens),
 {
-    openai_compat_tool_chat_ref(&request, cancellation, on_delta, on_usage)
+    openai_compat_tool_chat_ref(&request, cancellation, false, on_delta, on_usage)
 }
 
 pub(crate) fn openai_compat_tool_chat_ref<F, U>(
     request: &OpenAiCompatChatRequest<'_>,
     cancellation: &CancellationToken,
+    preserve_whitespace: bool,
     on_delta: F,
     mut on_usage: U,
 ) -> Result<OpenAiCompatChatResponse>
@@ -326,6 +332,7 @@ where
             openai_compat_tool_chat_once_with_updates(
                 request,
                 cancellation,
+                preserve_whitespace,
                 emit,
                 &mut on_usage,
                 recover_openrouter_usage,
@@ -366,6 +373,7 @@ where
     openai_compat_tool_chat_once_with_updates(
         request,
         cancellation,
+        false,
         on_delta,
         |_| {},
         recover_usage,
@@ -375,6 +383,7 @@ where
 fn openai_compat_tool_chat_once_with_updates<F, U, R>(
     request: &OpenAiCompatChatRequest<'_>,
     cancellation: &CancellationToken,
+    preserve_whitespace: bool,
     mut on_delta: F,
     mut on_usage: U,
     recover_usage: R,
@@ -425,7 +434,10 @@ where
             Err(ureq::Error::Status(400, response)) => {
                 observation.as_mut().unwrap().rejected();
                 let mut body = String::new();
-                let _ = response.into_reader().take(8192).read_to_string(&mut body);
+                let _ = response
+                    .into_reader()
+                    .take(MAX_ERROR_BODY_BYTES)
+                    .read_to_string(&mut body);
                 // Preserve explicitly selected effort and native tools. A generic
                 // 400 is not evidence that either option is unsupported.
                 if include_usage
@@ -644,7 +656,7 @@ where
         return Err(anyhow!(OPENAI_COMPAT_CANCELLED_MESSAGE));
     }
 
-    let content = state.content.trim().to_string();
+    let has_content = !state.content.trim().is_empty();
     let reasoning_content = state.reasoning_content.clone();
     let input_tokens = state.input_tokens;
     let output_tokens = state.output_tokens;
@@ -674,13 +686,18 @@ where
     let truncated = state.truncated;
     // A cap that cut tool calls is unsafe to execute. Text alone is an
     // unfinished answer: the runner joins a continuation instead of failing.
-    if truncated && (state.incomplete_tools || content.is_empty()) {
+    if truncated && (state.incomplete_tools || !has_content) {
         return Err(anyhow!(
             "the provider reached its output token limit; no tool calls from this response were executed"
         ));
     }
+    let content = if preserve_whitespace {
+        std::mem::take(&mut state.content)
+    } else {
+        state.content.trim().to_owned()
+    };
     let tool_calls = state.tool_calls()?;
-    if content.is_empty() && tool_calls.is_empty() {
+    if !has_content && tool_calls.is_empty() {
         return Err(anyhow!("the provider finished without a text response"));
     }
     Ok(OpenAiCompatChatResponse {
@@ -886,14 +903,27 @@ fn agent() -> ureq::Agent {
 fn openai_compat_http_error(error: ureq::Error) -> anyhow::Error {
     match error {
         ureq::Error::Status(status, response) => {
-            let detail = response
-                .into_string()
-                .ok()
-                .map(|body| error_message_from_body(&body))
-                .filter(|message| !message.is_empty());
-            match detail {
-                Some(detail) => anyhow!("provider returned HTTP {status}: {detail}"),
-                None => anyhow!("provider returned HTTP {status}"),
+            let mut body = String::new();
+            let _ = response
+                .into_reader()
+                .take(MAX_ERROR_BODY_BYTES)
+                .read_to_string(&mut body);
+            let envelope = serde_json::from_str::<serde_json::Value>(&body).ok();
+            let detail = error_message_from_body(&body, envelope.as_ref());
+            if status == 400
+                && envelope.is_some_and(|value| value["error"]["code"] == "context_length_exceeded")
+            {
+                return OpenAiCompatContextOverflow(if detail.is_empty() {
+                    "The request exceeds the model's context window.".into()
+                } else {
+                    detail
+                })
+                .into();
+            }
+            if detail.is_empty() {
+                anyhow!("provider returned HTTP {status}")
+            } else {
+                anyhow!("provider returned HTTP {status}: {detail}")
             }
         }
         ureq::Error::Transport(error) => {
@@ -905,9 +935,8 @@ fn openai_compat_http_error(error: ureq::Error) -> anyhow::Error {
 /// Pull the human-readable part out of an OpenAI-style error envelope. Keys are
 /// never echoed back: the body came from the provider, but a misconfigured
 /// gateway can reflect request headers into its errors.
-fn error_message_from_body(body: &str) -> String {
-    let message = serde_json::from_str::<serde_json::Value>(body)
-        .ok()
+fn error_message_from_body(body: &str, envelope: Option<&serde_json::Value>) -> String {
+    let message = envelope
         .and_then(|value| {
             value
                 .get("error")
@@ -918,9 +947,8 @@ fn error_message_from_body(body: &str) -> String {
                         .or_else(|| error.as_str())
                 })
                 .or_else(|| value.get("message").and_then(|message| message.as_str()))
-                .map(str::to_string)
         })
-        .unwrap_or_else(|| body.to_string());
+        .unwrap_or(body);
     let collapsed = message.split_whitespace().collect::<Vec<_>>().join(" ");
     collapsed.chars().take(MAX_ERROR_BODY_CHARS).collect()
 }

@@ -6,7 +6,15 @@ const COMMIT_QUESTION_EXAMPLE: &str = r#"
 GYRO_QUESTIONS: {"questions":[{"question":"Should I commit these changes?","options":[{"label":"Commit changes","detail":"Create a local commit of this task's changes."},{"label":"Review first","detail":"Show the diff and proposed commit message before committing."},{"label":"Not now","detail":"Leave the changes uncommitted."}]}]}
 "#;
 
-const COMMIT_SUGGESTION_INSTRUCTION: &str = "After completing and verifying requested edits, use fresh gyro_workspace_git_status and scoped diffs to confirm this task's uncommitted changes. Summarize the result, checks, and proposed commit scope, then ask 'Should I commit these changes?' through the existing question card: Commit changes (local only), Review first, or Not now. Skip this offer for read-only, failed, or unfinished work, clean or non-Git workspaces, conflicts, or others' changes. Honor prior authorization without asking again; respect refusals and do not repeat declined or skipped offers for the same changes. Delegated sub-agents report to their parent instead. Review first means show the diff and proposed message, then wait for commit confirmation. Not now, skipping, dismissal, and silence never authorize committing. After approval, recheck status and diffs, preserve unrelated staged and unstaged changes, commit only the agreed scope through available tools and existing approval policy, and confirm the resulting commit. Ask if the scope cannot be safely separated. A local commit needs no GitHub sign-in; connection or commit approval never authorizes push, PR, merge, or release. Only check gyro_github_status for a separately requested GitHub action.";
+const COMMIT_SUGGESTION_INSTRUCTION: &str = concat!(
+    "After verified requested edits, confirm this task's uncommitted changes with fresh gyro_workspace_git_status and scoped diffs. ",
+    "Summarize results, checks and scope. Ask 'Should I commit these changes?' in a question card: Commit changes (local only), Review first, or Not now. ",
+    "Skip for read-only, failed, unfinished, clean, non-Git or conflicted work and others' changes. Delegates report to their parent. ",
+    "Honor prior authorization and refusals. Offer once per change. Review first shows the diff and proposed message, then waits for approval. ",
+    "Not now, skipping, dismissal and silence leave changes uncommitted. Before an approved commit, recheck status and diff, preserve unrelated staged and unstaged changes, and commit only the agreed scope. ",
+    "Confirm the commit. Ask if scope is unclear. Local commits need no GitHub sign-in. Push, PR, merge and release need separate authorization. ",
+    "Use gyro_github_status only for a separately requested GitHub action.",
+);
 
 pub(super) fn guidance(
     request: &ProviderChatRequest,

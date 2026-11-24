@@ -78,6 +78,8 @@ struct Run {
     missing_reports: u32,
     #[serde(default)]
     last_progress: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    active_turn_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_request: Option<ProviderChatRequest>,
 }
@@ -98,6 +100,7 @@ impl Run {
             reason: String::new(),
             missing_reports: 0,
             last_progress: String::new(),
+            active_turn_id: None,
             next_request: None,
         }
     }
@@ -132,12 +135,23 @@ impl Run {
         self.reason = clean(&reason.into());
         self.next_request = None;
     }
-    /// Decide without a second model call. Missing reports get one chance to
-    /// supply a checkpoint; repeated empty or unchanged reports stop the run.
-    fn after_response(&mut self, response: &ProviderChatResponse) {
-        if let Ok(tokens) = serde_json::from_value::<UsageTokens>(
-            response.assistant_event.payload["turnTokens"].clone(),
-        ) {
+    fn settle_turn_usage(
+        &mut self,
+        store: &SessionStore,
+        session: Uuid,
+        response: Option<&ProviderChatResponse>,
+    ) -> Result<(), String> {
+        let Some(turn) = self.active_turn_id else {
+            return Ok(());
+        };
+        let tokens = store
+            .task_usage_tokens(session, turn)
+            .map_err(to_string)?
+            .or_else(|| {
+                let tokens = response?.assistant_event.payload.get("turnTokens")?;
+                serde_json::from_value::<UsageTokens>(tokens.clone()).ok()
+            });
+        if let Some(tokens) = tokens {
             self.new_tokens = self
                 .new_tokens
                 .saturating_add(gyro_core::call_ceiling_tokens(
@@ -146,6 +160,33 @@ impl Run {
                     Some(tokens.output_tokens),
                 ));
         }
+        self.active_turn_id = None;
+        Ok(())
+    }
+
+    fn settle_after_restart(&mut self, store: &SessionStore, session: Uuid) {
+        if self.active_turn_id.is_none() && self.status == "queued" {
+            self.active_turn_id = self
+                .next_request
+                .as_ref()
+                .filter(|request| Uuid::parse_str(&request.session_id).ok() == Some(session))
+                .and_then(|request| request.turn_id.as_deref())
+                .and_then(|turn| Uuid::parse_str(turn).ok());
+        }
+        if let Err(error) = self.settle_turn_usage(store, session, None) {
+            eprintln!(
+                "Could not account for the interrupted goal turn: {}",
+                clean(&error)
+            );
+        }
+        if matches!(self.status.as_str(), "running" | "queued") {
+            self.stop("paused", "Gyro restarted with unfinished goal work. Review the saved checkpoint before resuming; uncertain actions were not replayed.");
+        }
+    }
+
+    /// Decide without a second model call. Missing reports get one chance to
+    /// supply a checkpoint; repeated empty or unchanged reports stop the run.
+    fn after_response(&mut self, response: &ProviderChatResponse) {
         let payload = &response.assistant_event.payload;
         if payload.get("questions").is_some() {
             self.stop(
@@ -387,29 +428,33 @@ pub(super) fn run(
 ) -> Result<ProviderChatResponse, String> {
     let store = open_store()?;
     let session = parse_uuid(&request.session_id)?;
+    let lease = ProviderSessionLease::for_run(&store, session).map_err(to_string)?;
     let events = store.read_goal_events(session).map_err(to_string)?;
     let goal = session_goal::stored_or_unsaved_goal(&events, request.goal.clone());
     if let Some(expected) = expected_run {
-        if !latest_event(&events)
+        let queued = latest_event(&events)
             .and_then(stored_run)
-            .is_some_and(|run| {
-                run.id == expected
-                    && run.status == "queued"
-                    && run
-                        .next_request
-                        .as_ref()
-                        .is_some_and(|next| next.turn_id == request.turn_id)
+            .filter(|run| {
+                run.id == expected && goal.as_ref().is_some_and(|goal| goal.status == "active")
             })
-            || !goal.as_ref().is_some_and(|g| g.status == "active")
-        {
+            .ok_or_else(|| "the saved goal continuation is no longer queued".to_string())?;
+        let Some(recovered) = recoverable_request(&store, session, &queued)?
+            .filter(|next| next.turn_id == request.turn_id)
+        else {
             return Err("the saved goal continuation is no longer queued".into());
-        }
+        };
+        request = recovered;
     }
     if request.mode != ChatMode::Normal
         || (expected_run.is_none() && normal_chat_requests_plan(&request.message))
         || !goal.as_ref().is_some_and(|g| g.status == "active")
     {
-        return turn_timing::run_timed_provider_chat(app, request, UsageOrigin::Chat);
+        return turn_timing::run_timed_provider_chat_in_lease(
+            app,
+            request,
+            UsageOrigin::Chat,
+            &lease,
+        );
     }
     let goal = goal.unwrap();
     // A failed frontend goal save still receives a durable outcome before work.
@@ -456,7 +501,6 @@ pub(super) fn run(
     run.goal_version =
         session_goal::goal_revision(&store.read_goal_events(session).map_err(to_string)?);
     run.limits.validate()?;
-    let lease = ProviderSessionLease::for_run(&store, session).map_err(to_string)?;
     let control = app
         .state::<ProviderCancellationManager>()
         .flags
@@ -499,6 +543,14 @@ pub(super) fn run(
         }
         run.status = "running".into();
         run.next_request = None;
+        let turn = request
+            .turn_id
+            .as_deref()
+            .map(parse_uuid)
+            .transpose()?
+            .unwrap_or_else(Uuid::new_v4);
+        request.turn_id = Some(turn.to_string());
+        run.active_turn_id = Some(turn);
         let event = persist(&store, session, &goal.text, &run)?;
         if event.is_none() {
             return last_response.ok_or_else(|| "the goal changed before continuation".into());
@@ -512,12 +564,6 @@ pub(super) fn run(
             *control.efficiency_checkpoint.lock().map_err(to_string)? = None;
             *control.timeline.lock().map_err(to_string)? = Default::default();
             control.next_event_sequence.store(0, Ordering::SeqCst);
-            let turn = request
-                .turn_id
-                .as_deref()
-                .map(parse_uuid)
-                .transpose()?
-                .unwrap();
             let user = store
                 .append_user_turn_message_with_turn_id(
                     session,
@@ -534,8 +580,9 @@ pub(super) fn run(
             app.clone(),
             request.clone(),
             UsageOrigin::Chat,
-            Some(&lease),
+            &lease,
         );
+        let usage_result = run.settle_turn_usage(&store, session, result.as_ref().ok());
         match result {
             Err(error) => {
                 run.stop(
@@ -557,6 +604,11 @@ pub(super) fn run(
             Ok(response) => {
                 if control.cancellation.is_cancelled() {
                     run.stop("paused", provider_stop_message(&app, &request.session_id));
+                } else if let Err(error) = usage_result {
+                    run.stop(
+                        "paused",
+                        format!("Gyro could not account for the last goal turn: {error}"),
+                    );
                 } else {
                     run.after_response(&response);
                 }
@@ -599,6 +651,7 @@ fn recoverable_request(
     run: &Run,
 ) -> Result<Option<ProviderChatRequest>, String> {
     if run.status != "queued"
+        || run.active_turn_id.is_some()
         || run.limits.validate().is_err()
         || run.dispatch_limit(chrono::Utc::now()).is_some()
     {
@@ -619,13 +672,27 @@ fn recoverable_request(
     let (status, unfinished) = store
         .provider_turn_status_for_dispatch(session, turn)
         .map_err(to_string)?;
-    if status.is_some() || unfinished {
+    if status.is_some()
+        || unfinished
+        || store
+            .task_usage_tokens(session, turn)
+            .map_err(to_string)?
+            .is_some()
+    {
         return Ok(None);
     }
     request.full_access = false;
     request.require_command_approval = true;
     request.require_file_edit_approval = true;
     Ok(Some(request))
+}
+
+fn interrupted_run(events: &[SessionEvent]) -> Option<(String, Run)> {
+    let goal = session_goal::stored_session_goal(events).filter(|goal| goal.status == "active")?;
+    let run = latest_event(events).and_then(stored_run)?;
+    (matches!(run.status.as_str(), "running" | "queued")
+        || (matches!(run.status.as_str(), "paused" | "blocked") && run.active_turn_id.is_some()))
+    .then_some((goal.text, run))
 }
 
 pub(super) fn pause(store: &SessionStore, session: Uuid) -> Result<SessionEvent, String> {
@@ -653,44 +720,62 @@ pub(super) fn recover(app: tauri::AppHandle) {
             let mut queued = Vec::new();
             for session in store.list_sessions().map_err(to_string)? {
                 let events = store.read_goal_events(session.id).map_err(to_string)?;
-                let Some(event) = latest_event(&events) else { continue; };
-                let Some(goal) = session_goal::stored_session_goal(&events).filter(|g| g.status == "active") else { continue; };
-                let Some(mut run) = stored_run(event).filter(|r| matches!(r.status.as_str(), "running" | "queued")) else { continue; };
-                // A live host still owns this chat. Do not steal or alter it.
-                let Some(_lease) = ProviderSessionLease::try_acquire(store.paths(), session.id).map_err(to_string)? else { continue; };
+                if interrupted_run(&events).is_none() {
+                    continue;
+                }
+                let Some(_lease) = ProviderSessionLease::try_acquire(store.paths(), session.id)
+                    .map_err(to_string)?
+                else {
+                    continue;
+                };
+                // Read again under the lease in case the host updated the run
+                // between the initial scan and releasing its ownership.
+                let events = store.read_goal_events(session.id).map_err(to_string)?;
+                let Some((goal, mut run)) = interrupted_run(&events) else {
+                    continue;
+                };
                 if let Some(request) = recoverable_request(&store, session.id, &run)? {
-                    queued.push((goal.text, request, run.id));
+                    queued.push((goal, request, run.id));
                 } else {
-                    run.stop("paused", "Gyro restarted with unfinished goal work. Review the saved checkpoint before resuming; uncertain actions were not replayed.");
-                    persist(&store, session.id, &goal.text, &run)?;
+                    run.settle_after_restart(&store, session.id);
+                    persist(&store, session.id, &goal, &run)?;
                 }
             }
             Ok::<_, String>(queued)
-        }).await;
+        })
+        .await;
         let Ok(Ok(queued)) = scan else {
             return;
         };
         for (goal, request, run_id) in queued {
             let session_id = request.session_id.clone();
-            if let Err(error) = run_goal_chat(app.clone(), request, Some(run_id)).await {
-                if let Ok(store) = open_store() {
-                    if let Ok(events) = Uuid::parse_str(&session_id)
-                        .map_err(to_string)
-                        .and_then(|id| store.read_goal_events(id).map_err(to_string))
-                    {
-                        if let Some(mut run) = latest_event(&events)
-                            .and_then(stored_run)
-                            .filter(|r| r.status == "queued")
-                        {
-                            run.stop("paused", error);
-                            if let Ok(event) =
-                                persist(&store, Uuid::parse_str(&session_id).unwrap(), &goal, &run)
-                            {
-                                publish(&app, &session_id, event, None);
-                            }
-                        }
-                    }
-                }
+            let turn_id = request.turn_id.clone();
+            let Err(error) = run_goal_chat(app.clone(), request, Some(run_id)).await else {
+                continue;
+            };
+            let (Ok(store), Ok(session)) = (open_store(), Uuid::parse_str(&session_id)) else {
+                continue;
+            };
+            let Ok(Some(_lease)) = ProviderSessionLease::try_acquire(store.paths(), session) else {
+                continue;
+            };
+            let Ok(events) = store.read_goal_events(session) else {
+                continue;
+            };
+            let Some(mut run) = latest_event(&events).and_then(stored_run).filter(|run| {
+                run.id == run_id
+                    && run.status == "queued"
+                    && run
+                        .next_request
+                        .as_ref()
+                        .is_some_and(|request| request.turn_id == turn_id)
+            }) else {
+                continue;
+            };
+            run.settle_after_restart(&store, session);
+            run.stop("paused", error);
+            if let Ok(event) = persist(&store, session, &goal, &run) {
+                publish(&app, &session_id, event, None);
             }
         }
     });
@@ -700,7 +785,7 @@ pub(super) fn recover(app: tauri::AppHandle) {
 mod tests {
     use super::*;
     use crate::state::provider_run::PROVIDER_CUT_OFF_NOTICE;
-    use gyro_core::GyroPaths;
+    use gyro_core::{GyroPaths, UsageEntry, UsageOutcome};
     fn response(update: serde_json::Value) -> ProviderChatResponse {
         ProviderChatResponse {
             activity_events: vec![],
@@ -776,7 +861,13 @@ mod tests {
     }
     #[test]
     fn cached_input_is_not_charged_against_the_goal_new_token_limit() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("Gyro"))).unwrap();
+        let session = store
+            .create_session(temp.path(), gyro_core::SessionOrigin::Desktop, "Goal")
+            .unwrap();
         let mut run = Run::new(Limits::default());
+        run.active_turn_id = Some(Uuid::new_v4());
         let mut answer = response(
             serde_json::json!({"status":"continue","progress":"Implemented","nextAction":"Verify"}),
         );
@@ -788,8 +879,109 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
+        run.settle_turn_usage(&store, session.id, Some(&answer))
+            .unwrap();
         run.after_response(&answer);
         assert_eq!(run.new_tokens, 1_500);
+    }
+
+    #[test]
+    fn interrupted_goal_keeps_spend_from_compaction_and_a_cancelled_answer_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = GyroPaths::from_base_dir(temp.path().join("Gyro"));
+        let store = SessionStore::open(paths.clone()).unwrap();
+        let session = store
+            .create_session(temp.path(), gyro_core::SessionOrigin::Desktop, "Goal")
+            .unwrap();
+        store
+            .append_event(
+                session.id,
+                SessionEventKind::GoalUpdated,
+                "Goal set",
+                serde_json::json!({"action":"set","text":"Finish the runner","status":"active"}),
+            )
+            .unwrap();
+        let request = request(session.id);
+        let turn = parse_uuid(request.turn_id.as_deref().unwrap()).unwrap();
+        let mut run = Run::new(Limits {
+            max_new_tokens: 1_000,
+            ..Limits::default()
+        });
+        run.new_tokens = 50;
+        run.active_turn_id = Some(turn);
+        persist(&store, session.id, "Finish the runner", &run)
+            .unwrap()
+            .unwrap();
+
+        for (origin, outcome, input, cached, output) in [
+            (
+                UsageOrigin::ContextCompaction,
+                UsageOutcome::Done,
+                800,
+                500,
+                80,
+            ),
+            (UsageOrigin::Chat, UsageOutcome::Cancelled, 900, 400, 140),
+        ] {
+            store.note_usage_call(session.id, turn).unwrap();
+            store
+                .record_usage(&UsageEntry {
+                    session_id: session.id,
+                    turn_id: Some(turn),
+                    seat_id: None,
+                    provider_id: "openrouter".into(),
+                    model_id: None,
+                    reasoning_effort: None,
+                    origin,
+                    outcome,
+                    tokens: UsageTokens::measured(
+                        Some(input),
+                        Some(cached),
+                        Some(output),
+                        None,
+                        None,
+                    ),
+                    wall_ms: 1,
+                    retry_count: 0,
+                })
+                .unwrap();
+        }
+        let mut stale_queue = run.clone();
+        stale_queue.active_turn_id = None;
+        stale_queue.status = "queued".into();
+        stale_queue.next_request = Some(request);
+        assert_eq!(
+            store
+                .provider_turn_status_for_dispatch(session.id, turn)
+                .unwrap(),
+            (None, false)
+        );
+        assert!(recoverable_request(&store, session.id, &stale_queue)
+            .unwrap()
+            .is_none());
+
+        let paused = pause(&store, session.id).unwrap();
+        let original_reason = stored_run(&paused).unwrap().reason;
+        drop(store);
+        let store = SessionStore::open(paths).unwrap();
+        let events = store.read_goal_events(session.id).unwrap();
+        let (goal, mut recovered) = interrupted_run(&events).unwrap();
+        assert_eq!(recovered.active_turn_id, Some(turn));
+        recovered.settle_after_restart(&store, session.id);
+        assert_eq!(recovered.new_tokens, 1_070);
+        assert!(recovered
+            .dispatch_limit(chrono::Utc::now())
+            .unwrap()
+            .contains("new-token"));
+        assert_eq!(recovered.status, "paused");
+        assert_eq!(recovered.reason, original_reason);
+        assert!(recovered.active_turn_id.is_none());
+        recovered.settle_after_restart(&store, session.id);
+        assert_eq!(recovered.new_tokens, 1_070);
+        persist(&store, session.id, &goal, &recovered)
+            .unwrap()
+            .unwrap();
+        assert!(interrupted_run(&store.read_goal_events(session.id).unwrap()).is_none());
     }
     #[test]
     fn cut_off_responses_pause_even_with_a_continue_report() {

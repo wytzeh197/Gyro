@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileText } from "lucide-react";
+import { FileText } from "./icons";
 import { CanvasPreview } from "./canvas-preview-view";
 import { ChatArtifactContent } from "./chat-artifacts";
 import type { CanvasArtifact } from "./chat-canvas";

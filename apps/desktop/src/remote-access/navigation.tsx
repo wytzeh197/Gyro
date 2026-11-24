@@ -2,7 +2,7 @@ import { useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
-} from "../../../../packages/ui/node_modules/lucide-react";
+} from "@gyro-dev/ui/icons";
 import {
   Folder,
   FolderOpen,

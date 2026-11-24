@@ -63,3 +63,9 @@ html {
 :root[data-theme] .gyro-tour-primary:hover {
   background: var(--gyro-ink-hover);
 }
+
+.gyro-brand-mark {
+  display: block;
+  background-color: var(--gyro-brand-mark-ink);
+  mask: url("./assets/gyro-logo.svg") center / contain no-repeat;
+}

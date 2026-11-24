@@ -5,6 +5,7 @@ pub(crate) mod code_reviews;
 pub(crate) mod project_memory;
 pub(crate) mod remote_access;
 pub(crate) mod scope;
+pub(crate) mod server_runs;
 pub(crate) mod workflow_execution;
 pub(crate) mod workflow_extraction;
 pub(crate) mod workflows;

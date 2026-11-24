@@ -8,6 +8,7 @@ use crate::{
     browser_pointer, browser_viewport,
     capabilities::{
         access::{
+            approve_for_me_applies_file_changes, approve_for_me_covers_path_change,
             browser_capability_origin_scope, browser_destination_url, browser_observation,
             capability_access_with_full_access, capability_argument_string,
             capability_argument_strings, capability_argument_u64, capability_denied_permission,
@@ -18,15 +19,16 @@ use crate::{
             unknown_workspace_task_message,
         },
         approval::{
-            capability_event, capability_event_with_target, claim_model_terminal,
+            capability_event, capability_event_with_evidence, claim_model_terminal,
             editor_approval_fingerprint, persist_capability_grant, wait_for_capability_approval,
         },
         types::CapabilityApprovalDecisionRequest,
     },
     capability_execution_guard, capability_inspection, capability_output_budget,
     capability_workspace_helpers::{
-        capability_uses_workspace_root, redact_workspace_capability_result, root_argument_required,
-        workspace_result_byte_limit,
+        capability_uses_workspace_root, redact_workspace_capability_result,
+        relative_workspace_inspection_path, root_argument_required, workspace_result_byte_limit,
+        OutsideWorkspaceInspectionPath,
     },
     code_mode,
     command_execution::{
@@ -44,8 +46,10 @@ use crate::{
     },
     ide::task_discovery::task_discover_impl,
     lsp_capability, memory_capability,
-    ollama_runner::ollama_compatibility_catalog,
-    providers::{binding::session_execution_workspace, process::command_with_gui_path},
+    providers::{
+        binding::session_execution_workspace, catalog::DesktopToolCatalog,
+        process::command_with_gui_path,
+    },
     session_browser,
     state::{
         managers::{
@@ -62,6 +66,8 @@ use crate::{
         bound_model_search_results, confine_search_path, run_scoped_workspace_rg_search,
     },
 };
+use gyro_core::efficiency::checkpoint::VerificationEvidence;
+use gyro_core::provider_runtime::runners::ollama::ollama_compatibility_catalog;
 use gyro_core::{
     ipc::versions_compatible, timing, CapabilityAccess, CapabilityApprovalDecision,
     CapabilityClass, CapabilityId, CapabilityPolicySnapshot, CapabilityRequest,
@@ -79,11 +85,12 @@ fn optional_browser_ref(arguments: &serde_json::Value) -> anyhow::Result<Option<
     capability_argument_string(arguments, "ref").map(Some)
 }
 
-pub(crate) fn execute_provider_capability(
+fn execute_provider_capability(
     app: &tauri::AppHandle,
     bound: &BoundProviderCapabilityContext,
     request: &CapabilityRequest,
-) -> anyhow::Result<CapabilityResult> {
+    root_count: usize,
+) -> anyhow::Result<(CapabilityResult, Option<VerificationEvidence>)> {
     let workspace = bound.workspace.display().to_string();
     let arguments = &request.arguments;
     if (request.capability_id == CapabilityId::WebSearch
@@ -105,6 +112,7 @@ pub(crate) fn execute_provider_capability(
     {
         anyhow::bail!("The selected preview is a native runtime. Use capture_preview/preview_click, or select targetId web before using web-page tools.");
     }
+    let mut command_test_id = None;
     let (summary, data, resource) = match request.capability_id {
         CapabilityId::CodeModeDiscover | CapabilityId::CodeModeExecute => {
             code_mode::execute(app, bound, request)?
@@ -214,6 +222,8 @@ pub(crate) fn execute_provider_capability(
                 )
             } else if cap_reached || scan_incomplete {
                 format!("Returned {found} workspace matches (search limit reached; narrow the query for more)")
+            } else if found == 0 {
+                "No matches".to_string()
             } else {
                 format!("Returned {found} workspace matches")
             };
@@ -329,6 +339,15 @@ pub(crate) fn execute_provider_capability(
                 Path::new(cwd),
             )?;
             anyhow::ensure!(cwd.is_dir(), "Working directory is not a directory");
+            crate::command_execution::validate_model_program(program, &cwd)?;
+            if gyro_core::execution::is_foreground_test_command(
+                program,
+                args.iter().map(String::as_str),
+            ) {
+                command_test_id = Some(gyro_core::execution::foreground_test_identity(
+                    program, &args, &cwd,
+                ));
+            }
             let hosts = super::command_network::destinations(arguments)?;
             let proxy = if hosts.is_empty() {
                 None
@@ -347,12 +366,22 @@ pub(crate) fn execute_provider_capability(
                 .map(|control| control.cancellation.clone())
                 .ok_or_else(|| anyhow::anyhow!("provider run is no longer active"))?;
             let _admission = IdeCommandAdmission::acquire().map_err(anyhow::Error::msg)?;
+            let verification_snapshot = command_test_id.as_deref().and_then(|identity| {
+                crate::efficiency::benchmark::capture_verification_start(
+                    &bound.session_id,
+                    &bound.workspace,
+                    identity,
+                )
+            });
             let output = crate::command_execution::run_model_command(
                 command,
                 cancellation,
                 &boundary,
                 proxy.as_ref().map(|proxy| proxy.port()),
             )?;
+            if let Some(snapshot) = verification_snapshot {
+                snapshot.finish(request.context.call_id);
+            }
             let blocked = proxy
                 .as_ref()
                 .map_or_else(Vec::new, |proxy| proxy.blocked_destinations());
@@ -597,16 +626,7 @@ pub(crate) fn execute_provider_capability(
             if !cwd.is_dir() {
                 anyhow::bail!("terminal working directory is not a directory");
             }
-            // The program runs without a shell, so a whole command line in
-            // `program` fails as an unknown executable. Say how to fix it.
-            if args.is_empty()
-                && program.trim().contains(char::is_whitespace)
-                && !cwd.join(&program).exists()
-            {
-                anyhow::bail!(
-                    "terminal program must be one executable, not a command line; pass arguments in args (program \"npm\", args [\"run\", \"dev\"]), or use program \"sh\" with args [\"-c\", \"<command>\"] for pipes, redirects, or &&"
-                );
-            }
+            crate::command_execution::validate_model_program(&program, &cwd)?;
             let (resource_id, mut snapshot) = claim_model_terminal(
                 app,
                 bound,
@@ -1424,6 +1444,7 @@ pub(crate) fn execute_provider_capability(
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0) as usize;
             let page = ollama_compatibility_catalog(
+                &DesktopToolCatalog::for_workspace_roots(Some(root_count)),
                 request.context.mode,
                 prefix,
                 offset,
@@ -1440,13 +1461,18 @@ pub(crate) fn execute_provider_capability(
         request.capability_id,
         data,
     ))?;
-    Ok(CapabilityResult {
+    let result = CapabilityResult {
         call_id: request.context.call_id,
         capability_id: request.capability_id,
         summary: gyro_core::sanitize_capability_summary(&summary),
         data,
         resource,
-    })
+    };
+    let verification = VerificationEvidence::workspace_task(&result).or_else(|| {
+        command_test_id
+            .and_then(|test_id| VerificationEvidence::workspace_command_test(&result, test_id))
+    });
+    Ok((result, verification))
 }
 
 pub(crate) fn handle_desktop_provider_capability_request(
@@ -1456,7 +1482,11 @@ pub(crate) fn handle_desktop_provider_capability_request(
     let _inspection = capability_inspection::Scope::start(&request);
     let _workflow = code_mode::begin(&request);
     let mut response = handle_desktop_provider_capability_request_inner(app, &request);
-    efficiency::observe(app, &request, &mut response);
+    let config = efficiency::config();
+    efficiency::observe(app, &request, &mut response, &config);
+    if config.tool_feedback_for(&request.context.provider_id) {
+        gyro_core::provider_runtime::tool_batch::add_recovery_feedback(&mut response);
+    }
     response
 }
 
@@ -1604,14 +1634,22 @@ fn handle_desktop_provider_capability_request_inner(
                 .into(),
         );
     }
+    let identity = &session.workspace_identity;
+    let root_count = identity.roots.len();
     let bound = if capability_uses_workspace_root(request.capability_id) {
-        let identity = &session.workspace_identity;
+        let root_guidance = if root_count == 1 {
+            "Omit rootId to select the only Workspace root."
+        } else {
+            "Pass a rootId returned by gyro_workspace_get_context."
+        };
         let requested_root = match request.arguments.get("rootId") {
             Some(value) => match value.as_str() {
                 Some(id) => Some(id),
-                None => return fail("invalid-root", "rootId must be a string.".into()),
+                None => {
+                    return fail("invalid-root", format!("rootId must be a string. {root_guidance}"))
+                }
             },
-            None if !root_argument_required(identity.roots.len(), false) => {
+            None if !root_argument_required(root_count, false) => {
                 Some(identity.roots[0].id.as_str())
             }
             None => {
@@ -1624,7 +1662,7 @@ fn handle_desktop_provider_capability_request_inner(
         let Some(root) = requested_root.and_then(|id| identity.root(id)) else {
             return fail(
                 "invalid-root",
-                "The requested Workspace root is not in this session.".into(),
+                format!("The requested Workspace root is not in this session. {root_guidance}"),
             );
         };
         let root = match root.canonicalize() {
@@ -1690,6 +1728,38 @@ fn handle_desktop_provider_capability_request_inner(
             "Council seats cannot use tools or mutate the workspace.".into(),
         );
     }
+    if matches!(
+        request.capability_id,
+        CapabilityId::WorkspaceEdit | CapabilityId::WorkspaceProposeEdit
+    ) {
+        if let Some(error) = workspace_edit_capability::edit_argument_error(
+            &bound.workspace,
+            request.capability_id,
+            &request.arguments,
+        ) {
+            return fail("invalid-arguments", error);
+        }
+    }
+    let normalized = match relative_workspace_inspection_path(
+        &bound.workspace,
+        request.capability_id,
+        &request.arguments,
+    ) {
+        Ok(Some(path)) => {
+            let mut normalized = request.clone();
+            normalized.arguments["path"] = path.into();
+            Some(normalized)
+        }
+        Ok(None) => None,
+        Err(error) if error.is::<OutsideWorkspaceInspectionPath>() => {
+            return fail(
+                gyro_core::efficiency::progress::OUTSIDE_WORKSPACE_INSPECTION_PATH,
+                error.to_string(),
+            );
+        }
+        Err(error) => return fail("invalid-arguments", error.to_string()),
+    };
+    let request = normalized.as_ref().unwrap_or(request);
     let permission_classes = match capability_permission_classes(
         &bound.workspace,
         request.capability_id,
@@ -1842,6 +1912,18 @@ fn handle_desktop_provider_capability_request_inner(
                     CapabilityAccess::Allow
                 };
             }
+        }
+        // Approve for Me already applies file edits for these providers, so the
+        // recoverable path changes that go with them (create, rename, move,
+        // duplicate) do not ask either. A project Deny still wins, and delete,
+        // undo and Git commit keep their card.
+        if access == CapabilityAccess::Ask
+            && class == CapabilityClass::WorkspaceWrite
+            && approve_for_me_covers_path_change(request.capability_id)
+            && approve_for_me_applies_file_changes(&config, &bound.provider_id, bound.policy.mode)
+            && delegated_agents::file_edit_ceiling(app, &bound.session_id)
+        {
+            access = CapabilityAccess::Allow;
         }
         // Live editor text is not part of ordinary Workspace reads. Even Full
         // Access requires a fresh decision before disclosing an unsaved buffer.
@@ -2022,8 +2104,8 @@ fn handle_desktop_provider_capability_request_inner(
     );
     let _browser_operation =
         session_browser::begin_model_operation(request.capability_id, control.cancellation.clone());
-    match execute_provider_capability(app, &bound, request) {
-        Ok(result) => {
+    match execute_provider_capability(app, &bound, request, root_count) {
+        Ok((result, verification)) => {
             if gyro_core::capability_descriptor(request.capability_id).class
                 == CapabilityClass::WorkspaceWrite
                 || (matches!(
@@ -2037,7 +2119,7 @@ fn handle_desktop_provider_capability_request_inner(
             {
                 control.completed_mutations.store(true, Ordering::Relaxed);
             }
-            let _ = capability_event_with_target(
+            let _ = capability_event_with_evidence(
                 app,
                 &bound,
                 request.context.call_id,
@@ -2046,6 +2128,7 @@ fn handle_desktop_provider_capability_request_inner(
                 &result.summary,
                 result.resource.clone(),
                 session_browser::browser_action_target(&result).as_deref(),
+                verification,
             );
             // Agent browser tools remain in the child's Working process, but
             // must not populate the frontend browser/focus/capture surfaces.
@@ -2104,6 +2187,10 @@ fn handle_desktop_provider_capability_request_inner(
             fail(
                 if cancelled {
                     "cancelled"
+                } else if error.is::<crate::workspace_mutations::StaleEditBase>()
+                    && efficiency::config().tool_feedback_for(&bound.provider_id)
+                {
+                    "stale-edit-base"
                 } else {
                     "execution-failed"
                 },

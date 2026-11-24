@@ -1,5 +1,5 @@
 import { Folder, FolderOpen } from "./workspace-folder-icons";
-import { ChevronRight, Search, X } from "lucide-react";
+import { ChevronRight, Search, X } from "./icons";
 import {
   useId,
   useMemo,

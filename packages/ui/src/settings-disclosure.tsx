@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from "./icons";
 import "./settings-disclosure.css";
 
 type DisclosureContext = {

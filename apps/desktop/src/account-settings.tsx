@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import {
+  Button,
+  Input,
   CloudIcon,
   SettingsGroup,
   SettingsEmptyState,
@@ -97,13 +99,13 @@ function UnloadedAccount({ account }: { account: Account }) {
   return (
     <SettingsGroup id="account-connection" label="Connection" defaultOpen>
       <SettingsRow label="Couldn’t load your account" detail={account.error}>
-        <button
-          className="gyro-secondary-button"
+        <Button
+          variant="outline"
           onClick={() => void account.refresh()}
           type="button"
         >
           Try again
-        </button>
+        </Button>
       </SettingsRow>
     </SettingsGroup>
   );
@@ -154,23 +156,23 @@ function PasswordRow({
         />
       </AuthField>
       <div className="gyro-auth-footer is-end">
-        <button
-          className="gyro-secondary-button"
+        <Button
+          variant="outline"
           disabled={busy}
           onClick={cancel}
           type="button"
         >
           Cancel
-        </button>
-        <button className="gyro-primary-button" disabled={busy}>
+        </Button>
+        <Button size="md" type="submit" disabled={busy}>
           {busy ? "Saving…" : "Save password"}
-        </button>
+        </Button>
       </div>
     </form>
   ) : (
     <SettingsRow label="Password">
-      <button
-        className="gyro-secondary-button"
+      <Button
+        variant="outline"
         onClick={() => {
           onNotice("", false);
           setEditing(true);
@@ -178,7 +180,7 @@ function PasswordRow({
         type="button"
       >
         Change
-      </button>
+      </Button>
     </SettingsRow>
   );
 }
@@ -250,7 +252,7 @@ export function AccountSettings({ account }: { account: Account }) {
                 }}
               >
                 <AccountAvatar status={status} />
-                <input
+                <Input
                   aria-label="Display name"
                   autoFocus
                   className="gyro-cloud-input"
@@ -260,8 +262,8 @@ export function AccountSettings({ account }: { account: Account }) {
                   value={name}
                 />
                 <div className="gyro-cloud-actions">
-                  <button
-                    className="gyro-secondary-button"
+                  <Button
+                    variant="outline"
                     disabled={busy}
                     onClick={() => {
                       setEditing(false);
@@ -270,10 +272,10 @@ export function AccountSettings({ account }: { account: Account }) {
                     type="button"
                   >
                     Cancel
-                  </button>
-                  <button className="gyro-primary-button" disabled={busy}>
+                  </Button>
+                  <Button size="md" type="submit" disabled={busy}>
                     {busy ? "Saving…" : "Save"}
-                  </button>
+                  </Button>
                 </div>
               </form>
             ) : (
@@ -293,8 +295,8 @@ export function AccountSettings({ account }: { account: Account }) {
                   </strong>
                   <small>{status.profile?.email}</small>
                 </div>
-                <button
-                  className="gyro-secondary-button"
+                <Button
+                  variant="outline"
                   disabled={busy}
                   onClick={() => {
                     setName(displayName || "");
@@ -303,7 +305,7 @@ export function AccountSettings({ account }: { account: Account }) {
                   type="button"
                 >
                   {displayName ? "Edit" : "Add name"}
-                </button>
+                </Button>
               </div>
             )}
           </SettingsGroup>
@@ -322,8 +324,8 @@ export function AccountSettings({ account }: { account: Account }) {
               }}
             />
             <SettingsRow label="Signed in on this device">
-              <button
-                className="gyro-secondary-button"
+              <Button
+                variant="outline"
                 disabled={busy}
                 onClick={() =>
                   void run(async () => {
@@ -336,7 +338,7 @@ export function AccountSettings({ account }: { account: Account }) {
                 type="button"
               >
                 Sign out
-              </button>
+              </Button>
             </SettingsRow>
           </SettingsGroup>
           <CloudNotice
@@ -382,13 +384,13 @@ export function CloudSettings({
           <SettingsRow
             label="Sign in to use Cloud"
           >
-            <button
-              className="gyro-primary-button"
+            <Button
+              size="md"
               onClick={onAccount}
               type="button"
             >
               Go to Account
-            </button>
+            </Button>
           </SettingsRow>
         </SettingsGroup>
       ) : (

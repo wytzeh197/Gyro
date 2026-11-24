@@ -11,80 +11,18 @@
   --gyro-provider-default-model-width: 100%;
 }
 .gyro-provider-default-picker {
-  position: relative;
   width: min(100%, calc(198px * var(--gyro-ui-scale, 1)));
 }
-.gyro-provider-model-trigger,
-.gyro-provider-model-menu > button {
-  align-items: center;
-  color: var(--gyro-text);
-  display: flex;
-  font: 500 var(--gyro-font-support) var(--gyro-font-sans);
-  gap: var(--gyro-space-standard);
-  justify-content: space-between;
-  min-width: 0;
-  text-align: start;
-  width: 100%;
-}
+/* The trigger and list are the shared Select primitive; this only sizes them. */
 .gyro-provider-model-trigger {
-  background: transparent;
-  border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: var(--gyro-radius-md);
-  min-height: calc(28px * var(--gyro-ui-scale, 1));
-  padding: 0 8px;
-}
-.gyro-provider-model-trigger:hover {
-  background: var(--gyro-control-hover);
-}
-.gyro-provider-model-trigger[aria-expanded="true"] {
-  border-color: var(--gyro-accent);
-  box-shadow: 0 0 0 1px var(--gyro-accent);
-}
-.gyro-provider-model-trigger > span,
-.gyro-provider-model-menu > button > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.gyro-provider-model-trigger > svg,
-.gyro-provider-model-menu > button > svg {
-  flex: none;
-}
-.gyro-provider-model-trigger > svg {
-  color: var(--gyro-muted);
+  inline-size: 100%;
+  min-inline-size: 0;
 }
 .gyro-provider-model-menu {
-  background: var(--gyro-surface-raised);
-  border: 1px solid var(--gyro-premium-hairline-strong);
-  border-radius: var(--gyro-radius-md);
-  box-shadow: 0 8px 20px var(--gyro-premium-shadow-soft);
-  inset-inline-start: 0;
-  max-height: calc(152px * var(--gyro-ui-scale, 1));
+  min-inline-size: var(--anchor-width);
+  max-block-size: min(calc(220px * var(--gyro-ui-scale, 1)), var(--available-height));
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 3px;
-  position: absolute;
-  scrollbar-width: thin;
-  top: calc(100% + 4px);
-  width: 100%;
-  z-index: 20;
-}
-.gyro-provider-model-menu > button {
-  background: transparent;
-  border: 0;
-  border-radius: var(--gyro-radius-sm);
-  min-height: calc(28px * var(--gyro-ui-scale, 1));
-  padding: 0 7px;
-}
-.gyro-provider-model-menu > button:hover {
-  background: var(--gyro-control-hover);
-}
-.gyro-provider-model-menu > button[aria-checked="true"] {
-  background: color-mix(in srgb, var(--gyro-accent) 17%, transparent);
-}
-:root[data-theme] .gyro-settings-surface .gyro-provider-model-menu > button:focus-visible {
-  outline: 1px solid var(--gyro-accent);
-  outline-offset: -1px;
 }
 :root[data-theme] .gyro-provider-connect-help:first-child .gyro-settings-subsection-title {
   margin-top: 0;
@@ -171,11 +109,8 @@
     var(--gyro-surface) 35%,
     var(--gyro-pane)
   );
-  --gyro-settings-row-height: calc(60px * var(--gyro-ui-scale, 1));
+  --gyro-settings-row-height: calc(var(--gyro-row-height) * 72 / 28);
   padding: clamp(28px, 4vh, 36px) clamp(20px, 4vw, 48px) 48px;
-}
-:root[data-theme][data-density="comfortable"] .gyro-settings-surface {
-  --gyro-settings-row-height: calc(72px * var(--gyro-ui-scale, 1));
 }
 :root[data-theme] .gyro-settings-surface .gyro-settings-content {
   width: min(100%, 720px);
@@ -253,8 +188,8 @@
   .gyro-workspace-keybindings
   > header
   h2 {
-  font-size: var(--gyro-font-support);
-  font-weight: 500;
+  font-size: var(--gyro-text-ui);
+  font-weight: var(--gyro-weight-medium);
   color: var(--gyro-muted);
 }
 :root[data-theme] .gyro-settings-surface .gyro-workspace-keybindings strong {
@@ -363,6 +298,10 @@
   position: relative;
   min-width: 0;
   max-width: 100%;
+}
+.gyro-settings-choice {
+  max-inline-size: 100%;
+  min-inline-size: min(100%, 10rem);
 }
 :root[data-theme] .gyro-settings-surface .gyro-settings-select-field {
   margin-top: 0;
@@ -599,7 +538,7 @@
   :root[data-theme]
     .gyro-settings-surface
     :is(
-      .gyro-settings-row:has(.gyro-settings-select-field),
+      .gyro-settings-row:has(.gyro-settings-select-field, .gyro-settings-choice),
       .gyro-settings-row:has(.gyro-settings-segmented),
       .gyro-settings-row:has(.gyro-color-control),
       .gyro-settings-row:has(input:not([type="checkbox"])):not(
@@ -613,7 +552,7 @@
   :root[data-theme]
     .gyro-settings-surface
     .gyro-settings-row:is(
-      :has(.gyro-settings-select-field),
+      :has(.gyro-settings-select-field, .gyro-settings-choice),
       :has(.gyro-settings-segmented),
       :has(.gyro-color-control),
       :has(input:not([type="checkbox"])):not(:has(.gyro-settings-switch))
@@ -933,8 +872,7 @@
   .gyro-settings-surface
   :is(.gyro-settings-row, .gyro-workspace-settings-list > label) {
   min-height: var(--gyro-settings-row-height);
-  padding: calc(14px * var(--gyro-ui-scale, 1))
-    calc(16px * var(--gyro-ui-scale, 1));
+  padding: var(--gyro-settings-row-pad-y) var(--gyro-space-comfortable);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1015,7 +953,7 @@
   background: var(--gyro-segment-active);
   box-shadow:
     0 1px 2px var(--gyro-shadow),
-    0 0 0 0.5px var(--gyro-premium-hairline);
+    0 0 0 0.5px var(--gyro-border);
 }
 
 :root[data-theme]
@@ -1812,8 +1750,7 @@
 }
 
 :root[data-theme] .gyro-settings-surface .gyro-settings-row {
-  padding: calc(14px * var(--gyro-ui-scale, 1))
-    calc(16px * var(--gyro-ui-scale, 1));
+  padding: var(--gyro-settings-row-pad-y) var(--gyro-space-comfortable);
 }
 
 :root[data-theme]
@@ -1920,7 +1857,7 @@
 }
 .gyro-settings-more > summary > svg {
   flex: none;
-  transition: transform var(--gyro-premium-motion-fast) var(--gyro-premium-ease);
+  transition: transform var(--gyro-motion-fast) var(--gyro-ease);
 }
 .gyro-settings-more[open] > summary > svg {
   transform: rotate(90deg);

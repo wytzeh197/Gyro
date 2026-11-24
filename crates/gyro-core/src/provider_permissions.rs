@@ -37,8 +37,13 @@ pub fn approval_posture(
 /// Codex app-server approval policy and sandbox for one turn.
 ///
 /// Plan and Council are read-only even when the saved choice is Full Access.
-/// Approve for Me keeps the workspace sandbox and leaves network off. Full
-/// access is `danger-full-access`.
+/// Ask for Approval (either approval flag) is read-only too, so any write or
+/// network use has to come back as an `on-request` escalation. Approve for Me
+/// keeps the workspace sandbox and leaves network off. Full Access is
+/// `danger-full-access`.
+///
+/// The policy is always `on-request`. Codex has retired `untrusted`: its CLI
+/// no longer accepts it, and the read-only sandbox is what gates commands now.
 pub fn codex_execution_policy(
     advisory: bool,
     require_command_approval: bool,
@@ -48,12 +53,8 @@ pub fn codex_execution_policy(
 ) -> (&'static str, &'static str, Value) {
     let full_access =
         !advisory && full_access && !require_command_approval && !require_file_edit_approval;
-    let approval_policy = if advisory || require_command_approval {
-        "untrusted"
-    } else {
-        "on-request"
-    };
-    if advisory || require_file_edit_approval {
+    let approval_policy = "on-request";
+    if advisory || require_command_approval || require_file_edit_approval {
         return (
             approval_policy,
             "read-only",
@@ -96,10 +97,32 @@ pub fn claude_permission_mode(posture: ApprovalPosture) -> &'static str {
 /// Whether Approve for Me should still show a card when this CLI asks.
 ///
 /// These CLIs auto-approve the safe set themselves. A request that still
-/// reaches Gyro is outside that set, so the person decides it. CLIs without
-/// that filter keep Gyro's allow-without-asking behavior.
+/// reaches Gyro is outside that set, so the person decides it:
+/// - Grok `auto`, Kimi `--yolo` and Claude `auto` only ask past their safe set.
+/// - Cursor with `--sandbox enabled` asks only to run outside its sandbox.
+/// - OpenCode's Gyro agent allows edits and reads natively in Approve for Me
+///   and asks for shell, web and paths outside the project.
+///
+/// Gemini has no such filter in `auto_edit`, so Gyro still allows its other
+/// tool requests without asking.
 pub fn approve_for_me_keeps_escalations(provider_id: &str) -> bool {
-    matches!(provider_id, "xai" | "kimi" | "anthropic")
+    matches!(
+        provider_id,
+        "xai" | "kimi" | "anthropic" | "cursor" | "opencode"
+    )
+}
+
+/// Grok's per-session mode, sent as `_meta` on `session/new`.
+///
+/// Grok's agent docs set the session's mode here (`autoMode`, `yoloMode`).
+/// The global `--permission-mode` flag says the same thing; this keeps a new
+/// session from starting in Grok's default when the flag is not applied.
+pub fn grok_session_meta(posture: ApprovalPosture) -> Option<Value> {
+    match posture {
+        ApprovalPosture::Ask => None,
+        ApprovalPosture::ApproveForMe => Some(serde_json::json!({ "autoMode": true })),
+        ApprovalPosture::FullAccess => Some(serde_json::json!({ "yoloMode": true })),
+    }
 }
 
 /// Argv for an ACP CLI, including its subcommand, for the saved choice.
@@ -108,8 +131,8 @@ pub fn approve_for_me_keeps_escalations(provider_id: &str) -> bool {
 /// Antigravity no longer runs an ACP server: its official CLI takes the posture
 /// as ordinary launch flags (`--sandbox`, `--mode`,
 /// `--dangerously-skip-permissions`), so it has no ACP argv here.
-/// OpenCode uses a per-process Gyro agent and always sends permission requests;
-/// the callback applies the selected posture without a native bypass flag.
+/// OpenCode uses a per-process Gyro agent whose rules follow the posture; it
+/// has no native bypass flag.
 pub fn acp_permission_args(
     provider_id: &str,
     posture: ApprovalPosture,
@@ -139,8 +162,8 @@ pub fn acp_permission_args(
             ApprovalPosture::ApproveForMe => &["--sandbox", "enabled", "acp"],
             ApprovalPosture::FullAccess => &["--force", "--sandbox", "disabled", "acp"],
         },
-        // The managed agent requests permission in every posture. Gyro answers
-        // these callbacks itself; --auto would bypass plan/edit constraints.
+        // OpenCode has no posture flag. The posture is in the managed agent's
+        // rules (`opencode_policy`), and --auto would bypass plan/edit limits.
         "opencode" => &["acp"],
         _ => return None,
     })
@@ -179,6 +202,12 @@ mod tests {
 
         let (_, sandbox, _) = codex_execution_policy(true, false, false, true, cwd);
         assert_eq!(sandbox, "read-only");
+
+        // Ask for Approval, whole or split, stays read-only so writes escalate.
+        for (commands, edits) in [(true, true), (true, false), (false, true)] {
+            let (approval, sandbox, _) = codex_execution_policy(false, commands, edits, false, cwd);
+            assert_eq!((approval, sandbox), ("on-request", "read-only"));
+        }
     }
 
     #[test]
@@ -204,6 +233,19 @@ mod tests {
             acp_permission_args("opencode", ApprovalPosture::FullAccess)
         );
         assert!(acp_permission_args("antigravity", ApprovalPosture::FullAccess).is_none());
+        assert!(grok_session_meta(ApprovalPosture::Ask).is_none());
+        assert_eq!(
+            grok_session_meta(ApprovalPosture::ApproveForMe),
+            Some(serde_json::json!({ "autoMode": true }))
+        );
+        assert_eq!(
+            grok_session_meta(ApprovalPosture::FullAccess),
+            Some(serde_json::json!({ "yoloMode": true }))
+        );
+        for provider in ["xai", "kimi", "anthropic", "cursor", "opencode"] {
+            assert!(approve_for_me_keeps_escalations(provider), "{provider}");
+        }
+        assert!(!approve_for_me_keeps_escalations("gemini"));
         assert!(acp_permission_args("ollama", ApprovalPosture::FullAccess).is_none());
     }
 }

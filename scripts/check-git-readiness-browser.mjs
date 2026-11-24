@@ -62,7 +62,15 @@ try {
     await pause(100);
   };
   const state = () => evaluate(`document.querySelector('[data-testid="state"]')?.textContent`);
-  const popover = () => evaluate(`document.querySelector('[aria-label="Workspace preparation details"]')?.textContent`);
+  const popover = async () => {
+    const selector = '[aria-label="Workspace preparation details"]';
+    if (!(await evaluate(`Boolean(document.querySelector(${JSON.stringify(selector)}))`))) {
+      // The fixture's recovery buttons sit outside the production popover.
+      await evaluate("document.querySelector('.gyro-workspace-preparation-button').click()");
+      await until(() => evaluate(`Boolean(document.querySelector(${JSON.stringify(selector)}))`), "preparation details");
+    }
+    return evaluate(`document.querySelector(${JSON.stringify(selector)}).textContent`);
+  };
   async function capture(name) {
     const screenshot = await call("Page.captureScreenshot", { format: "png" });
     await writeFile(join(output, name + ".png"), Buffer.from(screenshot.data, "base64"));

@@ -110,7 +110,7 @@
   color: var(--gyro-muted);
 }
 .gyro-provider-allowance-tooltip {
-  --gyro-allowance-tooltip-duration: calc(var(--gyro-premium-motion-fast) * var(--gyro-exit-motion-factor));
+  --gyro-allowance-tooltip-duration: calc(var(--gyro-motion-fast) * var(--gyro-exit-motion-factor));
   position: absolute;
   z-index: 30;
   bottom: calc(100% + 10px);
@@ -119,7 +119,7 @@
      card's scroll area. allow-discrete keeps the fade. */
   display: none;
   opacity: 0;
-  transition: opacity var(--gyro-allowance-tooltip-duration) var(--gyro-premium-ease),
+  transition: opacity var(--gyro-allowance-tooltip-duration) var(--gyro-ease),
     display var(--gyro-allowance-tooltip-duration) allow-discrete;
   box-sizing: border-box;
   width: 200px;
@@ -146,7 +146,7 @@
 }
 .gyro-provider-allowance:is(:hover, :focus-visible)
   .gyro-provider-allowance-tooltip {
-  --gyro-allowance-tooltip-duration: var(--gyro-premium-motion-fast);
+  --gyro-allowance-tooltip-duration: var(--gyro-motion-fast);
   display: block;
   opacity: 1;
   @starting-style {

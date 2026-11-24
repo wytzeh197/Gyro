@@ -313,12 +313,23 @@ export function useChatTranscriptScroll({
     }
   };
 
+  const revealTranscriptTurn = useCallback((turnId: string) => {
+    const transcript = transcriptRef.current;
+    const turn = transcript?.querySelector<HTMLElement>(`[data-turn-id="${CSS.escape(turnId)}"]`);
+    if (!transcript || !turn) return false;
+    isFollowingBottomRef.current = false;
+    transcript.scrollTop += turn.getBoundingClientRect().top - transcript.getBoundingClientRect().top;
+    updateScrollPosition();
+    return true;
+  }, [updateScrollPosition]);
+
   return {
     transcriptRef,
     isTranscriptAwayFromBottom,
     isLoadedChatClipped,
     requestEarlierMessages,
     scrollTranscriptToBottom,
+    revealTranscriptTurn,
     onTranscriptScroll,
     onTranscriptWheel,
     onTranscriptTouchStart,

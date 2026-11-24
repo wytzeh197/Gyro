@@ -17,10 +17,14 @@ type UsagePage = (typeof pages)[number]["id"];
 /** Keep both panels mounted so settings search can reveal a target in either. */
 export function UsageSettingsPages({
   providerControl,
+  usageActions,
   usage,
   tokens,
 }: {
+  /** Provider identity card; it scopes both tabs, so it sits above them. */
   providerControl: ReactNode;
+  /** Controls that only apply to the Usage tab, shown at the tab bar's end. */
+  usageActions?: ReactNode;
   usage: ReactNode;
   tokens: ReactNode;
 }) {
@@ -44,45 +48,52 @@ export function UsageSettingsPages({
   }, []);
   return (
     <div className="gyro-usage-settings" ref={root}>
-      <div
-        className="gyro-usage-subnav"
-        role="tablist"
-        aria-label="Usage & limits"
-      >
-        {pages.map((item, index) => (
-          <button
-            key={item.id}
-            id={`${id}-${item.id}-tab`}
-            type="button"
-            role="tab"
-            aria-selected={page === item.id}
-            aria-controls={`${id}-${item.id}-panel`}
-            tabIndex={page === item.id ? 0 : -1}
-            onClick={() => setPage(item.id)}
-            onKeyDown={(event) => {
-              const next =
-                event.key === "Home"
-                  ? 0
-                  : event.key === "End"
-                    ? pages.length - 1
-                    : event.key === "ArrowRight"
-                      ? (index + 1) % pages.length
-                      : event.key === "ArrowLeft"
-                        ? (index + pages.length - 1) % pages.length
-                        : undefined;
-              if (next === undefined) return;
-              event.preventDefault();
-              setPage(pages[next]!.id);
-              root.current
-                ?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
-                [next]?.focus();
-            }}
-          >
-            {item.label}
-          </button>
-        ))}
+      {providerControl ? (
+        <div className="gyro-usage-scope">{providerControl}</div>
+      ) : null}
+      <div className="gyro-usage-tabbar">
+        <div
+          className="gyro-usage-subnav"
+          role="tablist"
+          aria-label="Usage & limits"
+        >
+          {pages.map((item, index) => (
+            <button
+              key={item.id}
+              id={`${id}-${item.id}-tab`}
+              type="button"
+              role="tab"
+              aria-selected={page === item.id}
+              aria-controls={`${id}-${item.id}-panel`}
+              tabIndex={page === item.id ? 0 : -1}
+              onClick={() => setPage(item.id)}
+              onKeyDown={(event) => {
+                const next =
+                  event.key === "Home"
+                    ? 0
+                    : event.key === "End"
+                      ? pages.length - 1
+                      : event.key === "ArrowRight"
+                        ? (index + 1) % pages.length
+                        : event.key === "ArrowLeft"
+                          ? (index + pages.length - 1) % pages.length
+                          : undefined;
+                if (next === undefined) return;
+                event.preventDefault();
+                setPage(pages[next]!.id);
+                root.current
+                  ?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+                  [next]?.focus();
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        {page === "usage" && usageActions ? (
+          <div className="gyro-usage-tabbar-actions">{usageActions}</div>
+        ) : null}
       </div>
-      <div className="gyro-usage-scope">{providerControl}</div>
       {pages.map((item) => (
         <div
           key={item.id}

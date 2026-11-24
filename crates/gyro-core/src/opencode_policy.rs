@@ -5,22 +5,81 @@
 //! No provider configuration is written to disk. Native task delegation is
 //! disabled because those agents have independent permission rules; Gyro's MCP
 //! delegation remains available through the same approval channel.
+//!
+//! OpenCode has no sandbox and no posture flag, so the agent's own rules carry
+//! Approve for Me: edits and reads inside the project run natively, while
+//! shell, web and paths outside the project still ask. Ask for Approval and
+//! Full Access keep every tool on ask; Full Access is answered by the callback.
 
+use crate::ApprovalPosture;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::process::Command;
 
-pub(crate) fn configure(command: &mut Command, plan: bool) -> Result<String> {
+pub(crate) fn configure(
+    command: &mut Command,
+    plan: bool,
+    posture: ApprovalPosture,
+) -> Result<String> {
     let name = format!("gyro-{}", uuid::Uuid::new_v4().simple());
     let inherited = std::env::var("OPENCODE_CONFIG_CONTENT").ok();
-    let config = configuration(inherited.as_deref(), &name, plan)?;
+    let config = configuration(inherited.as_deref(), &name, plan, posture)?;
     command.env("OPENCODE_CONFIG_CONTENT", serde_json::to_string(&config)?);
     // Don't inherit native auto-approval: the callback owns Gyro's posture.
     command.env_remove("OPENCODE_PERMISSION");
     Ok(name)
 }
 
-fn configuration(inherited: Option<&str>, name: &str, plan: bool) -> Result<Value> {
+/// The managed agent's `permission` block.
+///
+/// This is OpenCode's `permission` map: a tool key with `allow`, `ask` or
+/// `deny`, or a pattern map for `read`, `bash` and the other rule tools.
+fn permission(plan: bool, posture: ApprovalPosture) -> Value {
+    let secrets_denied = |rest: &str| json!({ "*": rest, "*.env": "deny", "*.env.*": "deny" });
+    if plan || posture != ApprovalPosture::ApproveForMe {
+        return json!({
+            "*": "ask",
+            "edit": if plan { "deny" } else { "ask" },
+            "task": "deny",
+            "read": secrets_denied("ask")
+        });
+    }
+    json!({
+        "*": "ask",
+        "edit": "allow",
+        "read": secrets_denied("allow"),
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "lsp": "allow",
+        "todowrite": "allow",
+        // Gyro's own tools (MCP server `gyro_capabilities`) follow the
+        // project's capability policy on Gyro's side, as before.
+        "gyro_capabilities_*": "allow",
+        // Exact read-only commands only: a wildcard would also match a chained
+        // command such as `git status; rm -rf .`.
+        "bash": {
+            "*": "ask",
+            "git status": "allow",
+            "git diff": "allow",
+            "git log": "allow",
+            "pwd": "allow",
+            "ls": "allow"
+        },
+        "external_directory": "ask",
+        "webfetch": "ask",
+        "websearch": "ask",
+        "doom_loop": "ask",
+        "task": "deny"
+    })
+}
+
+fn configuration(
+    inherited: Option<&str>,
+    name: &str,
+    plan: bool,
+    posture: ApprovalPosture,
+) -> Result<Value> {
     let mut config: Value = match inherited.filter(|value| !value.trim().is_empty()) {
         Some(value) => {
             serde_json::from_str(value).context("parse OpenCode inline configuration")?
@@ -41,12 +100,7 @@ fn configuration(inherited: Option<&str>, name: &str, plan: bool) -> Result<Valu
     config["agent"][name] = json!({
         "description": "Gyro workspace agent",
         "mode": "primary",
-        "permission": {
-            "*": "ask",
-            "edit": if plan { "deny" } else { "ask" },
-            "task": "deny",
-            "read": { "*": "ask", "*.env": "deny", "*.env.*": "deny" }
-        }
+        "permission": permission(plan, posture)
     });
     config["default_agent"] = json!(name);
     Ok(config)
@@ -73,7 +127,7 @@ mod tests {
         ] {
             command.env(key, temp.path().join(child));
         }
-        let name = configure(&mut command, false).unwrap();
+        let name = configure(&mut command, false, ApprovalPosture::Ask).unwrap();
         let output = command
             .args(["--pure", "debug", "agent", &name])
             .output()
@@ -98,7 +152,7 @@ mod tests {
 
     #[test]
     fn permissive_custom_agents_cannot_be_selected_by_default() {
-        let config = configuration(Some(r#"{"model":"vendor/model","default_agent":"build","agent":{"build":{"permission":"allow"}},"provider":{"vendor":{"options":{"baseURL":"http://localhost:1234"}}}}"#), "gyro-test", false).unwrap();
+        let config = configuration(Some(r#"{"model":"vendor/model","default_agent":"build","agent":{"build":{"permission":"allow"}},"provider":{"vendor":{"options":{"baseURL":"http://localhost:1234"}}}}"#), "gyro-test", false, ApprovalPosture::Ask).unwrap();
         assert_eq!(config["default_agent"], "gyro-test");
         assert_eq!(config["agent"]["gyro-test"]["permission"]["*"], "ask");
         assert_eq!(config["agent"]["gyro-test"]["permission"]["task"], "deny");
@@ -112,10 +166,50 @@ mod tests {
 
     #[test]
     fn planning_denies_edits_and_invalid_configuration_fails_closed() {
-        let config = configuration(None, "gyro-test", true).unwrap();
-        assert_eq!(config["agent"]["gyro-test"]["permission"]["edit"], "deny");
+        for posture in [
+            ApprovalPosture::Ask,
+            ApprovalPosture::ApproveForMe,
+            ApprovalPosture::FullAccess,
+        ] {
+            let config = configuration(None, "gyro-test", true, posture).unwrap();
+            let rules = &config["agent"]["gyro-test"]["permission"];
+            assert_eq!(rules["edit"], "deny");
+            assert_eq!(rules["read"]["*"], "ask");
+        }
         for bad in ["{", "[]", r#"{"agent":false}"#] {
-            assert!(configuration(Some(bad), "gyro-test", false).is_err());
+            assert!(configuration(Some(bad), "gyro-test", false, ApprovalPosture::Ask).is_err());
+        }
+    }
+
+    #[test]
+    fn approve_for_me_runs_project_work_and_still_asks_for_shell_and_web() {
+        let config =
+            configuration(None, "gyro-test", false, ApprovalPosture::ApproveForMe).unwrap();
+        let rules = &config["agent"]["gyro-test"]["permission"];
+        assert_eq!(rules["edit"], "allow");
+        assert_eq!(rules["read"]["*"], "allow");
+        assert_eq!(rules["read"]["*.env"], "deny");
+        assert_eq!(rules["bash"]["*"], "ask");
+        assert_eq!(rules["bash"]["git status"], "allow");
+        assert!(rules["bash"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .all(|pattern| pattern == "*" || !pattern.contains('*')));
+        for tool in ["external_directory", "webfetch", "websearch", "*"] {
+            assert_eq!(rules[tool], "ask", "{tool}");
+        }
+        assert_eq!(rules["task"], "deny");
+        assert_eq!(rules["gyro_capabilities_*"], "allow");
+        // Last match wins in OpenCode, so the catch-all has to come first.
+        assert_eq!(rules.as_object().unwrap().keys().next().unwrap(), "*");
+
+        // Ask and Full Access keep every native tool on ask.
+        for posture in [ApprovalPosture::Ask, ApprovalPosture::FullAccess] {
+            let config = configuration(None, "gyro-test", false, posture).unwrap();
+            let rules = &config["agent"]["gyro-test"]["permission"];
+            assert_eq!(rules["edit"], "ask");
+            assert_eq!(rules["read"]["*"], "ask");
         }
     }
 }

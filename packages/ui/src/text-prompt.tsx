@@ -10,8 +10,9 @@
  * element on `document.body`, resolves with the trimmed value on confirm, and
  * resolves with null when the prompt is dismissed.
  */
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { Button, Dialog, Input } from "./primitives";
 import "./text-prompt.css";
 
 export type TextPromptOptions = {
@@ -29,23 +30,18 @@ export type TextPromptOptions = {
 
 function TextPromptDialog({
   options,
+  open,
   onClose,
+  onExited,
 }: {
   options: TextPromptOptions;
+  open: boolean;
   onClose: (value: string | null) => void;
+  onExited: () => void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const field = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState(options.initialValue ?? "");
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const element = dialog.current;
-    if (!element) return;
-    if (!element.open) element.showModal();
-    field.current?.focus();
-    field.current?.select();
-  }, []);
 
   const commit = () => {
     const next = value.trim();
@@ -62,58 +58,67 @@ function TextPromptDialog({
   };
 
   return (
-    <dialog
-      aria-label={options.title}
-      className="gyro-text-prompt"
-      onCancel={(event) => {
-        event.preventDefault();
-        onClose(null);
+    <Dialog.Root
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose(null);
       }}
-      ref={dialog}
+      onOpenChangeComplete={(next) => {
+        if (next) field.current?.select();
+        else onExited();
+      }}
     >
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          commit();
-        }}
+      <Dialog.Content
+        aria-label={options.title}
+        className="gyro-text-prompt"
+        initialFocus={field}
+        size="sm"
       >
-        <h2 className="gyro-text-prompt-title">{options.title}</h2>
-        {options.message ? (
-          <p className="gyro-text-prompt-message">{options.message}</p>
-        ) : null}
-        <label className="gyro-text-prompt-field">
-          <span>{options.label ?? "Name"}</span>
-          <input
-            aria-invalid={error ? true : undefined}
-            autoComplete="off"
-            onChange={(event) => {
-              setValue(event.target.value);
-              setError(null);
-            }}
-            ref={field}
-            spellCheck={false}
-            value={value}
-          />
-        </label>
-        {error ? (
-          <p className="gyro-text-prompt-error" role="alert">
-            {error}
-          </p>
-        ) : null}
-        <div className="gyro-text-prompt-actions">
-          <button
-            className="gyro-secondary-button"
-            onClick={() => onClose(null)}
-            type="button"
-          >
-            Cancel
-          </button>
-          <button className="gyro-primary-button" type="submit">
-            {options.confirmLabel ?? "Save"}
-          </button>
-        </div>
-      </form>
-    </dialog>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            commit();
+          }}
+        >
+          <Dialog.Title>{options.title}</Dialog.Title>
+          {options.message ? (
+            <Dialog.Description>{options.message}</Dialog.Description>
+          ) : null}
+          <label className="gyro-text-prompt-field">
+            <span>{options.label ?? "Name"}</span>
+            <Input
+              autoComplete="off"
+              invalid={!!error}
+              onChange={(event) => {
+                setValue(event.target.value);
+                setError(null);
+              }}
+              ref={field}
+              spellCheck={false}
+              value={value}
+            />
+          </label>
+          {error ? (
+            <p className="gyro-text-prompt-error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          <div className="gyro-text-prompt-actions">
+            <Button
+              onClick={() => onClose(null)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Cancel
+            </Button>
+            <Button size="sm" type="submit">
+              {options.confirmLabel ?? "Save"}
+            </Button>
+          </div>
+        </form>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 
@@ -139,19 +144,34 @@ export function askTextValue(
 
   return new Promise<string | null>((resolve) => {
     let settled = false;
-    const close = (value: string | null) => {
+    let removed = false;
+    const remove = () => {
+      if (removed) return;
+      removed = true;
+      root.unmount();
+      host.remove();
+    };
+    const render = (open: boolean) =>
+      root.render(
+        <TextPromptDialog
+          onClose={close}
+          onExited={() => queueMicrotask(remove)}
+          open={open}
+          options={options}
+        />,
+      );
+    function close(value: string | null) {
       if (settled) return;
       settled = true;
       closeActivePrompt = null;
       resolve(value);
-      // Unmount after the caller resumes, so a submit handler is never torn
-      // down in the middle of its own event.
-      queueMicrotask(() => {
-        root.unmount();
-        host.remove();
-      });
-    };
+      // Play the exit, then unmount after the caller resumes, so a submit
+      // handler is never torn down mid-event. The timer covers a window that
+      // never paints, where transitions do not finish.
+      render(false);
+      window.setTimeout(remove, 1000);
+    }
     closeActivePrompt = close;
-    root.render(<TextPromptDialog onClose={close} options={options} />);
+    render(true);
   });
 }

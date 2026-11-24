@@ -40,8 +40,10 @@ export function inspectSettingsLayout({ requireProviders = false } = {}) {
       check(bounds(title).top - bounds(title.previousElementSibling).bottom >= 16,
         'Provider heading crowds the preceding account panel');
     }
-    for (const menu of table.querySelectorAll('.gyro-provider-details[open] > div')) {
-      check(inside(bounds(menu), bounds(table), 8), 'Open provider menu escapes its table');
+    // Details open in a portaled Popover, so check them against the viewport.
+    for (const menu of document.querySelectorAll('.gyro-provider-details__popup[data-open]')) {
+      check(inside(bounds(menu), { left: 0, top: 0, right: innerWidth, bottom: innerHeight }, 0),
+        'Open provider menu escapes the window');
       check(menu.scrollWidth <= menu.clientWidth + 1, 'Open provider menu clips its contents horizontally');
     }
     const head = table.querySelector('.gyro-provider-table-head');
@@ -57,9 +59,9 @@ export function inspectSettingsLayout({ requireProviders = false } = {}) {
       const cells = [...row.children].filter(visible);
       for (const cell of cells) {
         check(inside(bounds(cell), rowBounds, 16), `Cell outside row gutter: ${label(cell)}`);
-        for (const control of cell.querySelectorAll('button, summary')) {
-          // Popover contents float independently; the summary trigger must fit.
-          if (!visible(control) || (control.closest('.gyro-provider-details') && control.tagName !== 'SUMMARY')) continue;
+        for (const control of cell.querySelectorAll('button')) {
+          // Popover contents portal out of the row; only triggers live here.
+          if (!visible(control)) continue;
           check(inside(bounds(control), rowBounds, 16), `Control outside row: ${label(control)}`);
         }
       }

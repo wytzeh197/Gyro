@@ -4,11 +4,10 @@
   border: 1px solid var(--gyro-border);
   border-radius: var(--gyro-radius-lg);
   bottom: var(--gyro-space-section);
-  box-shadow:
-    0 12px 36px rgba(0, 0, 0, 0.18),
-    0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--gyro-shadow-toast);
   box-sizing: border-box;
   color: var(--gyro-text);
+  display: block;
   max-height: calc(100dvh - 40px);
   overflow: auto;
   padding: var(--gyro-space-panel);

@@ -1,3 +1,4 @@
+import { Button } from "./primitives/button";
 import { useRef, useState } from "react";
 import type { WorkbenchPreferences } from "./types";
 import { SettingsGroup } from "./settings-controls";
@@ -15,6 +16,7 @@ export function SettingsTransferPanel({
   onApply: (settings: Partial<PortableSettings>) => void;
 }) {
   const importGeneration = useRef(0);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState<Partial<PortableSettings>>();
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -25,8 +27,8 @@ export function SettingsTransferPanel({
       description="Move appearance, notifications and shortcuts between installations. Accounts, permissions, projects and chats are excluded."
     >
       <div className="gyro-settings-transfer-actions">
-        <button
-          className="gyro-secondary-button"
+        <Button
+          variant="outline"
           type="button"
           onClick={() => {
             const blob = new Blob([exportSettingsTransfer(preferences)], {
@@ -41,33 +43,35 @@ export function SettingsTransferPanel({
           }}
         >
           Export settings
-        </button>
-        <label className="gyro-secondary-button">
+        </Button>
+        <Button variant="outline" onClick={() => fileInput.current?.click()}>
           Import settings
-          <input
-            aria-label="Import settings file"
-            type="file"
-            accept=".json,application/json"
-            onChange={async (event) => {
-              const generation = ++importGeneration.current;
-              const file = event.target.files?.[0];
-              event.target.value = "";
-              setDraft(undefined);
-              setError("");
-              setNotice("");
-              if (!file) return;
-              try {
-                if (file.size > 65536)
-                  throw new Error("Settings files must be smaller than 64 KB.");
-                const parsed = parseSettingsTransfer(await file.text());
-                if (generation === importGeneration.current) setDraft(parsed);
-              } catch (e) {
-                if (generation === importGeneration.current)
-                  setError(String(e instanceof Error ? e.message : e));
-              }
-            }}
-          />
-        </label>
+        </Button>
+        <input
+          ref={fileInput}
+          hidden
+          aria-label="Import settings file"
+          type="file"
+          accept=".json,application/json"
+          onChange={async (event) => {
+            const generation = ++importGeneration.current;
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            setDraft(undefined);
+            setError("");
+            setNotice("");
+            if (!file) return;
+            try {
+              if (file.size > 65536)
+                throw new Error("Settings files must be smaller than 64 KB.");
+              const parsed = parseSettingsTransfer(await file.text());
+              if (generation === importGeneration.current) setDraft(parsed);
+            } catch (e) {
+              if (generation === importGeneration.current)
+                setError(String(e instanceof Error ? e.message : e));
+            }
+          }}
+        />
       </div>
       {error ? <p role="alert">{error}</p> : null}
       {draft ? (
@@ -95,9 +99,9 @@ export function SettingsTransferPanel({
               </div>
             ))}
           </dl>
-          <button
+          <Button
             type="button"
-            className="gyro-primary-button"
+            size="md"
             onClick={() => {
               onApply(draft);
               setDraft(undefined);
@@ -105,14 +109,14 @@ export function SettingsTransferPanel({
             }}
           >
             Apply settings
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             onClick={() => setDraft(undefined)}
           >
             Cancel
-          </button>
+          </Button>
         </div>
       ) : null}
       {notice ? <p role="status">{notice}</p> : null}

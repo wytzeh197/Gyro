@@ -1,4 +1,4 @@
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "./icons";
 import { workspaceFileBadge } from "./workspace-file-icons";
 import "./workspace-search-results.css";
 import { useMemo, useState } from "react";

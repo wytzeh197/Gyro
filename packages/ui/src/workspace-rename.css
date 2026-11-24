@@ -1,27 +1,15 @@
-.gyro-workspace-rename {
-  background: var(--gyro-surface-raised);
-  color: var(--gyro-text);
-  border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-md);
+/* The Dialog primitive owns the surface, backdrop, focus and motion. */
+.gyro-dialog.gyro-workspace-rename {
   padding: var(--gyro-space-card);
-  font-family: var(--gyro-font-sans);
-  width: min(420px, calc(100vw - 32px));
-  max-height: calc(100dvh - 32px);
   overflow: auto;
 }
-.gyro-workspace-rename::backdrop {
-  background: var(--gyro-scrim);
-}
-.gyro-workspace-rename.is-preview {
-  width: min(1000px, calc(100vw - 32px));
+.gyro-dialog.gyro-workspace-rename.is-preview {
+  max-inline-size: min(1000px, calc(100vw - 32px));
+  max-block-size: calc(100dvh - 32px);
 }
 .gyro-workspace-rename form {
   display: grid;
   gap: var(--gyro-space-group);
-}
-.gyro-workspace-rename h2 {
-  margin: 0;
-  font-size: var(--gyro-font-heading);
 }
 .gyro-workspace-rename p {
   margin: 0;
@@ -32,16 +20,6 @@
   display: grid;
   gap: var(--gyro-space-compact);
   font-size: var(--gyro-font-support);
-}
-.gyro-workspace-rename input {
-  width: 100%;
-  min-height: var(--gyro-control-height);
-  background: var(--gyro-surface-soft);
-  color: var(--gyro-text);
-  border: 1px solid var(--gyro-border);
-  border-radius: var(--gyro-radius-sm);
-  padding: var(--gyro-space-standard);
-  font: inherit;
 }
 .gyro-workspace-rename footer {
   display: flex;
@@ -81,8 +59,7 @@
 .gyro-workspace-rename-error {
   color: var(--gyro-danger) !important;
 }
-.gyro-workspace-rename button:focus-visible,
-.gyro-workspace-rename input:focus-visible,
+.gyro-workspace-rename-preview nav button:focus-visible,
 .gyro-workspace-edit-bar button:focus-visible,
 .gyro-workspace-edit-bar summary:focus-visible {
   outline: 2px solid var(--gyro-focus-ring);

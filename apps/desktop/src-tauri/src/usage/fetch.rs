@@ -445,7 +445,14 @@ pub(crate) fn fetch_anthropic_provider_usage(
 ) -> Result<ProviderUsageSnapshot, String> {
     static POLL: OnceLock<Mutex<usage_poll::UsagePoll<ProviderUsageSnapshot>>> = OnceLock::new();
     let mut poll = POLL
-        .get_or_init(|| Mutex::new(usage_poll::UsagePoll::holding(ANTHROPIC_USAGE_HOLD)))
+        .get_or_init(|| {
+            Mutex::new(
+                usage_poll::UsagePoll::holding(ANTHROPIC_USAGE_HOLD).holding_partial_for(
+                    ANTHROPIC_FRESH_USAGE_MAX_AGE,
+                    anthropic_usage_has_unmeasured_window,
+                ),
+            )
+        })
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let max_age = fresh.then_some(ANTHROPIC_FRESH_USAGE_MAX_AGE);
@@ -459,6 +466,33 @@ pub(crate) fn fetch_anthropic_provider_usage(
             other => other,
         },
     )
+}
+
+/// A reading that names a plan window without a level for it.
+///
+/// The 5-hour window is reported before the account has measured it, both while
+/// idle and in the first moments after the next message opens it. Such a reading
+/// is asked again after a minute rather than held for five, so the level shows
+/// up as soon as the account has one. A window whose reset has passed since the
+/// reading counts too: its level describes an allowance that no longer exists.
+pub(crate) fn anthropic_usage_has_unmeasured_window(snapshot: &ProviderUsageSnapshot) -> bool {
+    anthropic_usage_has_unmeasured_window_at(snapshot, chrono::Utc::now())
+}
+
+/// The same, against a fixed clock.
+pub(crate) fn anthropic_usage_has_unmeasured_window_at(
+    snapshot: &ProviderUsageSnapshot,
+    now: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    snapshot.windows.iter().any(|window| {
+        let unmeasured = window.used_percent.is_none() && window.status != "exhausted";
+        let rolled_over = window
+            .resets_at
+            .as_deref()
+            .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+            .is_some_and(|at| at <= now);
+        unmeasured || rolled_over
+    })
 }
 
 /// A lapsed or refused token is one only the CLI can renew. A rate limit or an

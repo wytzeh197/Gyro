@@ -1,0 +1,71 @@
+/* Project groups, sessions, settings, explorer, and source control share the
+   same hit target and focus treatment. Their own rules place icons and actions. */
+:root[data-theme]
+  .gyro-sidebar
+  :is(
+    .gyro-sidebar-project-toggle,
+    .gyro-sidebar-row,
+    .gyro-sidebar-scm-identity,
+    .gyro-sidebar-action.is-settings-page
+  ) {
+  min-block-size: var(--gyro-row-height);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-text-secondary);
+  font-size: var(--gyro-text-ui);
+}
+
+:root[data-theme] .gyro-sidebar .gyro-session-row .gyro-sidebar-thread-main {
+  min-height: calc(var(--gyro-row-height) * 1.35);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-text-secondary);
+  font-size: var(--gyro-text-ui);
+}
+
+.gyro-sidebar .gyro-session-row.is-awaiting-approval {
+  background-color: color-mix(in srgb, var(--gyro-blue) 8%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--gyro-blue) 50%, transparent);
+  outline-offset: -1px;
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  :is(
+    .gyro-sidebar-project-toggle,
+    .gyro-sidebar-thread-main,
+    .gyro-sidebar-row,
+    .gyro-sidebar-scm-identity,
+    .gyro-sidebar-action.is-settings-page
+  ):focus-visible {
+  outline: 2px solid var(--gyro-border-focus);
+  outline-offset: -2px;
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  :is(
+    .gyro-sidebar-row,
+    .gyro-sidebar-scm-row,
+    .gyro-session-row,
+    .gyro-sidebar-action.is-settings-page
+  ):hover {
+  background-color: var(--gyro-row-hover);
+}
+
+:root[data-theme]
+  .gyro-sidebar
+  :is(
+    .gyro-sidebar-row,
+    .gyro-sidebar-scm-row,
+    .gyro-session-row,
+    .gyro-sidebar-action.is-settings-page
+  ).is-active {
+  background-color: var(--gyro-row-selected);
+  color: var(--gyro-text-primary);
+}
+
+.gyro-sidebar
+  :is(.gyro-sidebar-small-title, .gyro-settings-sidebar-group > span) {
+  color: var(--gyro-text-tertiary);
+  font-size: var(--gyro-text-ui-xs);
+  letter-spacing: var(--gyro-tracking-caps);
+}

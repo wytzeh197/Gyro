@@ -1,3 +1,4 @@
+import { Button } from "./primitives/button";
 import "./efficiency.css";
 import { EfficiencyRoutingSettings } from "./efficiency-routing-settings";
 import { useState, type ReactNode } from "react";
@@ -5,7 +6,7 @@ import type { GyroConfig, EfficiencyConfig, PriceSnapshot } from "./types";
 import {
   SettingsGroup,
   SettingsRow,
-  SettingsSelect,
+  SettingsChoice,
   SettingsSwitch,
 } from "./settings-controls";
 export const DEFAULT_EFFICIENCY: EfficiencyConfig = {
@@ -171,21 +172,22 @@ export function EfficiencySettings({
         label="Task profile"
         detail="Applies only when no reasoning effort is selected and the model supports it."
       >
-        <SettingsSelect
+        <SettingsChoice
           aria-label="Task profile"
           disabled={disabled || !value.enabled}
           value={value.profile}
-          onChange={(e) =>
+          onValueChange={(profile) =>
             void save({
               ...value,
-              profile: e.target.value as EfficiencyConfig["profile"],
+              profile: profile as EfficiencyConfig["profile"],
             })
           }
-        >
-          <option value="routine">Routine</option>
-          <option value="standard">Standard</option>
-          <option value="deep">Deep</option>
-        </SettingsSelect>
+          options={[
+            { value: "routine", label: "Routine" },
+            { value: "standard", label: "Standard" },
+            { value: "deep", label: "Deep" },
+          ]}
+        />
       </SettingsRow>
       <EfficiencyRoutingSettings
         value={value}
@@ -197,8 +199,8 @@ export function EfficiencySettings({
         label="Reset efficiency"
         detail="Restore defaults while preserving immutable price history."
       >
-        <button
-          className="gyro-secondary-button"
+        <Button
+          variant="outline"
           disabled={disabled}
           onClick={() =>
             void save({ ...DEFAULT_EFFICIENCY, prices: value.prices })
@@ -206,7 +208,7 @@ export function EfficiencySettings({
           type="button"
         >
           Reset
-        </button>
+        </Button>
       </SettingsRow>
       <SettingsRow
         label="API price snapshots"
@@ -286,13 +288,13 @@ export function EfficiencySettings({
               />
             </SettingsRow>
           ))}
-          <button
-            className="gyro-secondary-button"
+          <Button
+            variant="outline"
             disabled={disabled}
             type="submit"
           >
             Add price snapshot
-          </button>
+          </Button>
         </form>
       </details>
       {error ? <p role="alert">{error}</p> : null}

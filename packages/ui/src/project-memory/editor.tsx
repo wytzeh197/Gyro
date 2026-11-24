@@ -1,3 +1,4 @@
+import { Button } from "../primitives/button";
 import type { RefObject } from "react";
 import type { MemoryDraft, MemoryCandidate, MemoryKind } from "./types";
 export type MemoryEditorState = {
@@ -91,8 +92,8 @@ export function MemoryEditor({
         when relevant.
       </p>
       {editor.draft.sources.some((source) => source.kind !== "user-entered") ? (
-        <button
-          className="gyro-secondary-button"
+        <Button
+          variant="outline"
           onClick={() =>
             setEditor({
               ...editor,
@@ -104,23 +105,22 @@ export function MemoryEditor({
           }
         >
           Record this as my correction
-        </button>
+        </Button>
       ) : null}
       <div className="gyro-memory-actions">
-        <button
-          className="gyro-primary-button"
+        <Button
           disabled={saving || !editor.draft.text.trim()}
           onClick={onSave}
         >
           {saving ? "Saving…" : "Save memory"}
-        </button>
-        <button
-          className="gyro-secondary-button"
+        </Button>
+        <Button
+          variant="outline"
           disabled={saving}
           onClick={onDiscard}
         >
           Discard edits
-        </button>
+        </Button>
       </div>
     </div>
   );

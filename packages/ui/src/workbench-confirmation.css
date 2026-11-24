@@ -1,0 +1,18 @@
+.gyro-workbench-confirmation .gyro-dialog__title {
+  display: flex;
+  align-items: center;
+  gap: var(--gyro-space-standard);
+}
+
+.gyro-workbench-confirmation .gyro-dialog__title svg {
+  flex: none;
+  color: var(--gyro-danger);
+}
+
+.gyro-workbench-confirmation .gyro-dialog__body code {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--gyro-text-secondary);
+  font-family: var(--gyro-font-mono);
+  font-size: var(--gyro-text-ui-xs);
+}

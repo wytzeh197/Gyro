@@ -114,10 +114,39 @@ pub(super) fn read_workspace_output(
     let manager = app.state::<CapabilityIdeEvidenceManager>();
     let output = if arguments.get("outputId").is_some() {
         let id = capability_argument_string(arguments, "outputId")?;
-        manager
-            .task_outputs
-            .get(&bound.workspace_key, Some(&bound.session_id), id)
-            .ok_or_else(|| anyhow::anyhow!("Requested output is not retained for this chat"))?
+        let Some(output) =
+            manager
+                .task_outputs
+                .get(&bound.workspace_key, Some(&bound.session_id), id)
+        else {
+            capability_output_budget::offset(arguments, "stdoutOffset")?;
+            capability_output_budget::offset(arguments, "stderrOffset")?;
+            let store = crate::stores::open_store().map_err(anyhow::Error::msg)?;
+            let session_id = uuid::Uuid::parse_str(&bound.session_id)?;
+            let (receipt, observed_at) = store
+                .read_workspace_output_receipt(session_id, &bound.workspace_key, id)?
+                .ok_or_else(|| anyhow::anyhow!("Requested output is not retained for this chat"))?;
+            let mut data = json!({
+                "id": id,
+                "status": receipt.outcome["status"],
+                "exitCode": receipt.outcome["exitCode"],
+                "taskId": receipt.outcome["taskId"],
+                "capabilityId": receipt.outcome["capabilityId"],
+                "observedAt": observed_at,
+                "outputAvailable": false,
+                "historical": true,
+            });
+            if store.has_applied_workspace_edit_after(
+                session_id,
+                &bound.workspace_key,
+                observed_at,
+            )? {
+                data["workspaceEditedAfterRun"] = true.into();
+                data["nextStep"] = "This chat applied a Workspace edit after the saved result. Run the relevant check again if you need to verify current behavior.".into();
+            }
+            return Ok(("Read saved Workspace exit status".into(), data, None));
+        };
+        output
     } else {
         // Only the active output channel is needed, so borrow the snapshot
         // instead of copying every open buffer out of the cache.
@@ -519,6 +548,42 @@ pub(super) fn bound_command_result(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn harness_feedback_crosses_api_and_mcp_without_replacing_the_terminal() {
+        use gyro_core::{CapabilityResponse, CapabilityResult, GyroPaths};
+        let mut response = CapabilityResponse::completed(
+            "test",
+            CapabilityResult {
+                call_id: uuid::Uuid::nil(),
+                capability_id: gyro_core::CapabilityId::TerminalOpen,
+                summary: "Running".into(),
+                data: serde_json::json!({"pane": {"status": "running", "outputCursor": {"start": 0, "end": 5, "generation": "a"}}}),
+                resource: Some(gyro_core::CapabilityResourceRef {
+                    id: "terminal:owned".into(),
+                    kind: "terminal".into(),
+                    label: "Build".into(),
+                }),
+            },
+        );
+        gyro_core::provider_runtime::tool_batch::add_recovery_feedback(&mut response);
+        let api: serde_json::Value = serde_json::from_str(
+            &gyro_core::provider_runtime::tool_batch::model_response_text(&response).unwrap(),
+        )
+        .unwrap();
+        let paths =
+            GyroPaths::from_base_dir(std::env::temp_dir().join("gyro-harness-feedback-test"));
+        let mcp = crate::capabilities::mcp_server::capability_mcp_response(&paths, response, false)
+            .unwrap();
+        let tool: serde_json::Value =
+            serde_json::from_str(mcp["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(api["result"]["resource"], tool["resource"]);
+        assert_eq!(api["result"]["data"], tool["data"]);
+        assert_eq!(api["result"]["summary"], tool["summary"]);
+        assert!(tool["summary"]
+            .as_str()
+            .unwrap()
+            .contains("gyro_terminal_wait"));
+    }
     use super::*;
 
     #[test]

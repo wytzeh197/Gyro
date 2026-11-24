@@ -61,14 +61,10 @@
 .gyro-remote-toolbar > select {
   max-width: 100%;
 }
-.gyro-remote-dialog {
-  background: var(--gyro-surface);
-  color: var(--gyro-text);
-  border: thin solid var(--gyro-border);
-  border-radius: var(--gyro-radius-lg);
-  padding: 0;
-  max-width: min(90vw, calc(var(--gyro-ide-sidebar-width) * 3));
-  max-height: 90vh;
+.gyro-dialog.gyro-remote-dialog {
+  display: block;
+  max-inline-size: min(90vw, calc(var(--gyro-ide-sidebar-width) * 3));
+  max-block-size: min(100%, 90dvh);
   overflow: auto;
 }
 /* The settings title already names the dialog; only Close sits on top. */
@@ -76,9 +72,6 @@
   display: flex;
   justify-content: flex-end;
   padding: var(--gyro-space-standard) var(--gyro-space-panel) 0;
-}
-.gyro-remote-dialog::backdrop {
-  background: var(--gyro-heavy-shadow);
 }
 .gyro-remote-settings p,
 .gyro-remote-settings small {
@@ -644,7 +637,7 @@
   border-radius: var(--gyro-radius-md);
   background: var(--gyro-ink-bg);
   color: var(--gyro-ink-text);
-  transition: opacity var(--gyro-premium-motion) var(--gyro-premium-ease);
+  transition: opacity var(--gyro-motion) var(--gyro-ease);
 }
 :root[data-theme="light"] .gyro-remote-qr {
   border: thin solid var(--gyro-border);
@@ -837,14 +830,15 @@
 }
 .gyro-remote-ssh-fields .gyro-settings-input,
 .gyro-remote-ssh-fields .gyro-settings-select-field,
-.gyro-remote-ssh-fields .gyro-settings-select {
+.gyro-remote-ssh-fields .gyro-settings-select,
+.gyro-remote-ssh-fields .gyro-settings-choice {
   width: 100%;
   max-width: none;
 }
 .gyro-remote-ssh-fields .gyro-settings-select-field {
   display: block;
 }
-.gyro-remote-ssh-fields .gyro-settings-select {
+.gyro-remote-ssh-fields :is(.gyro-settings-select, .gyro-settings-choice) {
   min-height: var(--gyro-control-height);
 }
 .gyro-remote-text-button {
@@ -929,17 +923,9 @@
   padding-top: var(--gyro-space-section);
   margin: 0;
 }
-.gyro-remote-ssh :is(button, input, select, summary):focus-visible {
+.gyro-remote-ssh :is(button, input, select, summary):not(:where(.gyro-btn, .gyro-input, .gyro-select-trigger)):focus-visible {
   outline: thin solid var(--gyro-focus-ring);
   outline-offset: var(--gyro-space-compact);
-}
-.gyro-remote-ssh-spinner {
-  animation: gyro-ssh-rotate 1s linear infinite;
-}
-@keyframes gyro-ssh-rotate {
-  to {
-    transform: rotate(360deg);
-  }
 }
 @media (max-width: 700px) {
   .gyro-remote-ssh-connect {
@@ -954,11 +940,6 @@
   }
   .gyro-remote-ssh-host > .gyro-settings-status {
     flex: 0 1 auto;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .gyro-remote-ssh-spinner {
-    animation: none;
   }
 }
 :root[data-theme]

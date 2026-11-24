@@ -7,10 +7,11 @@ import {
 import {
   SettingsGroup,
   SettingsRow,
-  SettingsSelect,
+  SettingsChoice,
   SettingsSwitch,
 } from "./settings-controls";
 import { WorkspaceDefaultSettings } from "./settings-workspace-defaults";
+import type { ThemePreferences } from "./theme/theme-engine";
 export type SettingsPreferencePatch = Partial<
   Pick<
     WorkbenchPreferences,
@@ -19,7 +20,7 @@ export type SettingsPreferencePatch = Partial<
     | "defaultChatEffort"
     | "checkReminders"
   >
->;
+> & ThemePreferences;
 export function NewChatSettings({
   config,
   preferences,
@@ -60,38 +61,38 @@ export function NewChatSettings({
           label="Provider for new chats"
           detail="Use the last selection, or always begin with one connected provider."
         >
-          <SettingsSelect
+          <SettingsChoice
             aria-label="Default chat provider"
             value={preferences.defaultChatProviderId ?? "last"}
-            onChange={(e) =>
+            onValueChange={(value) =>
               onChange?.({
                 defaultChatProviderId:
-                  e.target.value === "last"
-                    ? undefined
-                    : (e.target.value as ProviderId),
+                  value === "last" ? undefined : (value as ProviderId),
                 defaultChatEffort: undefined,
               })
             }
-          >
-            <option value="last">Last used</option>
-            {preferences.defaultChatProviderId && !provider ? (
-              <option value={preferences.defaultChatProviderId}>
-                Unavailable provider
-              </option>
-            ) : null}
-            {providers
-              .filter(
-                (p) =>
-                  p.authStatus === "connected" ||
-                  p.id === preferences.defaultChatProviderId,
-              )
-              .map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.displayName}
-                  {p.authStatus !== "connected" ? " — unavailable" : ""}
-                </option>
-              ))}
-          </SettingsSelect>
+            options={[
+              { value: "last", label: "Last used" },
+              ...(preferences.defaultChatProviderId && !provider
+                ? [{
+                    value: preferences.defaultChatProviderId,
+                    label: "Unavailable provider",
+                  }]
+                : []),
+              ...providers
+                .filter(
+                  (p) =>
+                    p.authStatus === "connected" ||
+                    p.id === preferences.defaultChatProviderId,
+                )
+                .map((p) => ({
+                  value: p.id,
+                  label: p.authStatus === "connected"
+                    ? p.displayName
+                    : `${p.displayName} — unavailable`,
+                })),
+            ]}
+          />
         </SettingsRow>
         {provider ? (
           <>
@@ -99,45 +100,34 @@ export function NewChatSettings({
               label="Default model"
               detail={`Uses ${provider.displayName}'s existing model default.`}
             >
-              <SettingsSelect
+              <SettingsChoice
                 aria-label="Default new-chat model"
-                value={providerDefaultModelId(provider)}
-                onChange={(e) => {
-                  onDefaultModel?.(provider.id, e.target.value);
+                value={providerDefaultModelId(provider) ?? null}
+                onValueChange={(value) => {
+                  onDefaultModel?.(provider.id, value);
                   onChange?.({ defaultChatEffort: undefined });
                 }}
-              >
-                {provider.models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.displayName}
-                  </option>
-                ))}
-              </SettingsSelect>
+                options={provider.models.map((m) => ({ value: m.id, label: m.displayName }))}
+              />
             </SettingsRow>
             {model?.supportedReasoningEfforts?.length ? (
               <SettingsRow
                 label="Reasoning effort"
                 detail="Only supported effort levels are available. Provider default follows the selected model."
               >
-                <SettingsSelect
+                <SettingsChoice
                   aria-label="Default reasoning effort"
                   value={preferences.defaultChatEffort ?? "default"}
-                  onChange={(e) =>
+                  onValueChange={(value) =>
                     onChange?.({
-                      defaultChatEffort:
-                        e.target.value === "default"
-                          ? undefined
-                          : e.target.value,
+                      defaultChatEffort: value === "default" ? undefined : value,
                     })
                   }
-                >
-                  <option value="default">Provider default</option>
-                  {model.supportedReasoningEfforts.map((e) => (
-                    <option key={e} value={e}>
-                      {e}
-                    </option>
-                  ))}
-                </SettingsSelect>
+                  options={[
+                    { value: "default", label: "Provider default" },
+                    ...model.supportedReasoningEfforts.map((effort) => ({ value: effort, label: effort })),
+                  ]}
+                />
               </SettingsRow>
             ) : null}
           </>

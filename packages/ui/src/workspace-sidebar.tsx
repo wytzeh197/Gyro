@@ -1,4 +1,3 @@
-import { SurfacePresence } from "./surface-presence";
 import { gitSetupMessage } from "./workspace-preparation";
 import { githubSetupStep, type GithubSetupAction } from "./github-setup";
 import {
@@ -53,7 +52,7 @@ import {
   Terminal,
   Trash2,
   XCircle,
-} from "lucide-react";
+} from "./icons";
 import {
   useCallback,
   useEffect,
@@ -69,8 +68,9 @@ import {
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { createPortal } from "react-dom";
 import { AntigravityMark } from "./antigravity-mark";
+import geminiSpark from "./assets/gemini-spark.png";
+import mistralMark from "./assets/mistral-mark.svg";
 import { branchCommitDetail, recentBranches } from "./branch-recency";
 import { formatRunDuration } from "./chat-run";
 import "./automation-detail.css";
@@ -87,7 +87,8 @@ import { CheckWorkMenuItem } from "./check-work-context";
 import { CliSessionList } from "./cli-session-list";
 import { confirmAction } from "./confirm-action";
 import { resolveLanguage } from "./editor/languages/registry";
-import { useOutsidePointerDismiss } from "./menu-dismiss";
+import { Button, Menu, Popover, pointAnchor } from "./primitives";
+import { WorkbenchConfirmation } from "./workbench-confirmation";
 import "./provider-allowance.css";
 import {
   CUSTOM_PROVIDER_PREFIX,
@@ -135,7 +136,6 @@ import type {
   WorkspaceLayoutId,
   WorkspaceSearchQuery,
 } from "./types";
-import { useDialogDismiss } from "./use-dialog-dismiss";
 import {
   isTransientWorkspacePath,
   isUserSelectedWorkspacePath,
@@ -1027,9 +1027,7 @@ export function WorkspaceSidebarContent({
       endChatDrag(drag.dragId);
     }
   }, [sessions]);
-  const [newSessionMenuView, setNewSessionMenuView] = useState<
-    "closed" | "root" | "more"
-  >("closed");
+  const [isNewSessionMenuOpen, setIsNewSessionMenuOpen] = useState(false);
   const readyCommandProfiles = commandProfiles.filter(
     (profile) => profile.readiness !== "blocked",
   );
@@ -1055,10 +1053,6 @@ export function WorkspaceSidebarContent({
     );
   }, [savedProjects, selectedTerminalPaneId, terminalPanes, workspacePath]);
   const newCliWorkspacePath = cliProjects[0]?.path ?? "";
-  const newSessionMenuRef = useOutsidePointerDismiss<HTMLDivElement>(
-    newSessionMenuView !== "closed",
-    () => setNewSessionMenuView("closed"),
-  );
   const [collapsedProjectIds, setCollapsedProjectIds] = useState<string[]>(
     loadCollapsedSidebarProjectIds,
   );
@@ -1165,10 +1159,12 @@ export function WorkspaceSidebarContent({
     if (roots.size === 0 && workspacePath) roots.add(workspacePath);
     return [...roots];
   }, [files, workspacePath]);
-  const explorerContextMenuRef = useOutsidePointerDismiss<HTMLDivElement>(
-    Boolean(explorerContextMenu),
-    () => setExplorerContextMenu(undefined),
-  );
+  // The menu keeps its last target while it animates out, after the state
+  // has already cleared.
+  const lastExplorerContextMenu = useRef(explorerContextMenu);
+  if (explorerContextMenu) lastExplorerContextMenu.current = explorerContextMenu;
+  const explorerMenuTarget =
+    explorerContextMenu ?? lastExplorerContextMenu.current;
   /* VS Code-style creation: the toolbar and the context menu open one row in
      the tree, and whatever is typed there names the new entry. The extension is
      part of the name, so "notes.txt" becomes a text file. */
@@ -1937,21 +1933,18 @@ export function WorkspaceSidebarContent({
 
   return (
     <>
-      {sessionDeleteCandidate
-        ? createPortal(
-            <SessionDeleteConfirmOverlay
-              chatLabel={sessionDeleteCandidate.label}
-              isWorking={sendingSessionIds.includes(sessionDeleteCandidate.id)}
-              onCancel={() => setSessionDeleteCandidate(undefined)}
-              onDelete={() => {
-                const candidate = sessionDeleteCandidate;
-                setSessionDeleteCandidate(undefined);
-                onDeleteSession?.(candidate.id);
-              }}
-            />,
-            document.body,
-          )
-        : null}
+      {sessionDeleteCandidate ? (
+        <SessionDeleteConfirmOverlay
+          chatLabel={sessionDeleteCandidate.label}
+          isWorking={sendingSessionIds.includes(sessionDeleteCandidate.id)}
+          onCancel={() => setSessionDeleteCandidate(undefined)}
+          onDelete={() => {
+            const candidate = sessionDeleteCandidate;
+            setSessionDeleteCandidate(undefined);
+            onDeleteSession?.(candidate.id);
+          }}
+        />
+      ) : null}
       <div className="gyro-sidebar-persistent-header">
         <div className="gyro-sidebar-windowbar" aria-label="Window navigation">
           {/* Both surfaces carry the toggle in the same slot, so the surface
@@ -2026,42 +2019,29 @@ export function WorkspaceSidebarContent({
                       <RefreshCw size={13} />
                     </button>
                     <ToolbarOverflow label="More Explorer actions">
-                      <button
-                        role="menuitem"
-                        aria-label="Add folder to workspace"
+                      <Menu.Item
+                        icon={<HardDrive aria-hidden="true" size={13} />}
                         onClick={onAddWorkspaceFolder}
-                        title="Add folder to workspace"
-                        type="button"
                       >
-                        <HardDrive size={13} />
-                        <span>Add folder to workspace</span>
-                      </button>
-                      <button
-                        role="menuitem"
-                        aria-label="Rename selected path"
+                        Add folder to workspace
+                      </Menu.Item>
+                      <Menu.Item
                         disabled={
                           (!selectedExplorerPath && !ide?.activePath) ||
                           Boolean(selectedExplorerFile?.isWorkspaceRoot)
                         }
+                        icon={<Edit3 aria-hidden="true" size={13} />}
                         onClick={() =>
                           startExplorerRename(
                             selectedExplorerPath ?? ide?.activePath ?? "",
                           )
                         }
-                        title="Rename selected path"
-                        type="button"
                       >
-                        <Edit3 size={13} />
-                        <span>Rename selected path</span>
-                      </button>
-                      <button
-                        role="menuitem"
-                        aria-label={
-                          selectedExplorerFile?.isWorkspaceRoot
-                            ? "Remove folder from workspace"
-                            : "Delete selected path"
-                        }
+                        Rename selected path
+                      </Menu.Item>
+                      <Menu.Item
                         disabled={!selectedExplorerPath && !ide?.activePath}
+                        icon={<Trash2 aria-hidden="true" size={13} />}
                         onClick={() => {
                           const path =
                             selectedExplorerPath ?? ide?.activePath ?? "";
@@ -2073,16 +2053,12 @@ export function WorkspaceSidebarContent({
                           }
                           onDeleteWorkspacePath?.(path);
                         }}
-                        title={
-                          selectedExplorerFile?.isWorkspaceRoot
-                            ? "Remove folder from workspace"
-                            : "Delete selected path"
-                        }
-                        type="button"
+                        tone="danger"
                       >
-                        <Trash2 size={13} />
-                        <span>{selectedExplorerFile?.isWorkspaceRoot ? "Remove folder from workspace" : "Delete selected path"}</span>
-                      </button>
+                        {selectedExplorerFile?.isWorkspaceRoot
+                          ? "Remove folder from workspace"
+                          : "Delete selected path"}
+                      </Menu.Item>
                     </ToolbarOverflow>
                   </div>
                 ) : null
@@ -2405,188 +2381,173 @@ export function WorkspaceSidebarContent({
                   Open a folder to browse and edit its files.
                 </div>
               )}
-              <SurfacePresence>{explorerContextMenu ? (
-                <div
-                  className="gyro-explorer-context-menu"
-                  ref={explorerContextMenuRef}
-                  role="menu"
-                  style={{
-                    left: explorerContextMenu.x,
-                    top: explorerContextMenu.y,
-                  }}
-                >
-                  <button
-                    onClick={() => {
-                      const file = files.find(
-                        (item) => item.path === explorerContextMenu.path,
-                      );
-                      if (file?.kind === "file") {
-                        onOpenWorkspaceFile?.(file.path);
-                      } else {
-                        startExplorerDraft("file", file?.path);
-                      }
-                      setExplorerContextMenu(undefined);
-                    }}
-                    role="menuitem"
-                    type="button"
+              <Menu.Root
+                open={Boolean(explorerContextMenu)}
+                onOpenChange={(open) => {
+                  if (!open) setExplorerContextMenu(undefined);
+                }}
+              >
+                {explorerMenuTarget ? (
+                  <Menu.Content
+                    anchor={pointAnchor(
+                      explorerMenuTarget.x,
+                      explorerMenuTarget.y,
+                    )}
+                    sideOffset={2}
                   >
-                    {files.find(
-                      (item) => item.path === explorerContextMenu.path,
-                    )?.kind === "file"
-                      ? "Open"
-                      : "New File"}
-                  </button>
-                  {files.find((item) => item.path === explorerContextMenu.path)
-                    ?.kind === "directory" ? (
-                    <button
-                      onClick={() =>
-                        startExplorerDraft(
-                          "directory",
-                          explorerContextMenu.path,
-                        )
-                      }
-                      role="menuitem"
-                      type="button"
-                    >
-                      New Folder
-                    </button>
-                  ) : null}
-                  <button
-                    onClick={() =>
-                      startExplorerRename(explorerContextMenu.path)
-                    }
-                    role="menuitem"
-                    type="button"
-                  >
-                    Rename
-                  </button>
-                  <button
-                    onClick={() => {
-                      const target = explorerContextMenu.path;
-                      setExplorerContextMenu(undefined);
-                      onDuplicateWorkspacePath?.(target);
-                    }}
-                    role="menuitem"
-                    type="button"
-                  >
-                    Duplicate
-                  </button>
-                  {files.find((item) => item.path === explorerContextMenu.path)
-                    ?.isWorkspaceRoot ? null : (
-                    <button
-                      onClick={() => {
-                        const target = explorerContextMenu.path;
-                        const separator = target.lastIndexOf("/");
-                        const parent =
-                          separator > 0 ? target.slice(0, separator) : target;
-                        setExplorerContextMenu(undefined);
-                        void askTextValue({
-                          title: "Move",
-                          label: "Destination folder",
-                          message:
-                            "The file keeps its name. Leave the destination inside this workspace folder.",
-                          initialValue: parent,
-                          confirmLabel: "Move",
-                        }).then((destination) => {
-                          if (!destination) return;
-                          onMoveWorkspacePath?.(target, destination);
-                        });
-                      }}
-                      role="menuitem"
-                      type="button"
-                    >
-                      Move…
-                    </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      const target = explorerContextMenu.path;
-                      setExplorerContextMenu(undefined);
-                      // Return must not send the current draft while the
-                      // folder listing is still being attached. Focus only
-                      // after that attachment is in the composer.
-                      setExplorerAskSendHeld(true);
-                      void Promise.resolve(onAskWorkspacePath?.(target))
-                        .then((attached) => {
-                          if (attached === false) return;
-                          window.dispatchEvent(
-                            new Event("gyro-focus-composer"),
+                      <Menu.Item
+                        onClick={() => {
+                          const file = files.find(
+                            (item) => item.path === explorerMenuTarget.path,
                           );
-                        })
-                        .finally(() => {
-                          setExplorerAskSendHeld(false);
-                        });
-                    }}
-                    role="menuitem"
-                    type="button"
-                  >
-                    Ask Gyro
-                  </button>
-                  <button
-                    onClick={() => {
-                      const target = explorerContextMenu.path;
-                      const entry = files.find((file) => file.path === target);
-                      setExplorerContextMenu(undefined);
-                      writeClipboardText(
-                        entry ? workspaceCopyAbsolutePath(entry) : target,
-                      );
-                    }}
-                    role="menuitem"
-                    type="button"
-                  >
-                    Copy Path
-                  </button>
-                  <button
-                    onClick={() => {
-                      const target = explorerContextMenu.path;
-                      const entry = files.find((file) => file.path === target);
-                      setExplorerContextMenu(undefined);
-                      writeClipboardText(
-                        entry ? workspaceCopyRelativePath(entry) : target,
-                      );
-                    }}
-                    role="menuitem"
-                    type="button"
-                  >
-                    Copy Relative Path
-                  </button>
-                  <button
-                    onClick={() => {
-                      const target = explorerContextMenu.path;
-                      setExplorerContextMenu(undefined);
-                      onRevealWorkspacePath?.(target);
-                    }}
-                    role="menuitem"
-                    type="button"
-                  >
-                    Reveal in Finder
-                  </button>
-                  <button
-                    className="is-danger"
-                    onClick={() => {
-                      const file = files.find(
-                        (item) => item.path === explorerContextMenu.path,
-                      );
-                      if (file?.isWorkspaceRoot) {
-                        onRemoveWorkspaceFolder?.(
-                          file.workspacePath ?? file.path,
-                        );
-                      } else {
-                        onDeleteWorkspacePath?.(explorerContextMenu.path);
-                      }
-                      setExplorerContextMenu(undefined);
-                    }}
-                    role="menuitem"
-                    type="button"
-                  >
-                    {files.find(
-                      (item) => item.path === explorerContextMenu.path,
-                    )?.isWorkspaceRoot
-                      ? "Remove Folder from Workspace"
-                      : "Delete"}
-                  </button>
-                </div>
-              ) : null}</SurfacePresence>
+                          if (file?.kind === "file") {
+                            onOpenWorkspaceFile?.(file.path);
+                          } else {
+                            startExplorerDraft("file", file?.path);
+                          }
+                          setExplorerContextMenu(undefined);
+                        }}
+                      >
+                        {files.find(
+                          (item) => item.path === explorerMenuTarget.path,
+                        )?.kind === "file"
+                          ? "Open"
+                          : "New File"}
+                      </Menu.Item>
+                      {files.find((item) => item.path === explorerMenuTarget.path)
+                        ?.kind === "directory" ? (
+                        <Menu.Item
+                          onClick={() =>
+                            startExplorerDraft(
+                              "directory",
+                              explorerMenuTarget.path,
+                            )
+                          }
+                        >
+                          New Folder
+                        </Menu.Item>
+                      ) : null}
+                      <Menu.Item
+                        onClick={() =>
+                          startExplorerRename(explorerMenuTarget.path)
+                        }
+                      >
+                        Rename
+                      </Menu.Item>
+                      <Menu.Item
+                        onClick={() => {
+                          const target = explorerMenuTarget.path;
+                          setExplorerContextMenu(undefined);
+                          onDuplicateWorkspacePath?.(target);
+                        }}
+                      >
+                        Duplicate
+                      </Menu.Item>
+                      {files.find((item) => item.path === explorerMenuTarget.path)
+                        ?.isWorkspaceRoot ? null : (
+                        <Menu.Item
+                          onClick={() => {
+                            const target = explorerMenuTarget.path;
+                            const separator = target.lastIndexOf("/");
+                            const parent =
+                              separator > 0 ? target.slice(0, separator) : target;
+                            setExplorerContextMenu(undefined);
+                            void askTextValue({
+                              title: "Move",
+                              label: "Destination folder",
+                              message:
+                                "The file keeps its name. Leave the destination inside this workspace folder.",
+                              initialValue: parent,
+                              confirmLabel: "Move",
+                            }).then((destination) => {
+                              if (!destination) return;
+                              onMoveWorkspacePath?.(target, destination);
+                            });
+                          }}
+                        >
+                          Move…
+                        </Menu.Item>
+                      )}
+                      <Menu.Item
+                        onClick={() => {
+                          const target = explorerMenuTarget.path;
+                          setExplorerContextMenu(undefined);
+                          // Return must not send the current draft while the
+                          // folder listing is still being attached. Focus only
+                          // after that attachment is in the composer.
+                          setExplorerAskSendHeld(true);
+                          void Promise.resolve(onAskWorkspacePath?.(target))
+                            .then((attached) => {
+                              if (attached === false) return;
+                              window.dispatchEvent(
+                                new Event("gyro-focus-composer"),
+                              );
+                            })
+                            .finally(() => {
+                              setExplorerAskSendHeld(false);
+                            });
+                        }}
+                      >
+                        Ask Gyro
+                      </Menu.Item>
+                      <Menu.Item
+                        onClick={() => {
+                          const target = explorerMenuTarget.path;
+                          const entry = files.find((file) => file.path === target);
+                          setExplorerContextMenu(undefined);
+                          writeClipboardText(
+                            entry ? workspaceCopyAbsolutePath(entry) : target,
+                          );
+                        }}
+                      >
+                        Copy Path
+                      </Menu.Item>
+                      <Menu.Item
+                        onClick={() => {
+                          const target = explorerMenuTarget.path;
+                          const entry = files.find((file) => file.path === target);
+                          setExplorerContextMenu(undefined);
+                          writeClipboardText(
+                            entry ? workspaceCopyRelativePath(entry) : target,
+                          );
+                        }}
+                      >
+                        Copy Relative Path
+                      </Menu.Item>
+                      <Menu.Item
+                        onClick={() => {
+                          const target = explorerMenuTarget.path;
+                          setExplorerContextMenu(undefined);
+                          onRevealWorkspacePath?.(target);
+                        }}
+                      >
+                        Reveal in Finder
+                      </Menu.Item>
+                      <Menu.Item
+                        tone="danger"
+                        onClick={() => {
+                          const file = files.find(
+                            (item) => item.path === explorerMenuTarget.path,
+                          );
+                          if (file?.isWorkspaceRoot) {
+                            onRemoveWorkspaceFolder?.(
+                              file.workspacePath ?? file.path,
+                            );
+                          } else {
+                            onDeleteWorkspacePath?.(explorerMenuTarget.path);
+                          }
+                          setExplorerContextMenu(undefined);
+                        }}
+                      >
+                        {files.find(
+                          (item) => item.path === explorerMenuTarget.path,
+                        )?.isWorkspaceRoot
+                          ? "Remove Folder from Workspace"
+                          : "Delete"}
+                      </Menu.Item>
+                  </Menu.Content>
+                ) : null}
+              </Menu.Root>
             </SidebarSection>
           ) : null}
 
@@ -3830,179 +3791,125 @@ export function WorkspaceSidebarContent({
       {isSessionsSidebar ? (
         <>
           <div className="gyro-sidebar-actions gyro-sidebar-quick-actions">
-            <div className="gyro-sidebar-new-session" ref={newSessionMenuRef}>
-              <button
-                aria-expanded={newSessionMenuView !== "closed"}
-                aria-haspopup="menu"
-                className="gyro-sidebar-action"
-                onClick={() =>
-                  setNewSessionMenuView((current) =>
-                    current === "closed" ? "root" : "closed",
-                  )
-                }
-                type="button"
+            <div className="gyro-sidebar-new-session">
+              <Menu.Root
+                open={isNewSessionMenuOpen}
+                onOpenChange={setIsNewSessionMenuOpen}
               >
-                <Plus size={15} />
-                <span>New session</span>
-              </button>
-              <SurfacePresence>{newSessionMenuView !== "closed" ? (
-                <div
+                <Menu.Trigger className="gyro-sidebar-action">
+                  <Plus size={15} />
+                  <span>New session</span>
+                </Menu.Trigger>
+                <Menu.Content
                   aria-label="Create Chat or CLI session"
-                  className="gyro-sidebar-new-session-menu is-root"
-                  role="menu"
+                  className="gyro-sidebar-new-session-popup"
                 >
-                  <div
-                    aria-label="Chat sessions"
-                    className="gyro-sidebar-session-group is-chat"
-                    role="group"
+                  <Menu.Item
+                    aria-label="New Chat"
+                    icon={<MessageSquare aria-hidden="true" size={15} />}
+                    onClick={onCreateSession}
                   >
-                    <button
-                      aria-label="New Chat"
-                      onClick={() => {
-                        setNewSessionMenuView("closed");
-                        onCreateSession();
-                      }}
-                      role="menuitem"
-                      type="button"
-                    >
-                      <MessageSquare size={15} />
-                      <strong>New Chat</strong>
-                    </button>
-                  </div>
-                  <div
-                    aria-label="Open CLI sessions"
-                    className="gyro-sidebar-session-group is-cli"
-                    role="group"
-                  >
-                    <span className="gyro-sidebar-session-group-label">
-                      CLI sessions
-                    </span>
+                    New Chat
+                  </Menu.Item>
+                  <Menu.Separator />
+                  <Menu.Group aria-label="Open CLI sessions">
+                    <Menu.GroupLabel>CLI sessions</Menu.GroupLabel>
                     {terminalPanes.length > 0 ? (
-                      <button
-                        className="is-terminal-navigation"
-                        onClick={() => {
-                          setNewSessionMenuView("closed");
-                          onSelectWorkspaceLayout("terminal-grid");
-                        }}
-                        role="menuitem"
-                        type="button"
+                      <Menu.Item
+                        icon={<Columns2 aria-hidden="true" size={15} />}
+                        onClick={() => onSelectWorkspaceLayout("terminal-grid")}
                       >
-                        <Columns2 size={15} />
-                        <strong>View open terminals</strong>
-                      </button>
+                        View open terminals
+                      </Menu.Item>
                     ) : null}
                     {cliProjects.length === 0 ? (
-                      <button
-                        onClick={() => {
-                          setNewSessionMenuView("closed");
-                          onOpenWorkspace();
-                        }}
-                        role="menuitem"
-                        type="button"
+                      <Menu.Item
+                        icon={<Folder aria-hidden="true" size={15} />}
+                        onClick={onOpenWorkspace}
+                        title="Choose where the CLI should run"
                       >
-                        <Folder size={15} />
-                        <span>
-                          <strong>Open project</strong>
-                          <small>Choose where the CLI should run</small>
-                        </span>
-                      </button>
+                        Open project
+                      </Menu.Item>
                     ) : null}
-                    <div className="gyro-sidebar-cli-profiles">
-                      {readyCommandProfiles.map((profile) => (
-                        <button
-                          aria-label={profile.displayName}
-                          disabled={!newCliWorkspacePath}
-                          key={profile.id}
-                          title={
-                            newCliWorkspacePath
-                              ? profile.displayName
-                              : "Open a project to start a CLI session"
-                          }
-                          onClick={() => {
-                            if (!newCliWorkspacePath) return;
-                            onCreateCliSession(profile.id, newCliWorkspacePath);
-                            setNewSessionMenuView("closed");
-                          }}
-                          role="menuitem"
-                          type="button"
-                        >
-                          {profile.providerId ? (
+                    {readyCommandProfiles.map((profile) => (
+                      <Menu.Item
+                        aria-label={profile.displayName}
+                        disabled={!newCliWorkspacePath}
+                        icon={
+                          profile.providerId ? (
                             <ProviderLogo
                               providerId={profile.providerId as ProviderId}
                             />
                           ) : (
-                            <Terminal size={15} />
-                          )}
-                          <span>
-                            <strong>{profile.displayName}</strong>
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  {blockedCommandProfiles.length > 0 ? (
-                    <div className="gyro-sidebar-session-group is-more">
-                      <button
-                        aria-expanded={newSessionMenuView === "more"}
-                        aria-label={`More tools, ${blockedCommandProfiles.length} ${blockedCommandProfiles.length === 1 ? "needs" : "need"} setup`}
-                        onClick={() =>
-                          setNewSessionMenuView((current) =>
-                            current === "more" ? "root" : "more",
+                            <Terminal aria-hidden="true" size={15} />
                           )
                         }
-                        role="menuitem"
-                        type="button"
+                        key={profile.id}
+                        onClick={() => {
+                          if (!newCliWorkspacePath) return;
+                          onCreateCliSession(profile.id, newCliWorkspacePath);
+                        }}
+                        title={
+                          newCliWorkspacePath
+                            ? profile.displayName
+                            : "Open a project to start a CLI session"
+                        }
                       >
-                        <Box size={16} />
-                        <strong>More tools</strong>
-                        <small
-                          aria-hidden="true"
-                          title={`${blockedCommandProfiles.length} tools need setup`}
+                        {profile.displayName}
+                      </Menu.Item>
+                    ))}
+                  </Menu.Group>
+                  {blockedCommandProfiles.length > 0 ? (
+                    <>
+                      <Menu.Separator />
+                      <Menu.SubmenuRoot>
+                        <Menu.SubmenuTrigger
+                          aria-label={`More tools, ${blockedCommandProfiles.length} ${blockedCommandProfiles.length === 1 ? "needs" : "need"} setup`}
+                          icon={<Box aria-hidden="true" size={15} />}
                         >
-                          {blockedCommandProfiles.length}
-                        </small>
-                        {newSessionMenuView === "more" ? (
-                          <ChevronDown size={15} />
-                        ) : (
-                          <ChevronRight size={15} />
-                        )}
-                      </button>
-                      {newSessionMenuView === "more" ? (
-                        <div
+                          More tools
+                        </Menu.SubmenuTrigger>
+                        <Menu.Content
                           aria-label="Tools requiring setup"
-                          className="gyro-sidebar-cli-profiles"
-                          role="group"
+                          align="start"
+                          side="right"
+                          sideOffset={4}
                         >
-                          {blockedCommandProfiles.map((profile) => (
-                            <button
-                              disabled
-                              key={profile.id}
-                              role="menuitem"
-                              type="button"
-                            >
-                              {profile.providerId ? (
-                                <ProviderLogo
-                                  providerId={profile.providerId as ProviderId}
-                                />
-                              ) : (
-                                <Terminal size={15} />
-                              )}
-                              <strong>{profile.displayName}</strong>
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
+                          <Menu.Group>
+                            <Menu.GroupLabel>Needs setup</Menu.GroupLabel>
+                            {blockedCommandProfiles.map((profile) => (
+                              <Menu.Item
+                                disabled
+                                icon={
+                                  profile.providerId ? (
+                                    <ProviderLogo
+                                      providerId={
+                                        profile.providerId as ProviderId
+                                      }
+                                    />
+                                  ) : (
+                                    <Terminal aria-hidden="true" size={15} />
+                                  )
+                                }
+                                key={profile.id}
+                              >
+                                {profile.displayName}
+                              </Menu.Item>
+                            ))}
+                          </Menu.Group>
+                        </Menu.Content>
+                      </Menu.SubmenuRoot>
+                    </>
                   ) : null}
-                </div>
-              ) : null}</SurfacePresence>
+                </Menu.Content>
+              </Menu.Root>
             </div>
             <button
               aria-label="Search"
               title={`Search (${primaryGlobalSearchShortcut("global")})`}
               className="gyro-sidebar-action gyro-sidebar-icon-action"
               onClick={() => {
-                setNewSessionMenuView("closed");
+                setIsNewSessionMenuOpen(false);
                 onOpenCommandPalette();
               }}
               type="button"
@@ -4017,7 +3924,7 @@ export function WorkspaceSidebarContent({
               title="Workflows"
               className={`gyro-sidebar-action gyro-sidebar-icon-action${activeDestination === "automations" ? " is-active" : ""}`}
               onClick={() => {
-                setNewSessionMenuView("closed");
+                setIsNewSessionMenuOpen(false);
                 onSelectDestination("automations");
               }}
               type="button"
@@ -4595,12 +4502,6 @@ export function SessionSidebarRow({
   onDragEnd?: (event: ReactDragEvent<HTMLDivElement>) => void;
   onPointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
-  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useOutsidePointerDismiss<HTMLDivElement>(
-    isMenuOpen,
-    onMenuClose,
-    menuTriggerRef,
-  );
   const sessionProviderId = providerIdForSession(session);
   const modelTitle =
     session.modelLabel ??
@@ -4765,53 +4666,60 @@ export function SessionSidebarRow({
             </button>
           ) : null}
           {onMenuToggle ? (
-            <button
-              aria-expanded={isMenuOpen}
-              aria-label="Chat options"
-              className="gyro-session-action is-more"
-              onClick={onMenuToggle}
-              ref={menuTriggerRef}
-              title="More"
-              type="button"
+            <Menu.Root
+              open={isMenuOpen}
+              onOpenChange={(open) => {
+                if (open !== isMenuOpen) {
+                  if (open) onMenuToggle();
+                  else onMenuClose();
+                }
+              }}
             >
-              <MoreHorizontal size={15} />
-            </button>
+              <Menu.Trigger
+                aria-label="Chat options"
+                className="gyro-session-action is-more"
+                title="More"
+              >
+                <MoreHorizontal size={15} />
+              </Menu.Trigger>
+              <Menu.Content align="end">
+                <CheckWorkMenuItem
+                  sessionId={session.id}
+                  disabled={isSending}
+                  onClose={onMenuClose}
+                />
+                {onOpenInGrid ? (
+                  <Menu.Item
+                    icon={<Columns2 aria-hidden="true" size={14} />}
+                    onClick={onOpenInGrid}
+                  >
+                    Open in chat grid
+                  </Menu.Item>
+                ) : null}
+                {onUploadCloudChat ? (
+                  <Menu.Item onClick={onUploadCloudChat}>
+                    Back up to Cloud
+                  </Menu.Item>
+                ) : null}
+                <Menu.Item
+                  icon={<Edit3 aria-hidden="true" size={14} />}
+                  onClick={onRename}
+                >
+                  Rename
+                </Menu.Item>
+                <Menu.Separator />
+                <Menu.Item
+                  icon={<Trash2 aria-hidden="true" size={14} />}
+                  onClick={onDelete}
+                  tone="danger"
+                >
+                  Delete
+                </Menu.Item>
+              </Menu.Content>
+            </Menu.Root>
           ) : null}
         </div>
       ) : null}
-      <SurfacePresence>{isMenuOpen ? (
-        <div className="gyro-session-menu" ref={menuRef} role="menu">
-          <CheckWorkMenuItem
-            sessionId={session.id}
-            disabled={isSending}
-            onClose={onMenuClose}
-          />
-          {onOpenInGrid ? (
-            <button onClick={onOpenInGrid} role="menuitem" type="button">
-              <Columns2 aria-hidden="true" size={14} />
-              Open in chat grid
-            </button>
-          ) : null}
-          {onUploadCloudChat ? (
-            <button onClick={onUploadCloudChat} role="menuitem" type="button">
-              Back up to Cloud
-            </button>
-          ) : null}
-          <button onClick={onRename} role="menuitem" type="button">
-            <Edit3 aria-hidden="true" size={14} />
-            Rename
-          </button>
-          <button
-            className="is-danger"
-            onClick={onDelete}
-            role="menuitem"
-            type="button"
-          >
-            <Trash2 aria-hidden="true" size={14} />
-            Delete
-          </button>
-        </div>
-      ) : null}</SurfacePresence>
     </div>
   );
 }
@@ -5871,49 +5779,6 @@ export function githubRunStateIcon(state: GithubRunState): IconComponent {
   return Minus;
 }
 
-/**
- * GitHub pull requests and Actions runs for the current workspace.
- *
- * Renders nothing but a short hint when `gh` is missing, logged out, or the
- * repository is not on GitHub — the states where showing controls would only
- * promise something Gyro cannot deliver.
- */
-export function scmBranchMenuStyle(trigger: HTMLElement): CSSProperties {
-  const rect = trigger.getBoundingClientRect();
-  const padding = 8;
-  const minWidth = Math.max(rect.width, 260);
-  const width = Math.min(
-    minWidth,
-    Math.max(160, window.innerWidth - padding * 2),
-  );
-  const spaceBelow = window.innerHeight - rect.bottom - padding;
-  const spaceAbove = rect.top - padding;
-  const openUp = spaceBelow < 148 && spaceAbove > spaceBelow;
-  const left = Math.min(
-    Math.max(padding, rect.right - width),
-    Math.max(padding, window.innerWidth - width - padding),
-  );
-  const maxHeight = Math.min(
-    280,
-    Math.max(96, (openUp ? spaceAbove : spaceBelow) - 4),
-  );
-  return openUp
-    ? {
-        left,
-        width,
-        maxHeight,
-        top: "auto",
-        bottom: window.innerHeight - rect.top + 4,
-      }
-    : {
-        left,
-        width,
-        maxHeight,
-        top: rect.bottom + 4,
-        bottom: "auto",
-      };
-}
-
 export function ScmBranchPicker({
   branchCatalog,
   currentBranch,
@@ -5935,13 +5800,7 @@ export function ScmBranchPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useOutsidePointerDismiss<HTMLDivElement>(
-    open,
-    () => setOpen(false),
-    triggerRef,
-  );
+  const menuRef = useRef<HTMLDivElement>(null);
   const branches = recentBranches(branchCatalog, currentBranch);
   const needle = query.trim().toLowerCase();
   const visibleBranches = branches.filter((branch) =>
@@ -5956,170 +5815,154 @@ export function ScmBranchPicker({
           ? "No repository"
           : "Select branch";
 
-  useLayoutEffect(() => {
-    if (!open) return;
-    const update = () => {
-      const trigger = triggerRef.current;
-      if (!trigger) return;
-      setMenuStyle(scmBranchMenuStyle(trigger));
-    };
-    update();
-    window.addEventListener("resize", update);
-    document.addEventListener("scroll", update, true);
-    return () => {
-      window.removeEventListener("resize", update);
-      document.removeEventListener("scroll", update, true);
-    };
-  }, [open]);
-
   return (
     <div className="gyro-scm-branch-picker">
-      <button
-        aria-expanded={open}
-        aria-haspopup="menu"
-        className="gyro-scm-branch-trigger"
-        disabled={disabled || isLoading}
-        onClick={() => {
-          if (open) {
-            setOpen(false);
-            return;
+      <Popover.Root
+        open={open}
+        onOpenChange={(next) => {
+          if (next) {
+            setQuery("");
+            onOpenBranchPicker?.();
           }
-          if (triggerRef.current) {
-            setMenuStyle(scmBranchMenuStyle(triggerRef.current));
-          }
-          setQuery("");
-          setOpen(true);
-          onOpenBranchPicker?.();
+          setOpen(next);
         }}
-        ref={triggerRef}
-        title={error ?? label}
-        type="button"
       >
-        <GitBranch size={12} aria-hidden="true" />
-        <span>{isLoading ? "Loading…" : label}</span>
-        <ChevronDown size={12} aria-hidden="true" />
-      </button>
-      <SurfacePresence portal="body">
-        {open ? (
-          <div
-            className="gyro-scm-branch-menu"
-            ref={menuRef}
-            role="menu"
-            aria-label="Local branches"
-            style={menuStyle}
+        <Popover.Trigger
+          aria-haspopup="menu"
+          className="gyro-scm-branch-trigger"
+          disabled={disabled || isLoading}
+          title={error ?? label}
+        >
+          <GitBranch size={12} aria-hidden="true" />
+          <span>{isLoading ? "Loading…" : label}</span>
+          <ChevronDown size={12} aria-hidden="true" />
+        </Popover.Trigger>
+        <Popover.Content
+          align="end"
+          aria-label="Local branches"
+          className="gyro-scm-branch-menu"
+          ref={menuRef}
+          role="menu"
+          sideOffset={4}
+        >
+          {branches.length >= 6 ? (
+            <label className="gyro-composer-menu-search">
+              <Search size={12} aria-hidden="true" />
+              <input
+                aria-label="Find branch"
+                autoFocus
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "ArrowDown" && event.key !== "ArrowUp")
+                    return;
+                  const rows =
+                    menuRef.current?.querySelectorAll<HTMLButtonElement>(
+                      '[role="menuitem"]:not(.is-action):not(:disabled)',
+                    );
+                  const row =
+                    event.key === "ArrowDown"
+                      ? rows?.[0]
+                      : rows?.[rows.length - 1];
+                  if (row) {
+                    event.preventDefault();
+                    row.focus();
+                  }
+                }}
+                placeholder="Find branch…"
+                spellCheck={false}
+                type="search"
+                value={query}
+              />
+            </label>
+          ) : null}
+          <button
+            className="gyro-scm-branch-item is-action"
+            disabled={disabled || isLoading}
+            onClick={() => {
+              setOpen(false);
+              onCreateBranch?.();
+            }}
+            role="menuitem"
+            type="button"
           >
-            {branches.length >= 6 ? (
-              <label className="gyro-composer-menu-search">
-                <Search size={12} aria-hidden="true" />
-                <input
-                  aria-label="Find branch"
-                  autoFocus
-                  onChange={(event) => setQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key !== "ArrowDown" && event.key !== "ArrowUp")
-                      return;
-                    const rows =
-                      menuRef.current?.querySelectorAll<HTMLButtonElement>(
-                        '[role="menuitem"]:not(.is-action):not(:disabled)',
-                      );
-                    const row =
-                      event.key === "ArrowDown"
-                        ? rows?.[0]
-                        : rows?.[rows.length - 1];
-                    if (row) {
-                      event.preventDefault();
-                      row.focus();
-                    }
-                  }}
-                  placeholder="Find branch…"
-                  spellCheck={false}
-                  type="search"
-                  value={query}
-                />
-              </label>
-            ) : null}
-            <button
-              className="gyro-scm-branch-item is-action"
-              disabled={disabled || isLoading}
-              onClick={() => {
-                setOpen(false);
-                onCreateBranch?.();
-              }}
-              role="menuitem"
-              type="button"
-            >
-              <GitBranchPlus size={12} aria-hidden="true" />
-              Create new branch…
-            </button>
-            {branches.length === 0 ? (
-              <div className="gyro-scm-branch-empty">
-                {branchCatalog?.error ?? error ?? "No local branches found."}
-              </div>
-            ) : visibleBranches.length === 0 ? (
-              <div className="gyro-scm-branch-empty" role="status">
-                No matching branches
-              </div>
-            ) : (
-              visibleBranches.map(
-                ({
-                  name: branch,
-                  current: isCurrent,
-                  latest,
-                  committedAt,
-                }) => {
-                  const detail = branchCommitDetail(committedAt);
-                  return (
-                    <button
-                      aria-current={isCurrent ? "true" : undefined}
-                      disabled={disabled || isLoading}
-                      className={[
-                        "gyro-scm-branch-item",
-                        isCurrent ? "is-current" : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
-                      key={branch}
-                      onClick={() => {
-                        setOpen(false);
-                        if (!isCurrent) {
-                          onSelectBranch?.(branch);
-                        }
-                      }}
-                      role="menuitem"
-                      title={[
-                        branch,
-                        detail,
-                        latest ? "Latest local commit" : undefined,
-                      ]
-                        .filter(Boolean)
-                        .join(" — ")}
-                      type="button"
-                    >
-                      <GitBranch size={12} aria-hidden="true" />
-                      <span className="gyro-scm-branch-copy">
-                        <span className="gyro-scm-branch-name">{branch}</span>
-                        {latest ? (
-                          <em className="gyro-scm-branch-badge">
-                            Latest commit
-                          </em>
-                        ) : null}
-                        {detail ? <small>{detail}</small> : null}
-                      </span>
-                      {isCurrent ? (
-                        <Check size={12} aria-hidden="true" />
+            <GitBranchPlus size={12} aria-hidden="true" />
+            Create new branch…
+          </button>
+          {branches.length === 0 ? (
+            <div className="gyro-scm-branch-empty">
+              {branchCatalog?.error ?? error ?? "No local branches found."}
+            </div>
+          ) : visibleBranches.length === 0 ? (
+            <div className="gyro-scm-branch-empty" role="status">
+              No matching branches
+            </div>
+          ) : (
+            visibleBranches.map(
+              ({
+                name: branch,
+                current: isCurrent,
+                latest,
+                committedAt,
+              }) => {
+                const detail = branchCommitDetail(committedAt);
+                return (
+                  <button
+                    aria-current={isCurrent ? "true" : undefined}
+                    disabled={disabled || isLoading}
+                    className={[
+                      "gyro-scm-branch-item",
+                      isCurrent ? "is-current" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    key={branch}
+                    onClick={() => {
+                      setOpen(false);
+                      if (!isCurrent) {
+                        onSelectBranch?.(branch);
+                      }
+                    }}
+                    role="menuitem"
+                    title={[
+                      branch,
+                      detail,
+                      latest ? "Latest local commit" : undefined,
+                    ]
+                      .filter(Boolean)
+                      .join(" — ")}
+                    type="button"
+                  >
+                    <GitBranch size={12} aria-hidden="true" />
+                    <span className="gyro-scm-branch-copy">
+                      <span className="gyro-scm-branch-name">{branch}</span>
+                      {latest ? (
+                        <em className="gyro-scm-branch-badge">
+                          Latest commit
+                        </em>
                       ) : null}
-                    </button>
-                  );
-                },
-              )
-            )}
-          </div>
-        ) : null}
-      </SurfacePresence>
+                      {detail ? <small>{detail}</small> : null}
+                    </span>
+                    {isCurrent ? (
+                      <Check size={12} aria-hidden="true" />
+                    ) : null}
+                  </button>
+                );
+              },
+            )
+          )}
+        </Popover.Content>
+      </Popover.Root>
     </div>
   );
 }
 
+/**
+ * GitHub pull requests and Actions runs for the current workspace.
+ *
+ * Renders nothing but a short hint when `gh` is missing, logged out, or the
+ * repository is not on GitHub — the states where showing controls would only
+ * promise something Gyro cannot deliver.
+ */
 export function GithubSidebarPanel({
   github,
   branch,
@@ -6473,63 +6316,17 @@ export function SessionDeleteConfirmOverlay({
   onCancel,
   onDelete,
 }: SessionDeleteConfirmOverlayProps) {
-  const { ref: dialogRef, dismiss } = useDialogDismiss(onCancel);
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        dismiss();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [dismiss]);
-
   return (
-    <div
-      ref={dialogRef}
-      aria-modal="true"
-      className="gyro-terminal-terminate-overlay"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) {
-          dismiss();
-        }
-      }}
-      role="alertdialog"
-    >
-      <section
-        aria-label={`Delete ${chatLabel}`}
-        className="gyro-terminal-terminate-card gyro-chat-delete-card"
-      >
-        <div className="gyro-terminal-terminate-heading">
-          <Trash2 size={16} />
-          <h2>Delete this chat?</h2>
-        </div>
-        <p>
-          Deleting <strong>{chatLabel}</strong> removes its messages and saved
-          attachments from Gyro, and this can't be undone. Files in the project
-          are not touched.
-        </p>
-        {isWorking ? (
-          <p className="gyro-chat-delete-note">
-            This chat is still working. Stop its turn before deleting it.
-          </p>
-        ) : null}
-        <div className="gyro-terminal-terminate-actions">
-          <button autoFocus onClick={dismiss} type="button">
-            Cancel
-          </button>
-          <button
-            className="is-danger"
-            disabled={isWorking}
-            onClick={onDelete}
-            type="button"
-          >
-            Delete chat
-          </button>
-        </div>
-      </section>
-    </div>
+    <WorkbenchConfirmation
+      title="Delete this chat?"
+      icon={<Trash2 aria-hidden="true" size={16} />}
+      description={<>Deleting <strong>{chatLabel}</strong> permanently removes its messages and saved attachments from Gyro. Project files stay on disk.</>}
+      detail={isWorking ? <p>Stop the current turn before deleting this chat.</p> : undefined}
+      confirmLabel="Delete chat"
+      confirmDisabled={isWorking}
+      onCancel={onCancel}
+      onConfirm={onDelete}
+    />
   );
 }
 
@@ -6670,10 +6467,7 @@ export function ProviderLogo({
         title="Gemini"
       >
         <svg viewBox="0 0 24 24">
-          <path
-            d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81"
-            fill="currentColor"
-          />
+          <image href={geminiSpark} width="24" height="24" />
         </svg>
       </span>
     );
@@ -6719,9 +6513,7 @@ export function ProviderLogo({
     );
   }
 
-  // DeepSeek and Mistral marks from Simple Icons 16.27.1 (CC0-1.0), the same
-  // source as Cursor above. Each is a single monochrome path, so
-  // currentColor carries the brand ink set in the stylesheet.
+  // DeepSeek uses the original whale outline in its brand blue.
   if (providerId === "deepseek") {
     return (
       <span
@@ -6736,6 +6528,7 @@ export function ProviderLogo({
     );
   }
 
+  // Keep the pixel mark’s five color bands together in one reusable asset.
   if (providerId === "mistral") {
     return (
       <span
@@ -6743,17 +6536,15 @@ export function ProviderLogo({
         className="gyro-provider-logo is-mistral"
         title="Mistral"
       >
-        <svg viewBox="0 0 24 24" fill="currentColor">
-          <path d="M17.143 3.429v3.428h-3.429v3.429h-3.428V6.857H6.857V3.43H3.43v13.714H0v3.428h10.286v-3.428H6.857v-3.429h3.429v3.429h3.429v-3.429h3.428v3.429h-3.428v3.428H24v-3.428h-3.43V3.429z" />
+        <svg viewBox="0 0 24 24">
+          <image href={mistralMark} width="24" height="24" />
         </svg>
       </span>
     );
   }
 
   // OpenRouter's glyph comes from its own brand assets (openrouter.ai/brand,
-  // v2) — Simple Icons still carries the retired route mark. The glyph is
-  // wider than it is tall, so the viewBox is its own bounds plus a hair of
-  // padding; the default `meet` fit centres it in the square logo well.
+  // v2). The official grape and volt colors come from the theme tokens.
   if (providerId === "openrouter") {
     return (
       <span
@@ -6761,8 +6552,8 @@ export function ProviderLogo({
         className="gyro-provider-logo is-openrouter"
         title="OpenRouter"
       >
-        <svg viewBox="17.8 15.2 369.6 262.3" fill="currentColor">
-          <path d="M303.9475,17.19926c42.79734,0,77.48933,34.69327,77.48933,77.48933s-34.69199,77.48933-77.48933,77.48933l76.86166,76.86244c9.76367,9.76313,2.84903,26.45667-10.95697,26.45667h-220.88335c-71.32686,0-129.14889-57.82202-129.14889-129.14889S77.64197,17.19926,148.96884,17.19926h154.97866ZM148.96884,68.85881c-42.79607,0-77.48933,34.69327-77.48933,77.48933s34.69327,77.48933,77.48933,77.48933,77.48933-34.69327,77.48933-77.48933-34.69327-77.48933-77.48933-77.48933Z" />
+        <svg viewBox="0 0 1024 730" fill="currentColor">
+          <path d="M795.893 0C915.776 0 1012.95 97.9963 1012.95 218.88C1012.95 339.764 915.776 437.76 795.893 437.76L1011.2 654.869C1038.55 682.447 1019.18 729.6 980.504 729.6H361.77C161.97 729.6 0 566.273 0 364.8C0 163.327 161.97 0 361.77 0L795.893 0ZM361.77 145.92C241.89 145.92 144.708 243.916 144.708 364.8C144.708 485.684 241.89 583.68 361.77 583.68C481.649 583.68 578.831 485.684 578.831 364.8C578.831 243.916 481.649 145.92 361.77 145.92Z" />
         </svg>
       </span>
     );

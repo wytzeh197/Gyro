@@ -204,15 +204,18 @@ try {
   await call("Input.insertText", { text: "Fix duplicate saves. /pl" });
   await key("Tab", "Tab", 9);
   await until(() => evaluate(`${field}.value === "Fix duplicate saves. /plan "`), "inline completion");
+  const planChip = ".gyro-composer-chip.is-plan";
+  assert.equal(await evaluate(`!!document.querySelector('${planChip}')`), false, "draft Plan stays inline");
   await call("Input.insertText", { text: "Start with the retry path." });
   assert.equal(await evaluate("document.querySelector('.gyro-inline-command svg text').textContent"), "/plan");
   await key("Enter", "Enter", 13);
   await until(() => evaluate(`${field}.value === ""`), "submitted draft cleared");
+  await until(() => evaluate(`document.querySelector('${planChip}[role=status]')?.textContent === "Plan"`), "sent Plan status");
   assert.equal(
     await evaluate("document.querySelector('.slash-preview-result').textContent"),
     "Fixture action: Sent Fix duplicate saves. Start with the retry path.",
   );
-  console.log("Inline slash completion, continued typing and submitted prose passed.");
+  console.log("Inline slash completion, deferred Plan status and submitted prose passed.");
   await call("Page.navigate", {
     url: (process.env.GYRO_TEST_ORIGIN ?? "http://127.0.0.1:1420") + "/slash-menu-preview.html?reviewer",
   });
@@ -244,6 +247,10 @@ try {
   assert.ok(bounds.left >= 0 && bounds.right <= 420, "reviewer fits narrow chat");
   await changeProvider("All");
   await call("Emulation.setDeviceMetricsOverride", { width: 960, height: 940, deviceScaleFactor: 2, mobile: false });
+  await until(
+    () => evaluate(`document.querySelector('${popup}').getBoundingClientRect().width <= 373`),
+    "reviewer preserves its compact width on a wide canvas",
+  );
   await saveReviewerView("choose-reviewer");
   const headerTop = await evaluate("document.querySelector('.gyro-reviewer-controls').getBoundingClientRect().top");
   const point = await evaluate(`(() => {const r=document.querySelector('${results}').getBoundingClientRect(); return { x:r.x+r.width/2, y:r.y+r.height/2 };})()`);

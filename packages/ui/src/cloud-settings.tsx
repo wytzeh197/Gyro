@@ -1,4 +1,5 @@
-import { Cloud } from "lucide-react";
+import { Button } from "./primitives/button";
+import { Cloud } from "./icons";
 import {
   CloudConnectionSettings,
   type BillingActions,
@@ -143,22 +144,22 @@ export function CloudSettings({
         showAccount={false}
       >
         {onOpenBilling ? (
-          <button
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             onClick={onOpenBilling}
           >
             Open plan &amp; billing
-          </button>
+          </Button>
         ) : null}
         {onManageCloud ? (
-          <button
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             onClick={onManageCloud}
           >
             Manage Cloud
-          </button>
+          </Button>
         ) : null}
       </CloudConnectionSettings>
       {!workspace ? (

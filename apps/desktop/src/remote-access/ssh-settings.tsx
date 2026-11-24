@@ -1,13 +1,13 @@
+import { Button, Input } from "@gyro-dev/ui";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
   ChevronRight,
   Info,
-  LoaderCircle,
   MoreHorizontal,
-} from "../../../../packages/ui/node_modules/lucide-react";
+} from "@gyro-dev/ui/icons";
 import {
   SettingsEmptyState,
-  SettingsSelect,
+  SettingsChoice,
 } from "../../../../packages/ui/src/settings-controls";
 import { SettingsStatus } from "../../../../packages/ui/src/settings-presentation";
 import {
@@ -213,21 +213,17 @@ export function SshSettings() {
           {!manual ? (
             <div className="gyro-remote-ssh-fields">
               <label htmlFor={`${id}-host`}>SSH host</label>
-              <SettingsSelect
+              <SettingsChoice
                 id={`${id}-host`}
                 value={host}
-                onChange={(event) => setHost(event.target.value)}
+                onValueChange={setHost}
                 aria-describedby={`${id}-hosts-help`}
-              >
-                <option value="">
-                  {loading ? "Reading SSH config…" : "Choose from SSH config…"}
-                </option>
-                {aliases.map((alias) => (
-                  <option key={alias} value={alias}>
-                    {alias}
-                  </option>
-                ))}
-              </SettingsSelect>
+                options={[
+                  { value: "", label: loading ? "Reading SSH config…" : "Choose from SSH config…" },
+                  ...aliases.map((alias) => ({ value: alias, label: alias })),
+                ]}
+                disabled={Boolean(busy)}
+              />
               <button
                 type="button"
                 className="gyro-remote-text-button"
@@ -249,7 +245,7 @@ export function SshSettings() {
             <div className="gyro-remote-ssh-fields">
               <label>
                 Host address
-                <input
+                <Input
                   className="gyro-settings-input"
                   ref={manualInput}
                   value={address}
@@ -264,7 +260,7 @@ export function SshSettings() {
               <div className="gyro-remote-ssh-field-pair">
                 <label>
                   User
-                  <input
+                  <Input
                     className="gyro-settings-input"
                     value={user}
                     onChange={(event) => setUser(event.target.value)}
@@ -276,7 +272,7 @@ export function SshSettings() {
                 </label>
                 <label>
                   Port
-                  <input
+                  <Input
                     className="gyro-settings-input"
                     type="number"
                     min={1}
@@ -310,18 +306,21 @@ export function SshSettings() {
             <div className="gyro-remote-ssh-fields">
               <label>
                 Authentication
-                <SettingsSelect
+                <SettingsChoice
+                  aria-label="Authentication"
                   value={authentication}
-                  onChange={(event) => setAuthentication(event.target.value)}
-                >
-                  <option value="config">SSH agent or configured key</option>
-                  <option value="file">Identity file</option>
-                </SettingsSelect>
+                  onValueChange={setAuthentication}
+                  disabled={Boolean(busy)}
+                  options={[
+                    { value: "config", label: "SSH agent or configured key" },
+                    { value: "file", label: "Identity file" },
+                  ]}
+                />
               </label>
               {authentication === "file" && (
                 <label>
                   Identity file
-                  <input
+                  <Input
                     className="gyro-settings-input"
                     value={identityFile}
                     onChange={(event) => setIdentityFile(event.target.value)}
@@ -334,7 +333,7 @@ export function SshSettings() {
               {!manual && (
                 <label>
                   Port override
-                  <input
+                  <Input
                     className="gyro-settings-input"
                     type="number"
                     min={1}
@@ -348,7 +347,7 @@ export function SshSettings() {
               )}
               <label>
                 Remote Gyro socket path
-                <input
+                <Input
                   className="gyro-settings-input"
                   value={socketPath}
                   onChange={(event) => setSocketPath(event.target.value)}
@@ -372,20 +371,14 @@ export function SshSettings() {
               access on.
             </p>
           </div>
-          <button
-            className="gyro-primary-button"
+          <Button
+            size="md"
             type="submit"
             disabled={Boolean(busy) || loading}
+            loading={busy === "new"}
           >
-            {busy === "new" && (
-              <LoaderCircle
-                className="gyro-remote-ssh-spinner"
-                size={15}
-                aria-hidden
-              />
-            )}
             {busy === "new" ? "Connecting…" : "Connect"}
-          </button>
+          </Button>
         </div>
       </form>
       {error && (

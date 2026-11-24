@@ -63,6 +63,7 @@ fn internal_summary_requests_carry_only_their_own_input() {
             "GYRO_QUESTIONS",
             "GYRO_TASKS",
             "Selected workspace",
+            "Omit rootId",
             "Gyro Browser",
         ] {
             assert!(
@@ -77,11 +78,41 @@ fn internal_summary_requests_carry_only_their_own_input() {
             chat.len()
         );
         // Owned runners split the same prompt into a cacheable prefix and a tail.
-        let (stable, dynamic) = provider_context_sections(&request, None, true, true);
+        let (stable, dynamic) = provider_context_sections(&request, None, true, true, Some(1));
         assert!(stable.starts_with("Gyro internal request:"));
         assert!(dynamic.ends_with("+ added line"));
         assert_eq!(prompt, format!("{stable}\n\n{dynamic}"));
     }
+}
+
+#[test]
+fn single_root_tool_prompts_offer_workspace_location_on_demand() {
+    let mut request = anthropic_provider_request();
+    let workspace = "/tmp/gyro-prompt-workspace";
+    request.workspace_path = Some(workspace.into());
+    let guidance = "Workspace tools select this chat's only root automatically. Omit rootId.";
+    let (stable, dynamic) = provider_context_sections(&request, None, true, false, Some(1));
+    assert!(!stable.contains(guidance));
+    assert!(dynamic.contains(guidance));
+    assert!(
+        dynamic.contains("If you need the root's absolute path, call gyro_workspace_get_context.")
+    );
+    assert!(!stable.contains(workspace));
+    assert!(!dynamic.contains(workspace));
+    for root_count in [None, Some(2)] {
+        let (_, dynamic) = provider_context_sections(&request, None, true, false, root_count);
+        assert!(!dynamic.contains(guidance));
+        assert!(dynamic.contains(&format!("Selected workspace: {workspace}")));
+    }
+    request.message = format!("Inspect {workspace}/src/main.rs");
+    let (_, dynamic) = provider_context_sections(&request, None, true, false, Some(1));
+    assert!(dynamic.ends_with(&request.message));
+    assert_eq!(dynamic.matches(workspace).count(), 1);
+    let (_, dynamic) = provider_context_sections(&request, None, false, false, Some(1));
+    assert!(!dynamic.contains(guidance));
+    request.mode = ChatMode::Council;
+    let (_, dynamic) = provider_context_sections(&request, None, true, false, Some(1));
+    assert!(!dynamic.contains(guidance));
 }
 
 #[test]
@@ -187,7 +218,7 @@ fn owned_turns_share_one_stable_block_across_history_and_check_duration() {
     second.workspace_check.as_mut().unwrap().duration_ms = 4_000;
     second.message = "edit it again".into();
     let build = |request: &ProviderChatRequest, history: &str| {
-        provider_context_sections(request, Some(history), true, false)
+        provider_context_sections(request, Some(history), true, false, None)
     };
     let history = "User: one\n\nAssistant: first answer";
     let (stable_a, dynamic_a) = build(&first, history);
@@ -1453,6 +1484,20 @@ fn provider_stream_parsers_extract_live_activity_and_commentary() {
     assert_eq!(command.kind, "command");
     assert_eq!(command.label, "Listed files");
     assert_eq!(command.status, "done");
+
+    let failed = extract_provider_activity(&serde_json::json!({
+        "type": "item.completed",
+        "item": {
+            "id": "item_1",
+            "type": "command_execution",
+            "command": "git status\nls missing",
+            "status": "completed",
+            "exit_code": 1
+        }
+    }))
+    .expect("completed command with a nonzero exit");
+    assert_eq!(failed.status, "failed");
+    assert_eq!(failed.note.as_deref(), Some("Exit code: 1"));
 
     let compaction = extract_provider_activity(&serde_json::json!({
         "type": "item.completed",

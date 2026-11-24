@@ -1,11 +1,24 @@
 .gyro-usage-settings {
   min-width: 0;
 }
+/* The tab bar owns the rule so page-level actions can sit on the same line. */
+.gyro-usage-tabbar {
+  align-items: center;
+  border-bottom: 1px solid var(--gyro-border-soft);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gyro-space-comfortable) var(--gyro-space-section);
+  justify-content: space-between;
+  margin-bottom: var(--gyro-space-section);
+}
+.gyro-usage-tabbar-actions {
+  margin-left: auto;
+  padding-block: 4px;
+}
 .gyro-usage-subnav {
   display: flex;
   gap: var(--gyro-space-section);
-  border-bottom: 1px solid var(--gyro-border-soft);
-  margin-bottom: var(--gyro-space-section);
+  margin-bottom: -1px;
 }
 .gyro-usage-subnav > button {
   appearance: none;
@@ -41,33 +54,415 @@
 .gyro-usage-scope {
   margin-bottom: var(--gyro-space-section);
 }
-.gyro-usage-settings .gyro-usage-provider-select {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--gyro-space-comfortable);
-  margin: 0;
-}
-.gyro-usage-settings .gyro-usage-provider-select > span {
-  color: var(--gyro-muted);
-  font-size: var(--gyro-font-support);
-}
-.gyro-usage-settings .gyro-usage-provider-select select {
-  max-width: 100%;
-  min-width: 0;
-}
 .gyro-usage-settings .gyro-settings-group-heading {
   flex-wrap: wrap;
   gap: var(--gyro-space-comfortable);
 }
-.gyro-usage-settings .gyro-usage-toolbar {
-  flex-wrap: wrap;
-  gap: var(--gyro-space-panel);
-  border: 0;
-  padding-block: var(--gyro-space-standard);
+
+/* --- provider identity card ------------------------------------------- */
+.gyro-usage-provider-card {
+  align-items: center;
+  background: color-mix(in srgb, var(--gyro-text) 3%, transparent);
+  border: 0.5px solid var(--gyro-border-heavy);
+  border-radius: var(--gyro-radius-lg);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 10px 12px;
 }
-.gyro-usage-settings .gyro-usage-toolbar-actions {
+/* The real brand mark, in a tile so monochrome and coloured marks share a
+   footprint. */
+.gyro-usage-settings .gyro-usage-provider-card > .gyro-provider-logo {
+  background: color-mix(in srgb, var(--gyro-text) 6%, transparent);
+  border: 0.5px solid var(--gyro-border-soft);
+  border-radius: var(--gyro-radius-md);
+  box-sizing: border-box;
+  height: 32px;
+  padding: 7px;
+  width: 32px;
+}
+.gyro-usage-settings
+  .gyro-usage-provider-card
+  > .gyro-provider-logo.is-monogram {
+  padding: 5px;
+}
+.gyro-usage-provider-identity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.gyro-usage-provider-name {
+  align-items: center;
+  display: flex;
   flex-wrap: wrap;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.gyro-usage-provider-name > strong {
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-body);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.gyro-usage-provider-badge {
+  align-items: center;
+  background: color-mix(in srgb, var(--gyro-warn) 13%, transparent);
+  border-radius: var(--gyro-radius-pill);
+  color: var(--gyro-warn);
+  display: inline-flex;
+  font-size: var(--gyro-font-caption);
+  font-weight: 500;
+  gap: 3px;
+  line-height: 1;
+  padding: 3px 7px;
+  white-space: nowrap;
+}
+.gyro-usage-provider-badge.is-verified {
+  background: color-mix(in srgb, var(--gyro-success) 13%, transparent);
+  color: var(--gyro-success);
+}
+.gyro-usage-provider-status {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+  line-height: 1.4;
+}
+.gyro-usage-provider-actions {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+.gyro-usage-icon-button,
+.gyro-usage-provider-select > span {
+  align-items: center;
+  background: var(--gyro-control);
+  border: 0.5px solid var(--gyro-border-heavy);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-text);
+  display: inline-flex;
+  font: inherit;
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
+  gap: 5px;
+  height: 28px;
+  justify-content: center;
+  white-space: nowrap;
+}
+.gyro-usage-icon-button {
+  cursor: pointer;
+  padding: 0;
+  width: 28px;
+}
+.gyro-usage-icon-button:hover:not(:disabled),
+.gyro-usage-provider-select:hover > span {
+  background: var(--gyro-control-hover);
+}
+.gyro-usage-icon-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.gyro-usage-icon-button:focus-visible,
+.gyro-usage-provider-select:has(select:focus-visible) > span {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+.gyro-usage-provider-select {
+  cursor: pointer;
+  display: inline-grid;
+  margin: 0;
+  position: relative;
+}
+.gyro-usage-provider-select > span {
+  padding: 0 8px 0 10px;
+}
+.gyro-usage-provider-select > span > svg {
+  color: var(--gyro-muted);
+}
+/* Invisible but real: the native menu, typeahead and screen-reader name. */
+.gyro-usage-provider-select > select {
+  appearance: none;
+  cursor: pointer;
+  height: 100%;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  position: absolute;
+  width: 100%;
+}
+
+/* --- allowance card (bars) -------------------------------------------- */
+.gyro-usage-settings .gyro-usage-cards {
+  gap: 12px;
+}
+.gyro-usage-settings .gyro-usage-card.is-bars {
+  gap: 8px;
+  padding: 14px 16px;
+}
+.gyro-usage-card.is-bars > header {
+  align-items: flex-start;
+  gap: 12px;
+}
+.gyro-usage-card-figure {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.gyro-usage-card.is-bars > header .gyro-usage-card-figure > span {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
+}
+.gyro-usage-card-figure > strong {
+  align-items: baseline;
+  color: var(--gyro-text);
+  display: flex;
+  font-size: calc(22px * var(--gyro-ui-scale, 1));
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  gap: 5px;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.gyro-usage-card-figure > strong > small {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.gyro-usage-card-side {
+  display: grid;
+  flex-shrink: 0;
+  gap: 4px;
+  justify-items: end;
+  text-align: right;
+}
+.gyro-usage-card.is-bars > header .gyro-usage-card-side > span:not(.gyro-usage-pill) {
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-micro);
+}
+.gyro-usage-card-side > small {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+}
+.gyro-usage-card > header .gyro-usage-pill {
+  background: color-mix(in srgb, var(--gyro-success) 13%, transparent);
+  border-radius: var(--gyro-radius-pill);
+  color: var(--gyro-success);
+  font-size: var(--gyro-font-caption);
+  font-weight: 500;
+  line-height: 1;
+  padding: 3px 7px;
+  white-space: nowrap;
+}
+.gyro-usage-card > header .gyro-usage-pill.is-warning {
+  background: color-mix(in srgb, var(--gyro-warn) 14%, transparent);
+  color: var(--gyro-warn);
+}
+.gyro-usage-card > header .gyro-usage-pill.is-critical {
+  background: color-mix(in srgb, var(--gyro-danger) 14%, transparent);
+  color: var(--gyro-danger);
+}
+.gyro-usage-card:has(.is-unmeasured) > header .gyro-usage-pill {
+  background: color-mix(in srgb, var(--gyro-text) 7%, transparent);
+  color: var(--gyro-muted);
+}
+.gyro-usage-track {
+  margin-top: 4px;
+  position: relative;
+}
+.gyro-usage-card.is-bars .gyro-usage-bar {
+  height: 8px;
+}
+.gyro-usage-card.is-bars .gyro-usage-bar > span {
+  border-radius: inherit;
+}
+/* Healthy windows match their green pill; warning and critical keep their tints. */
+.gyro-usage-card.is-bars:not(.is-warning, .is-critical) .gyro-usage-bar > span {
+  background: var(--gyro-success);
+}
+.gyro-usage-settings .gyro-usage-card:not(.is-warning, .is-critical, :has(.is-unmeasured)) .gyro-usage-wheel {
+  background: conic-gradient(
+    var(--gyro-success) var(--usage),
+    color-mix(in srgb, var(--gyro-text) 8%, transparent) 0
+  );
+}
+/* Where an even pace would leave the allowance right now. */
+.gyro-usage-expected {
+  background: var(--gyro-text);
+  border-radius: 1px;
+  bottom: -3px;
+  opacity: 0.7;
+  position: absolute;
+  top: -3px;
+  transform: translateX(-50%);
+  width: 2px;
+}
+.gyro-usage-scale {
+  color: var(--gyro-faint);
+  display: flex;
+  font-size: var(--gyro-font-caption);
+  font-variant-numeric: tabular-nums;
+  justify-content: space-between;
+  position: relative;
+}
+.gyro-usage-scale-expected {
+  color: var(--gyro-muted);
+  position: absolute;
+  transform: translateX(-50%);
+}
+.gyro-usage-pace {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+  line-height: 1.45;
+  margin: 0;
+}
+
+/* --- allowance card (wheels) ------------------------------------------ */
+.gyro-usage-settings .gyro-usage-card:has(.gyro-usage-wheel) {
+  gap: 12px;
+  min-height: 0;
+  padding: 14px 16px;
+}
+.gyro-usage-settings .gyro-usage-card:has(.gyro-usage-wheel) > header > strong {
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-micro);
+  font-weight: 500;
+}
+.gyro-usage-settings .gyro-usage-wheel {
+  height: 84px;
+  margin: 2px auto 0;
+  width: 84px;
+}
+.gyro-usage-settings .gyro-usage-wheel::before {
+  height: 64px;
+  width: 64px;
+}
+.gyro-usage-settings .gyro-usage-wheel > span > strong {
+  font-size: var(--gyro-font-body);
+  font-variant-numeric: tabular-nums;
+}
+.gyro-usage-pace.is-ahead {
+  color: var(--gyro-warn);
+}
+
+/* --- warnings & run controls ------------------------------------------ */
+.gyro-usage-controls {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding-top: 10px;
+}
+.gyro-usage-control {
+  align-content: start;
+  border: 0.5px solid var(--gyro-border-heavy);
+  border-radius: var(--gyro-radius-lg);
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px 14px;
+}
+.gyro-usage-control.is-paused {
+  border-color: color-mix(in srgb, var(--gyro-danger) 45%, transparent);
+}
+.gyro-usage-control-head {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.gyro-usage-control-head > strong {
+  color: var(--gyro-text);
+  font-size: var(--gyro-font-support);
+  line-height: 1.3;
+  font-weight: 600;
+}
+.gyro-usage-control-icon {
+  align-items: center;
+  background: color-mix(in srgb, var(--gyro-accent) 14%, transparent);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-accent);
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  width: 24px;
+}
+.gyro-usage-control-icon.is-danger {
+  background: color-mix(in srgb, var(--gyro-danger) 13%, transparent);
+  color: var(--gyro-danger);
+}
+.gyro-usage-control > p {
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+  line-height: 1.5;
+  margin: 0;
+}
+.gyro-usage-control-status {
+  align-items: center;
+  color: var(--gyro-muted);
+  display: inline-flex;
+  font-size: var(--gyro-font-caption);
+  gap: 6px;
+}
+.gyro-usage-control-status::before {
+  background: currentColor;
+  border-radius: 50%;
+  content: "";
+  flex-shrink: 0;
+  height: 6px;
+  width: 6px;
+}
+.gyro-usage-control-status.is-on {
+  color: var(--gyro-success);
+}
+.gyro-usage-control-status.is-paused {
+  color: var(--gyro-danger);
+}
+.gyro-usage-pause-button {
+  align-items: center;
+  background: color-mix(in srgb, var(--gyro-danger) 12%, transparent);
+  border: 0.5px solid color-mix(in srgb, var(--gyro-danger) 45%, transparent);
+  border-radius: var(--gyro-radius-md);
+  color: var(--gyro-danger);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: var(--gyro-font-micro);
+  font-weight: 600;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+.gyro-usage-pause-button:hover {
+  background: color-mix(in srgb, var(--gyro-danger) 20%, transparent);
+}
+.gyro-usage-pause-button:focus-visible {
+  outline: 2px solid var(--gyro-focus-ring);
+  outline-offset: 2px;
+}
+/* Once paused, the way out is the calm action. */
+.gyro-usage-pause-button.is-active {
+  background: var(--gyro-control);
+  border-color: var(--gyro-border-heavy);
+  color: var(--gyro-text);
+}
+.gyro-usage-pause-button.is-active:hover {
+  background: var(--gyro-control-hover);
+}
+
+@media (max-width: 760px) {
+  .gyro-usage-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* The window is wider than the pane; only wrap the actions once they cannot sit beside the name. */
+@media (max-width: 520px) {
+  .gyro-usage-provider-card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .gyro-usage-provider-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
 }
 .gyro-token-total {
   padding-block: var(--gyro-space-section);
@@ -80,7 +475,7 @@
 }
 .gyro-token-total strong {
   color: var(--gyro-text);
-  font-size: var(--gyro-font-heading);
+  font-size: calc(18px * var(--gyro-ui-scale, 1));
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -114,7 +509,7 @@
 .gyro-token-breakdown dd {
   margin: 0;
   color: var(--gyro-text);
-  font-size: var(--gyro-font-lead);
+  font-size: var(--gyro-font-body);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }

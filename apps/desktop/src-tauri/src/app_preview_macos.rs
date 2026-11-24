@@ -24,6 +24,13 @@ mod tests {
                 pixels[y * row + x * 4..y * row + x * 4 + 4].copy_from_slice(&rgba);
             }
         }
+        let png = encode(&bitmap).unwrap();
+        for (y, expected) in [(2, [220, 10, 20]), (30, [10, 200, 30])] {
+            let png = crop(&png, super::super::PixelRegion { x: 2, y, width: 6, height: 5 }).unwrap();
+            let pixels = NSBitmapImageRep::imageRepWithData(&NSData::with_bytes(&png)).unwrap();
+            assert_eq!((pixels.pixelsWide(), pixels.pixelsHigh()), (6, 5));
+            assert_eq!(unsafe { std::slice::from_raw_parts(pixels.bitmapData(), 3) }, &expected);
+        }
         for phone in [false, true] {
             let (png, rect) = frame(&encode(&bitmap).unwrap(), 64, 40, phone).unwrap();
             let output = NSBitmapImageRep::imageRepWithData(&NSData::with_bytes(&png)).unwrap();
@@ -192,6 +199,9 @@ pub fn windows() -> Result<Vec<Target>, String> {
             window_id: Some(id),
             pid: Some(pid),
             bounds: Some(b),
+            device_family: None,
+            device_type: None,
+            booted: None,
         });
     }
     Ok(result)
@@ -202,6 +212,19 @@ fn encode(bitmap: &NSBitmapImageRep) -> Result<Vec<u8>, String> {
         .map(|v| v.to_vec())
         .ok_or("Could not encode preview PNG".into())
 }
+pub(super) fn crop(png: &[u8], region: super::PixelRegion) -> Result<Vec<u8>, String> {
+    use objc2_core_graphics::CGImage;
+    let data = NSData::with_bytes(png);
+    let source = NSBitmapImageRep::imageRepWithData(&data).ok_or("Invalid runtime PNG")?;
+    let image = source.CGImage().ok_or("Cannot read the capture pixels")?;
+    let rect = NSRect::new(
+        NSPoint::new(f64::from(region.x), f64::from(region.y)),
+        NSSize::new(f64::from(region.width), f64::from(region.height)),
+    );
+    let cropped = CGImage::with_image_in_rect(Some(&image), rect).ok_or("Cannot crop the capture pixels")?;
+    encode(&NSBitmapImageRep::initWithCGImage(NSBitmapImageRep::alloc(), &cropped))
+}
+
 pub fn png_dimensions(png: &[u8]) -> Result<(u32, u32), String> {
     let data = NSData::with_bytes(png);
     let bitmap = NSBitmapImageRep::imageRepWithData(&data).ok_or("Invalid runtime PNG")?;

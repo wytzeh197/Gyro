@@ -1,3 +1,4 @@
+import { Button, Empty, Spinner } from "@gyro-dev/ui";
 import { useRef, useState } from "react";
 import { askTextValue, confirmAction } from "@gyro-dev/ui";
 import type {
@@ -208,13 +209,13 @@ export function RemoteFiles({
               if (!event.target.value) setResults(undefined);
             }}
           />
-          <button
+          <Button
             type="submit"
-            className="gyro-secondary-button"
+            variant="outline"
             disabled={!w.online || w.busy}
           >
             Search
-          </button>
+          </Button>
         </form>
         {results
           ? results.map((result, index) => (
@@ -245,32 +246,32 @@ export function RemoteFiles({
         {!data.files.length && !results && !w.toolsLoading && (
           <p>
             No files loaded.{" "}
-            <button
+            <Button
               type="button"
-              className="gyro-secondary-button"
+              variant="outline"
               onClick={() => void w.loadTools()}
             >
               Refresh
-            </button>
+            </Button>
           </p>
         )}
         <div className="gyro-remote-actions">
-          <button
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             disabled={!w.canAct || w.busy}
             onClick={() => void pathAction("createFile")}
           >
             New file
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             disabled={!w.canAct || w.busy}
             onClick={() => void pathAction("createDirectory")}
           >
             New folder
-          </button>
+          </Button>
         </div>
       </aside>
       <div className="gyro-remote-editor">
@@ -280,10 +281,10 @@ export function RemoteFiles({
             .map((k) => {
               const path = k.slice(session.id.length + 1);
               return (
-                <button
+                <Button
                   key={k}
                   type="button"
-                  className="gyro-secondary-button"
+                  variant="outline"
                   aria-pressed={view.selectedFile === path}
                   onClick={() =>
                     setView((previous) => ({ ...previous, selectedFile: path }))
@@ -293,7 +294,7 @@ export function RemoteFiles({
                   {view.buffers[k]?.text !== view.buffers[k]?.file.content
                     ? " •"
                     : ""}
-                </button>
+                </Button>
               );
             })}
         </nav>
@@ -301,40 +302,40 @@ export function RemoteFiles({
           <>
             <div className="gyro-remote-toolbar">
               <span>{view.selectedFile}</span>
-              <button
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 disabled={!w.canAct || w.busy || buffer.file.truncated}
                 onClick={() => void save()}
               >
                 Save on host
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 disabled={!w.online || w.busy}
                 onClick={() =>
                   view.selectedFile && void openFile(view.selectedFile, true)
                 }
               >
                 Reload from host
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 disabled={!w.canAct || w.busy}
                 onClick={() => void pathAction("rename")}
               >
                 Rename
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
-                className="gyro-secondary-button"
+                variant="outline"
                 disabled={!w.canAct || w.busy}
                 onClick={() => void pathAction("delete")}
               >
                 Delete
-              </button>
+              </Button>
             </div>
             {buffer.file.truncated && (
               <p role="status">
@@ -378,9 +379,7 @@ export function RemoteFiles({
             </div>
           </>
         ) : (
-          <div className="gyro-remote-empty">
-            <p>Select a remote file to edit it.</p>
-          </div>
+          <Empty className="gyro-remote-empty" size="compact" title="Select a remote file to edit it." />
         )}
       </div>
     </section>
@@ -416,27 +415,27 @@ export function RemoteGit({ workspace: w, session }: Props) {
     >
       <div className="gyro-remote-toolbar">
         <strong>{git?.status.branch ?? "Source Control"}</strong>
-        <button
+        <Button
           type="button"
-          className="gyro-secondary-button"
+          variant="outline"
           onClick={() => void w.loadTools()}
         >
           Refresh
-        </button>
+        </Button>
         {(["fetch", "pull", "push"] as const).map((kind) => (
-          <button
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             key={kind}
             disabled={!w.canAct || w.busy || !git?.status.available}
             onClick={() => void action(kind)}
           >
             {kind}
-          </button>
+          </Button>
         ))}
-        <button
+        <Button
           type="button"
-          className="gyro-secondary-button"
+          variant="outline"
           disabled={!w.canAct || w.busy || !git?.status.available}
           onClick={() => {
             void askTextValue({ title: "New host branch" }).then((branch) => {
@@ -445,10 +444,10 @@ export function RemoteGit({ workspace: w, session }: Props) {
           }}
         >
           New branch
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className="gyro-secondary-button"
+          variant="outline"
           disabled={!w.canAct || w.busy || !git?.status.available}
           onClick={() => {
             void askTextValue({ title: "Switch to existing host branch" }).then(
@@ -459,7 +458,7 @@ export function RemoteGit({ workspace: w, session }: Props) {
           }}
         >
           Switch branch
-        </button>
+        </Button>
       </div>
       {!git && w.toolsLoading && <p>Loading changes…</p>}
       {git && !git.status.available && (
@@ -471,33 +470,33 @@ export function RemoteGit({ workspace: w, session }: Props) {
           className="gyro-remote-toolbar"
           key={`${file.path}:${file.staged}`}
         >
-          <button
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             onClick={() =>
               void action("diff", file.path, file.staged ? "staged" : undefined)
             }
           >
             {file.path} · {file.staged ? "Staged" : "Unstaged"}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             disabled={!w.canAct || w.busy}
             onClick={() =>
               void action(file.staged ? "unstage" : "stage", file.path)
             }
           >
             {file.staged ? "Unstage" : "Stage"}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             disabled={!w.canAct || w.busy}
             onClick={() => void action("discard", file.path)}
           >
             Discard
-          </button>
+          </Button>
         </div>
       ))}
       <label className="gyro-remote-stack">
@@ -508,14 +507,14 @@ export function RemoteGit({ workspace: w, session }: Props) {
           onChange={(event) => setMessage(event.target.value)}
         />
       </label>
-      <button
+      <Button
         type="button"
-        className="gyro-secondary-button"
+        variant="outline"
         disabled={!w.canAct || w.busy || !message.trim()}
         onClick={() => void action("commit", undefined, message)}
       >
         Commit staged changes on host
-      </button>
+      </Button>
       <pre className="gyro-remote-output">
         {diff || "Select a changed file to inspect its diff."}
       </pre>
@@ -578,19 +577,19 @@ export function RemoteTerminals({ workspace: w, session }: Props) {
     <section className="gyro-remote-terminal" aria-label="Remote terminals">
       <nav className="gyro-remote-toolbar" aria-label="Host terminal tabs">
         {w.data.terminals.map((item) => (
-          <button
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             key={item.paneId}
             aria-pressed={item.paneId === pane?.paneId}
             onClick={() => setSelected(item.paneId)}
           >
             {item.title}
-          </button>
+          </Button>
         ))}
-        <button
+        <Button
           type="button"
-          className="gyro-secondary-button"
+          variant="outline"
           disabled={!w.canAct || w.busy}
           onClick={() =>
             void w
@@ -606,11 +605,11 @@ export function RemoteTerminals({ workspace: w, session }: Props) {
           }
         >
           New host terminal
-        </button>
+        </Button>
         {pane && (
-          <button
+          <Button
             type="button"
-            className="gyro-secondary-button"
+            variant="outline"
             disabled={!w.canAct}
             onClick={() => {
               void confirmAction(
@@ -629,7 +628,7 @@ export function RemoteTerminals({ workspace: w, session }: Props) {
             }}
           >
             Close terminal
-          </button>
+          </Button>
         )}
       </nav>
       {!w.online && (
@@ -677,14 +676,19 @@ export function RemoteTerminals({ workspace: w, session }: Props) {
             }}
           />
         </div>
-      ) : (
-        <div className="gyro-remote-empty">
+      ) : w.toolsLoading ? (
+        <div className="gyro-remote-empty" role="status">
           <p>
-            {w.toolsLoading
-              ? "Loading terminals…"
-              : "No remote terminals. Take control and create one."}
+            <Spinner decorative size="xs" /> Loading terminals…
           </p>
         </div>
+      ) : (
+        <Empty
+          className="gyro-remote-empty"
+          size="compact"
+          title="No remote terminals"
+          description="Take control and create one."
+        />
       )}
       <small>
         Output uses bounded host scrollback. Earlier output may no longer be

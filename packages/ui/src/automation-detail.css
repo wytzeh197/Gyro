@@ -78,7 +78,7 @@
 .gyro-automation-run-mark {
   flex: none;
   margin-top: 2px;
-  stroke-width: 1.75;
+  stroke-width: 1.9;
 }
 
 .gyro-automation-heading > p {
@@ -127,7 +127,7 @@
   flex: none;
   margin-top: 2px;
   color: var(--gyro-muted);
-  stroke-width: 1.75;
+  stroke-width: 1.9;
 }
 
 .gyro-automation-schedule-line p {

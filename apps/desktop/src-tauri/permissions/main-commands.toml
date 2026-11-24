@@ -194,6 +194,7 @@ commands.allow = [
   "recover_config",
   "save_project_capability_policy",
   "search_workspace",
+  "server_runs_request",
   "set_session_model",
   "set_menu_bar_snapshot",
   "set_menu_bar_visible",

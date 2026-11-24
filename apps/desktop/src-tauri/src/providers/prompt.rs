@@ -90,6 +90,7 @@ pub(crate) fn provider_context_message_with_capabilities_for_turn(
         supports_tools,
         supports_images,
         turn,
+        None,
     );
     stable.append(&mut context);
     format!(
@@ -104,6 +105,7 @@ pub(crate) fn provider_context_sections(
     conversation_history: Option<&str>,
     supports_tools: bool,
     supports_images: bool,
+    workspace_root_count: Option<usize>,
 ) -> (String, String) {
     let (stable, context) = provider_context_parts(
         request,
@@ -111,6 +113,7 @@ pub(crate) fn provider_context_sections(
         supports_tools,
         supports_images,
         PromptTurn::default(),
+        workspace_root_count,
     );
     let mut dynamic = context.join("\n");
     if !dynamic.is_empty() {
@@ -127,6 +130,7 @@ fn provider_context_parts(
     supports_tools: bool,
     supports_images: bool,
     turn: PromptTurn,
+    workspace_root_count: Option<usize>,
 ) -> (Vec<String>, Vec<String>) {
     if let Some(purpose) = isolated_internal_purpose(request) {
         return (vec![internal_request_instructions(purpose)], Vec::new());
@@ -214,7 +218,9 @@ fn provider_context_parts(
             stable.push("Reuse current evidence, narrow and batch independent reads/searches, and prefer exact edits when authorized. Complete required checks with verification proportionate to risk; preserve user constraints and explicit attachments.".into());
             context.push(delegated_agents::prompt_guidance(request, false).into());
         }
-        if let Some(workspace) = request.workspace_path.as_deref() {
+        if workspace_root_count == Some(1) {
+            context.push("Workspace tools select this chat's only root automatically. Omit rootId. For file tools, use the file's workspace-relative path. If you need the root's absolute path, call gyro_workspace_get_context.".into());
+        } else if let Some(workspace) = request.workspace_path.as_deref() {
             context.push(format!("Selected workspace: {workspace}"));
         }
         // A resumed provider thread already holds the full workspace guide.
@@ -225,6 +231,12 @@ fn provider_context_parts(
         } else {
             stable.push("Use the selected workspace to carry out workspace requests. Inspect actual files with the available Gyro tools before making claims about them; do not ask the user to paste files you can read. Prefer Gyro Workspace tools so reads, changes, command output, and review state remain connected to this chat. For unrelated questions, answer directly without unnecessary workspace calls. Use file paths supplied by the user or observed in workspace results; discover unfamiliar filenames before narrowing a read or search to them. If a search scope does not exist, inspect an existing parent or search from the workspace root before trying another path.".into());
             stable.push("Paths are relative to the selected workspace root, never to the last file read or listed. Preserve each user-supplied path exactly: a bare filename names a root file, even when another requested file is in a subdirectory. A failed read is not permission to create that path. Recheck the original request and use gyro_workspace_list with path \".\" to locate existing files before proposing a replacement or a new file. Create files only when the requested change calls for them. Read-only requests and explicit edit-path limits also apply to pending proposals, memory notes and housekeeping files; proposing an out-of-scope write is not a read-only action even if review would block application. Keep facts for the next reply in conversation context when file writes are forbidden. When multiple roots are configured, get their root IDs from gyro_workspace_get_context and pass rootId to root-specific tools.".into());
+        }
+        let command_guidance = "Use separate tool calls for independent commands so each result has its own status. Use Gyro Workspace Search for searches that can return zero matches. Check whether an optional path exists before reading or listing it, and report an absent dependency as unavailable.";
+        if turn.resumed {
+            context.push(command_guidance.into());
+        } else {
+            stable.push(command_guidance.into());
         }
         if request.mode == ChatMode::Normal {
             // Tool descriptions already name list, search, read, and edit.
@@ -422,6 +434,7 @@ fn browser_snapshot_for_prompt(
         let schema = snapshot.get("schema").and_then(Value::as_str);
         observation = schema == Some(crate::browser::types::BROWSER_OBSERVATION_SCHEMA_V1);
         annotation = schema == Some("gyro.browser-annotation.v1");
+        let app_annotation = schema == Some("gyro.app-preview-annotation.v1");
         let image = snapshot.get("attachedImage");
         let reported_visible = snapshot
             .get("evidence")
@@ -442,6 +455,8 @@ fn browser_snapshot_for_prompt(
             evidence["screenshotModelVisible"] = visible.into();
             evidence["visualNote"] = if visible {
                 "The captured screenshot is included as an image attachment."
+            } else if app_annotation {
+                "No image is delivered to this model. Use the app annotation text and capture metadata."
             } else {
                 "No image is delivered to this model. Use the structured page; do not claim pixel-level inspection."
             }.into();

@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronUp, Users } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Users } from "./icons";
 import { useId, useState } from "react";
 import { normalizedCouncilConfig, type CouncilSeatResolution } from "./council";
 import {

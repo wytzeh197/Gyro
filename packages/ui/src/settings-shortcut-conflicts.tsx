@@ -1,3 +1,4 @@
+import { Button } from "./primitives/button";
 import { SettingsGroup, SettingsRow } from "./settings-controls";
 import { workspaceCommandRegistry } from "./workspace-shell";
 import type { WorkspaceKeybinding } from "./types";
@@ -45,14 +46,14 @@ export function ShortcutConflicts({
         label="Reset customized shortcuts"
         detail="Restore the built-in workspace shortcuts. App shortcuts are unchanged."
       >
-        <button
+        <Button
           type="button"
-          className="gyro-secondary-button"
+          variant="outline"
           disabled={!onChange || !overrides.length}
           onClick={() => overrides.forEach((id) => onChange?.(id, undefined))}
         >
           Reset shortcuts
-        </button>
+        </Button>
       </SettingsRow>
     </SettingsGroup>
   );

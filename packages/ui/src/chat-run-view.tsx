@@ -23,7 +23,7 @@ import {
   ShieldQuestion,
   SquareTerminal,
   Wrench,
-} from "lucide-react";
+} from "./icons";
 
 import {
   failureDetail,
@@ -739,6 +739,9 @@ function RunCallRow({
     .filter(Boolean)
     .join(" ");
 
+  const exitCode = item.kind === "command" && item.status === "failed"
+    ? /^Exit code: (-?\d+)\b/.exec(item.error ?? "")?.[1]
+    : undefined;
   const body = (
     <>
       <span aria-hidden="true" className="gyro-run-row-icon">
@@ -765,7 +768,9 @@ function RunCallRow({
       ) : null}
       {elapsed ? <span className="gyro-run-call-meta">{elapsed}</span> : null}
       {item.status === "failed" ? (
-        <span className="gyro-run-call-meta is-failed">Failed</span>
+        <span className="gyro-run-call-meta is-failed">
+          {exitCode ? `Failed · exit ${exitCode}` : "Failed"}
+        </span>
       ) : null}
     </>
   );
@@ -775,6 +780,9 @@ function RunCallRow({
       <summary className={`${className} gyro-import-tool-summary`}>{body}<ChevronRight aria-hidden="true" className="gyro-import-tool-chevron" size={12} /></summary>
       <div className="gyro-import-tool-content">
         {item.kind === "search" && item.path ? <span>{item.path}</span> : null}
+        {item.kind === "command" && item.grouped ? (
+          <pre aria-label="Shell command group">{text.description}</pre>
+        ) : null}
         <pre aria-label="Tool failure details" tabIndex={0}>{item.error}</pre>
       </div>
     </details>;
@@ -955,6 +963,9 @@ function RunRow({
       <summary className={`${className} gyro-import-tool-summary`}>{body}<ChevronRight aria-hidden="true" className="gyro-import-tool-chevron" size={12} /></summary>
       <div className="gyro-import-tool-content">
         {item.kind === "search" && item.path ? <span>{item.path}</span> : null}
+        {item.kind === "command" && item.grouped ? (
+          <pre aria-label="Shell command group">{text.description}</pre>
+        ) : null}
         <pre aria-label="Tool failure details" tabIndex={0}>{item.error}</pre>
       </div>
     </details>;

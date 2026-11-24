@@ -45,6 +45,15 @@ pub fn is_foreground_test_command<'a>(
             })
 }
 
+/// Identify the exact foreground test invocation used by a workspace receipt.
+pub fn foreground_test_identity(program: &str, args: &[String], cwd: &std::path::Path) -> String {
+    let invocation = serde_json::json!([program, args, cwd.to_string_lossy()]);
+    format!(
+        "command:{}",
+        crate::mutations::content_hash(invocation.to_string().as_bytes())
+    )
+}
+
 const EXECUTION_CHANNEL_CAPACITY: usize = 128;
 const EXECUTION_READ_CHUNK_BYTES: usize = 8 * 1024;
 const EXECUTION_POLL_INTERVAL: Duration = Duration::from_millis(20);

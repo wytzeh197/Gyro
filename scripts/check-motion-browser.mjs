@@ -80,47 +80,40 @@ try {
   assert.ok(reversed.at(-1)?.width > 250, "open-close-open interruption settles open");
   await click("Close panel");
   await pause(300);
+  // The overflow is the shared Base UI Menu: CSS transitions driven by
+  // data-starting-style / data-ending-style, unmounted after the exit.
   const menuMotion = await evaluate(`(async () => {
     const trigger = document.querySelector('[aria-label="Preview actions"]');
     const getMenu = () => document.querySelector(".gyro-toolbar-overflow-menu");
     const frame = () => new Promise(requestAnimationFrame);
-    const findTrack = menu => menu.getAnimations().find(track => track.animationName);
+    const frames = async (n) => { for (let i = 0; i < n; i += 1) await frame(); };
+    const transitions = menu => menu.getAnimations().filter(track => track.transitionProperty);
+    const settle = async (test) => { for (let i = 0; i < 90 && !test(); i += 1) await frame(); return test(); };
     trigger.click();
-    await frame();
+    await frames(2);
     const menu = getMenu();
-    const opening = findTrack(menu);
-    const openTime = Number(opening.effect.getComputedTiming().duration);
-    await opening.finished;
+    const opening = transitions(menu);
+    const openTime = Math.max(0, ...opening.map(t => Number(t.effect.getComputedTiming().duration)));
+    await Promise.all(opening.map(t => t.finished.catch(() => undefined)));
+    const openSettled = menu.hasAttribute("data-open") && getComputedStyle(menu).opacity === "1";
     trigger.click();
-    await opening.ready;
-    const closingRate = opening.playbackRate;
-    const inert = menu.inert;
-    await opening.finished;
-    await frame();
-    const removed = !getMenu();
+    await frames(2);
+    const exiting = menu.hasAttribute("data-ending-style") || transitions(menu).length > 0;
+    const removed = await settle(() => !getMenu());
     trigger.click();
-    await frame();
+    await frames(2);
     const reopenedMenu = getMenu();
-    const interrupted = findTrack(reopenedMenu);
-    interrupted.pause();
-    await interrupted.ready;
-    interrupted.currentTime = openTime * 0.45;
     trigger.click();
-    await interrupted.ready;
-    const sameTimeline = findTrack(reopenedMenu) === interrupted;
+    await frames(1);
     trigger.click();
-    await interrupted.ready;
-    const reopeningRate = interrupted.playbackRate;
-    await interrupted.finished;
-    return {
-      openTime, closingRate, inert, removed, sameTimeline, reopeningRate,
-      reopened: getMenu() === reopenedMenu && !reopenedMenu.inert,
-    };
+    const reopened = await settle(() => {
+      const current = getMenu();
+      return !!current && current.hasAttribute("data-open") && !current.hasAttribute("data-ending-style") && getComputedStyle(current).opacity === "1";
+    });
+    return { openTime, openSettled, exiting, removed, reopened: reopened && !!reopenedMenu };
   })()`);
-  assert.equal(menuMotion.openTime, 130, "overflow keeps its existing 130 ms entrance");
-  assert.equal(menuMotion.closingRate, -1.25, "full exit takes 80% of the opening duration");
-  assert.equal(menuMotion.reopeningRate, 1, "reopening restores the original playback rate");
-  assert.ok(menuMotion.inert && menuMotion.removed && menuMotion.sameTimeline && menuMotion.reopened, JSON.stringify(menuMotion));
+  assert.ok(menuMotion.openTime > 0 && menuMotion.openTime <= 220, "overflow keeps a short entrance transition");
+  assert.ok(menuMotion.openSettled && menuMotion.exiting && menuMotion.removed && menuMotion.reopened, JSON.stringify(menuMotion));
   await call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape" });
   await until(() => evaluate('!document.querySelector(".gyro-toolbar-overflow-menu")'), "overflow exits after Escape");
   assert.equal(await evaluate("document.activeElement?.getAttribute('aria-label')"), "Preview actions");
@@ -140,8 +133,8 @@ try {
   assert.equal(await evaluate('!!document.querySelector(".motion-qa-detail .gyro-run-group-details")'), false, "nested file details unmount after closing");
   await click("Open branch dialog");
   await pause(250);
-  assert.ok(await evaluate('document.querySelector(".gyro-branch-name-dialog").open'), "native dialog opens");
-  await evaluate('document.querySelector(".gyro-branch-name-dialog .gyro-secondary-button").click()');
+  assert.ok(await evaluate('document.querySelector(".gyro-branch-name-dialog")?.getAttribute("role") === "dialog"'), "branch dialog opens");
+  await evaluate('document.querySelector(".gyro-branch-name-dialog .gyro-btn--outline").click()');
   await until(() => evaluate('!document.querySelector(".gyro-branch-name-dialog")'), "cancel dismisses dialog");
   await call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   const reducedOpened = await trace("Open Files panel");

@@ -40,14 +40,24 @@ function mark(x, y, size, ink) {
   return `<svg x="${x}" y="${y}" width="${size}" height="${size}" viewBox="${viewBox}" fill="${ink}" color="${ink}">${paths.replaceAll("currentColor", ink).replaceAll("#111111", ink)}</svg>`;
 }
 
-// Preserve the existing inset macOS tile. The mark occupies approximately 60%
-// of the tile width, keeping comfortable space around the new four-part shape.
+// The cobalt app tile uses the same four-part mark as the in-app branding. The
+// mark occupies roughly 60% of the tile so it sits comfortably in the Dock.
 const appIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <rect x="100" y="100" width="824" height="824" rx="190" fill="#f8f8f6"/>
-  ${mark(232, 232, 560, "#0a0a0a")}
+  <defs>
+    <linearGradient id="cobalt" x2="90%" y2="100%">
+      <stop offset="0" stop-color="#536de2"/>
+      <stop offset="1" stop-color="#293e9d"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="206" fill="url(#cobalt)"/>
+  ${mark(232, 232, 560, "#f8f9ff")}
 </svg>`;
 const appIconPath = resolve(tauriRoot, "app-icon.png");
 await sharp(Buffer.from(appIcon)).png().toFile(appIconPath);
+await sharp(appIconPath)
+  .resize(256, 256)
+  .png()
+  .toFile(resolve(repoRoot, "apps/desktop/public/gyro-logo.png"));
 
 // Tauri produces macOS, Windows, Android, iOS and all existing PNG sizes from
 // the same canonical 1024px source. Use the checked-in workspace CLI version.

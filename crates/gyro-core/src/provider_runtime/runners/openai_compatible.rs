@@ -18,18 +18,29 @@ use super::super::{
     types::{ChatAttachmentRequest, ChatMode, ProviderChatRequest, ProviderRunnerOutput},
 };
 use super::ollama::{
-    ollama_compatibility_catalog, ollama_compatibility_system, parse_compatibility_reply,
-    validate_ollama_compatibility_call, OllamaCompatibilityAction,
+    append_compatibility_reply_retry, ollama_compatibility_catalog, ollama_compatibility_system,
+    parse_compatibility_reply, validate_ollama_compatibility_call, OllamaCompatibilityAction,
 };
 use crate::{
-    openai_compat_endpoint, openai_compat_host_is_loopback, provider_api_key_env_name,
-    CapabilityId, HarnessRunStatus, OpenAiCompatChatRequest, UsageTokens,
-    OPENAI_COMPAT_CANCELLED_MESSAGE,
+    openai_compat_endpoint, openai_compat_host_is_loopback,
+    openai_compatible::OpenAiCompatContextOverflow, provider_api_key_env_name, CapabilityId,
+    HarnessRunStatus, OpenAiCompatChatRequest, UsageTokens, OPENAI_COMPAT_CANCELLED_MESSAGE,
 };
 use base64::Engine;
 use provider_tool_batch::mark_browser_image_attached;
 use std::sync::{atomic::AtomicBool, Arc};
 use uuid::Uuid;
+
+const COMPATIBILITY_TOOL_BUDGET_CHECKPOINT: &str = "The tool budget is exhausted. Reply with a final JSON object describing completed work and what remains.";
+
+fn system_with_workspace_instructions(mut system: String, stable: &str) -> String {
+    if !stable.is_empty() {
+        system.push('\n');
+        system.push_str(stable);
+    }
+    system
+}
+
 pub fn openai_compat_tool_unsupported(error: &anyhow::Error) -> bool {
     let message = error
         .to_string()
@@ -192,7 +203,7 @@ pub fn run_openai_compatible_chat(
         && !crate::openai_compatible::openai_compat_native_tools_available(
             base_url, model, &api_key,
         )?;
-    let mut system = if request.mode == ChatMode::Council {
+    let system = if request.mode == ChatMode::Council {
         format!("{identity} Respond in concise Markdown. This Council seat is advisory-only; do not call tools or claim to have executed files, commands, browser actions, or edits.")
     } else if compatibility {
         ollama_compatibility_system(&identity)
@@ -200,10 +211,7 @@ pub fn run_openai_compatible_chat(
         format!("{identity} Respond in concise Markdown. Use Gyro tools when they are needed; every tool call is enforced by Gyro's existing approval policy. Never claim an action succeeded until its tool result confirms it.")
     };
     let (stable, dynamic) = host.context_sections(request, true, supports_images);
-    if !stable.is_empty() {
-        system.push('\n');
-        system.push_str(&stable);
-    }
+    let mut system = system_with_workspace_instructions(system, &stable);
     let mut compact_catalog = config.efficiency.policies()
         && config.efficiency.compact_tool_catalog
         && !compatibility
@@ -267,15 +275,18 @@ pub fn run_openai_compatible_chat(
             provider_reliability::configured_tool_rounds().or(compatibility.then_some(16));
         let mut compatibility = compatibility;
         let mut malformed_responses = 0usize;
+        let mut warned_path = None;
         let mut verification_followup = provider_tool_batch::requests_workspace_test(request);
         let mut completed_rounds = 0usize;
         let mut output_continuations = 0usize;
         let mut joined_output = String::new();
+        let mut context_recovery_attempted = false;
         loop {
             let round = completed_rounds;
             if round_budget.is_some_and(|limit| round > limit) {
                 break;
             }
+            let at_tool_budget = round_budget.is_some_and(|limit| round >= limit);
             if cancellation.is_cancelled() {
                 anyhow::bail!("{PROVIDER_STOP_MARKER}: cancelled during {label} response");
             }
@@ -305,7 +316,20 @@ pub fn run_openai_compatible_chat(
                     context_window,
                     auto_compact_percent,
                 ) {
-                    host.save_checkpoint(request);
+                    if config
+                        .efficiency
+                        .checkpoint_recovery_for(&request.provider_id)
+                        && !compatibility
+                    {
+                        if let Some(checkpoint) = host.save_recovery_checkpoint(request) {
+                            provider_context::attach_recovery_to_compaction_note(
+                                &mut messages,
+                                &checkpoint,
+                            );
+                        }
+                    } else {
+                        host.save_checkpoint(request);
+                    }
                     host.complete_context_compaction_request(request);
                     last_measured = None;
                     let activity = provider_context::activity(auto_compactions.len(), &compaction);
@@ -316,13 +340,22 @@ pub fn run_openai_compatible_chat(
                         Some(auto_compactions.len() as u64),
                     );
                     auto_compactions.push(activity);
-                    catalog_memory.after_compaction(&mut messages, retain_catalog);
+                    catalog_memory
+                        .after_compaction(&mut messages, retain_catalog && !compatibility);
                 }
             }
             // A notice belongs to the previous measured response. A rewrite
             // clears that reading and any notice left in the retained tail.
             let (input_tokens, output_tokens) = last_measured.unwrap_or_default();
-            provider_context::refresh_context_checkpoint(
+            let stable_prefix = config.efficiency.stable_prefix_for(&request.provider_id)
+                && !compatibility
+                && request.mode != ChatMode::Council;
+            let refresh_checkpoint = if stable_prefix {
+                provider_context::refresh_cacheable_context_checkpoint
+            } else {
+                provider_context::refresh_context_checkpoint
+            };
+            refresh_checkpoint(
                 &mut messages,
                 input_tokens,
                 output_tokens,
@@ -343,18 +376,16 @@ pub fn run_openai_compatible_chat(
                     e.catalog_fallbacks = e.catalog_fallbacks.saturating_add(1)
                 });
             }
-            let retired = prefix_retention.prepare_for_task(
-                &mut messages,
-                config.efficiency.evidence_policy(),
-                config.efficiency.enabled && config.efficiency.stable_api_prefix && !compatibility,
-                &request.message,
-            );
-            crate::provider_observation::retired_context(retired);
             let (send_catalog, tools_offered) = if compatibility {
-                if round_budget.is_some_and(|limit| round >= limit) {
+                if at_tool_budget
+                    && !messages.iter().skip(2).any(|message| {
+                        message["role"] == "user"
+                            && message["content"] == COMPATIBILITY_TOOL_BUDGET_CHECKPOINT
+                    })
+                {
                     messages.push(serde_json::json!({
                         "role": "user",
-                        "content": "The tool budget is exhausted. Reply with a final JSON object describing completed work and what remains."
+                        "content": COMPATIBILITY_TOOL_BUDGET_CHECKPOINT
                     }));
                 }
                 (false, false)
@@ -369,7 +400,15 @@ pub fn run_openai_compatible_chat(
                     config.efficiency.policies() && config.efficiency.cache_assembly,
                 )
             };
-            let round_request = OpenAiCompatChatRequest {
+            let retired = prefix_retention.prepare_request_for_task(
+                &mut messages,
+                config.efficiency.evidence_policy(),
+                stable_prefix,
+                &request.message,
+                send_catalog.then_some((tools.as_slice(), tools_offered)),
+            );
+            crate::provider_observation::retired_context(retired);
+            let mut round_request = OpenAiCompatChatRequest {
                 base_url,
                 api_key: api_key.as_str(),
                 model,
@@ -382,24 +421,51 @@ pub fn run_openai_compatible_chat(
                 allow_tool_calls: tools_offered,
                 reasoning_effort: reasoning_effort.as_deref(),
             };
-            let turn = crate::openai_compatible::openai_compat_tool_chat_ref(
-                &round_request,
-                &cancellation,
-                |delta| {
-                    if !compatibility {
-                        emit_provider_chat_event(
-                            host,
-                            request,
-                            "delta",
-                            Some(HarnessRunStatus::Running),
-                            Some(delta.to_string()),
-                            None,
-                            None,
-                        );
+            let turn = {
+                let _retry_budget = crate::provider_retry::RetryScope::start();
+                loop {
+                    let turn = crate::openai_compatible::openai_compat_tool_chat_ref(
+                        &round_request,
+                        &cancellation,
+                        // Continuations join at the exact character boundary.
+                        !compatibility,
+                        |delta| {
+                            if !compatibility {
+                                emit_provider_chat_event(
+                                    host,
+                                    request,
+                                    "delta",
+                                    Some(HarnessRunStatus::Running),
+                                    Some(delta.to_string()),
+                                    None,
+                                    None,
+                                );
+                            }
+                        },
+                        |tokens| {
+                            runner::emit_request_usage(host, request, accounted_usage, tokens, None)
+                        },
+                    );
+                    if context_recovery_attempted
+                        || auto_compact_percent == 0
+                        || !tools_offered
+                        || !turn
+                            .as_ref()
+                            .is_err_and(|error| error.is::<OpenAiCompatContextOverflow>())
+                        || !provider_context::retry_with_workspace_evidence(
+                            &mut round_request.messages,
+                            &round_request.tools,
+                            &cancellation,
+                        )
+                    {
+                        break turn;
                     }
-                },
-                |tokens| runner::emit_request_usage(host, request, accounted_usage, tokens, None),
-            );
+                    context_recovery_attempted = true;
+                    // This prefix was rewritten after preparation. The next
+                    // round must never report reuse of that rejected request.
+                    prefix_retention = Default::default();
+                }
+            };
             messages = round_request.messages;
             if send_catalog {
                 tools = round_request.tools;
@@ -409,14 +475,20 @@ pub fn run_openai_compatible_chat(
                     if round == 0
                         && tools_offered
                         && request.mode != ChatMode::Council
+                        && !error.is::<OpenAiCompatContextOverflow>()
                         && openai_compat_tool_unsupported(&error) =>
                 {
                     crate::openai_compatible::remember_openai_compat_native_tool_rejection(
                         base_url, model, &api_key,
                     )?;
                     compatibility = true;
+                    compact_catalog = false;
                     round_budget = round_budget.or(Some(16));
-                    messages[0]["content"] = ollama_compatibility_system(&identity).into();
+                    messages[0]["content"] = system_with_workspace_instructions(
+                        ollama_compatibility_system(&identity),
+                        &stable,
+                    )
+                    .into();
                     continue;
                 }
                 Err(error) => {
@@ -432,7 +504,10 @@ pub fn run_openai_compatible_chat(
                         },
                     )
                 }
-                Ok(turn) => turn,
+                Ok(turn) => {
+                    prefix_retention.confirm_request_completed();
+                    turn
+                }
             };
             // A rejected tools parameter never produced a model response or
             // executed a tool. Keep that round available for the bridge,
@@ -465,49 +540,6 @@ pub fn run_openai_compatible_chat(
             if cancellation.is_cancelled() {
                 anyhow::bail!("{PROVIDER_STOP_MARKER}: cancelled during {label} response");
             }
-            // A text-only length finish is an unfinished answer. Join the next
-            // chunk with no extra newline, up to the same three continuations
-            // ACP uses, and do not spend a tool round on the retry. A cut that
-            // included tool calls never reaches here. The compatibility bridge
-            // must not parse that partial text as a protocol object.
-            // Native Plan replies are Markdown documents that can end
-            // mid-sentence on a normal stop. The compatibility bridge
-            // validates its JSON actions separately.
-            let plan_cut_off = request.mode == ChatMode::Plan
-                && !compatibility
-                && !turn.truncated
-                && turn.tool_calls.is_empty()
-                && if joined_output.is_empty() {
-                    crate::kimi_acp::answer_looks_cut_off(&turn.content)
-                } else {
-                    let mut joined = joined_output.clone();
-                    joined.push_str(&turn.content);
-                    crate::kimi_acp::answer_looks_cut_off(&joined)
-                };
-            match continue_owned_output_limit(
-                &turn.content,
-                turn.truncated || plan_cut_off,
-                turn.tool_calls.is_empty(),
-                &mut joined_output,
-                &mut output_continuations,
-            ) {
-                OwnedOutputLimit::Continue => {
-                    completed_rounds -= 1;
-                    messages.push(serde_json::json!({"role":"assistant","content":turn.content}));
-                    messages.push(serde_json::json!({
-                        "role": "user",
-                        "content": crate::kimi_acp::ACP_OUTPUT_LIMIT_CONTINUATION
-                    }));
-                    continue;
-                }
-                OwnedOutputLimit::Finish(content) => {
-                    turn.content = content;
-                    paused_at_tool_budget = false;
-                    response = Some(turn);
-                    break;
-                }
-                OwnedOutputLimit::Proceed => {}
-            }
             if compatibility {
                 anyhow::ensure!(
                     turn.tool_calls.is_empty(),
@@ -521,11 +553,13 @@ pub fn run_openai_compatible_chat(
                         if malformed_responses > 1 {
                             anyhow::bail!("{label} could not produce a valid Gyro Workspace action after one retry: {error}");
                         }
-                        messages
-                            .push(serde_json::json!({"role":"assistant","content":turn.content}));
-                        messages.push(serde_json::json!({"role":"user","content":format!(
-                            "Invalid Gyro action JSON: {error}. Retry once with one valid protocol object."
-                        )}));
+                        append_compatibility_reply_retry(
+                            &mut messages,
+                            turn.content,
+                            turn.truncated,
+                            &error,
+                        );
+                        completed_rounds -= 1;
                         continue;
                     }
                 };
@@ -553,13 +587,14 @@ pub fn run_openai_compatible_chat(
                             None,
                         );
                         turn.content = content;
-                        paused_at_tool_budget = round_budget.is_some_and(|limit| round >= limit);
+                        turn.truncated = false;
+                        paused_at_tool_budget = at_tool_budget;
                         response = Some(turn);
                         break;
                     }
                     OllamaCompatibilityAction::Catalog { prefix, offset } => {
                         anyhow::ensure!(
-                            !round_budget.is_some_and(|limit| round >= limit),
+                            !at_tool_budget,
                             "{label} requested another catalog after its tool budget was exhausted"
                         );
                         provider_tool_batch::observe_tool(CapabilityId::ToolCatalog);
@@ -581,7 +616,7 @@ pub fn run_openai_compatible_chat(
                     }
                     OllamaCompatibilityAction::Tool { name, arguments } => {
                         anyhow::ensure!(
-                            !round_budget.is_some_and(|limit| round >= limit),
+                            !at_tool_budget,
                             "{label} requested another tool after its tool budget was exhausted"
                         );
                         let id = match validate_ollama_compatibility_call(
@@ -620,6 +655,46 @@ pub fn run_openai_compatible_chat(
                     }
                 }
             }
+            // Prose can resume at an exact character. JSON compatibility
+            // requires a complete, validated protocol object instead.
+            let plan_cut_off = request.mode == ChatMode::Plan
+                && !turn.truncated
+                && turn.tool_calls.is_empty()
+                && if joined_output.is_empty() {
+                    crate::kimi_acp::answer_looks_cut_off(&turn.content)
+                } else {
+                    let mut joined = joined_output.clone();
+                    joined.push_str(&turn.content);
+                    crate::kimi_acp::answer_looks_cut_off(&joined)
+                };
+            match continue_owned_output_limit(
+                &turn.content,
+                turn.truncated || plan_cut_off,
+                turn.tool_calls.is_empty(),
+                &mut joined_output,
+                &mut output_continuations,
+            ) {
+                OwnedOutputLimit::Continue => {
+                    completed_rounds -= 1;
+                    messages.push(serde_json::json!({"role":"assistant","content":turn.content}));
+                    messages.push(serde_json::json!({
+                        "role": "user",
+                        "content": crate::kimi_acp::ACP_OUTPUT_LIMIT_CONTINUATION
+                    }));
+                    continue;
+                }
+                OwnedOutputLimit::Finish(content) => {
+                    turn.content = content.trim().to_owned();
+                    paused_at_tool_budget = at_tool_budget;
+                    response = Some(turn);
+                    break;
+                }
+                OwnedOutputLimit::Proceed => {
+                    if turn.content.trim().len() != turn.content.len() {
+                        turn.content = turn.content.trim().to_owned();
+                    }
+                }
+            }
             anyhow::ensure!(
                 tools_offered || turn.tool_calls.is_empty(),
                 "{label} returned tool calls although no tools were offered"
@@ -628,7 +703,7 @@ pub fn run_openai_compatible_chat(
                 // A reply given with tools withheld is the checkpoint the budget
                 // asked for, not the model choosing to stop: the turn is paused
                 // and the user is told so, rather than left with prose alone.
-                paused_at_tool_budget = round_budget.is_some_and(|limit| round >= limit);
+                paused_at_tool_budget = at_tool_budget;
                 response = Some(turn);
                 break;
             }
@@ -727,6 +802,14 @@ pub fn run_openai_compatible_chat(
                     &mut results,
                     &mut verification_followup,
                 )?;
+            if provider_tool_batch::repeated_rejected_path(
+                &mut warned_path,
+                ordered_replies.len() == 1,
+                &batch,
+                &results,
+            ) {
+                anyhow::bail!("{PROVIDER_STOP_MARKER}: repeated unchanged tool results after a workspace path correction");
+            }
             for result in &results {
                 catalog_memory.observe(result);
             }

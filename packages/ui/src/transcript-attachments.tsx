@@ -1,4 +1,4 @@
-import { RotateCcw, SquareTerminal } from "lucide-react";
+import { RotateCcw, SquareTerminal } from "./icons";
 import { ChatFileCard, chatFileKind } from "./chat-file-card";
 import { useTerminalAttachmentActions } from "./terminal-attachment-actions";
 import type { ChatAttachment } from "./types";

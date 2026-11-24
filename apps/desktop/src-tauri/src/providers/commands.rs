@@ -7,12 +7,13 @@ use crate::{
             ProviderChatRequest, ProviderChatResponse, ProviderContextCompactionResponse,
         },
         run::compact_provider_chat_blocking,
+        session_lifecycle::ProviderSessionLease,
     },
     state::{
         managers::ProviderCancellationManager,
         provider_run::{cancel_provider_run, ProviderRunControl, ProviderStopReason},
     },
-    stores::parse_uuid,
+    stores::{open_store, parse_uuid, to_string},
     text::validate_chat_message,
 };
 use std::sync::Arc;
@@ -148,6 +149,9 @@ pub(crate) async fn compact_provider_chat(
     let worker_app = app.clone();
     let worker_session_id = session_id.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
+        let store = open_store()?;
+        let _lease = ProviderSessionLease::for_run(&store, parse_uuid(&worker_session_id)?)
+            .map_err(to_string)?;
         compact_provider_chat_blocking(worker_app, worker_session_id, run_id)
     })
     .await

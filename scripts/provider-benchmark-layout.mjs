@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // Fixture repositories must be outside the app's private data directory.
@@ -28,4 +29,19 @@ export async function readBenchmarkLayout(root) {
 
 export function benchmarkStoreDirectory(root, layout) {
   return layout ? join(root, "data") : root;
+}
+
+export async function createBenchmarkRoot(prefix, layout = null) {
+  const temporaryDirectory = await realpath(tmpdir());
+  const prospectiveRoot = join(temporaryDirectory, `${prefix}XXXXXX`);
+  const socketPath = join(
+    benchmarkStoreDirectory(prospectiveRoot, layout),
+    "gyro-4294967295.sock",
+  );
+  // macOS includes the trailing NUL in its 104-byte Unix socket path limit.
+  const parent =
+    process.platform === "darwin" && Buffer.byteLength(socketPath) >= 104
+      ? "/private/tmp"
+      : temporaryDirectory;
+  return realpath(await mkdtemp(join(parent, prefix)));
 }

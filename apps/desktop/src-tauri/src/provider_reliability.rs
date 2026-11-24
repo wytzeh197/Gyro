@@ -152,6 +152,45 @@ mod tests {
 #[cfg(test)]
 mod tool_validation_tests {
     use super::*;
+
+    #[test]
+    fn malformed_edit_and_command_get_specific_recovery_before_the_broker() {
+        use serde_json::json;
+        let edit = CapabilityId::WorkspaceEdit;
+        let error = validate_tool_call(
+            edit.provider_tool_name(),
+            &json!({"path":"src/main.mjs", "content":"replacement"}),
+        )
+        .unwrap_err();
+        assert!(error.contains("missing required arguments: oldString, newString"));
+        assert!(error.contains("Use the existing read result if available"));
+        assert!(error.contains("No action was executed"));
+        assert_eq!(
+            validate_tool_call(
+                edit.provider_tool_name(),
+                &json!({"path":"src/main.mjs", "oldString":"original", "newString":"replacement"}),
+            ),
+            Ok(edit)
+        );
+
+        let command = CapabilityId::WorkspaceRunCommand;
+        let error = validate_tool_call(
+            command.provider_tool_name(),
+            &json!({"cwd":"src", "args":["--test", "sum.test.mjs"]}),
+        )
+        .unwrap_err();
+        assert!(error.contains("missing required argument: program"));
+        assert!(error.contains("Omit cwd to run from the workspace root"));
+        assert!(error.contains("No action was executed"));
+        assert_eq!(
+            validate_tool_call(
+                command.provider_tool_name(),
+                &json!({"program":"node", "args":["--test", "sum.test.mjs"]}),
+            ),
+            Ok(command)
+        );
+    }
+
     #[test]
     fn observation_size_hints_are_repaired_before_schema_validation() {
         use serde_json::json;

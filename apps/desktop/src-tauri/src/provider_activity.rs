@@ -103,13 +103,22 @@ pub(crate) fn extract_provider_activity(value: &serde_json::Value) -> Option<Pro
     match item_type {
         "command_execution" | "command" => {
             let command = json_string_or_joined(item.get("command"))?;
+            let exit_code = item.get("exit_code").and_then(serde_json::Value::as_i64);
+            let status = if status != "running" && exit_code.is_some_and(|code| code != 0) {
+                "failed"
+            } else {
+                status
+            };
+            let note = exit_code
+                .filter(|_| status == "failed")
+                .map(|code| format!("Exit code: {code}"));
             Some(ProviderActivity {
                 id,
                 kind: "command".into(),
                 label: command_activity_label(&command),
                 detail: Some(command),
                 file_counts: None,
-                note: None,
+                note,
                 status: status.into(),
             })
         }

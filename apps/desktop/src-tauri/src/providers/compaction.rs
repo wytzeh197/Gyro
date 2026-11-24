@@ -12,7 +12,7 @@ use crate::{
         },
         events::{emit_provider_activity_event, provider_activity_event_entry},
         retry::run_provider_chat_with_retry,
-        types::ProviderActivity,
+        types::{ProviderActivity, ProviderRunnerOutput},
     },
     stores::{parse_uuid, to_string},
     usage::guard::UsageContext,
@@ -20,6 +20,19 @@ use crate::{
 use gyro_core::{SessionStore, UsageOrigin};
 use std::time::Instant;
 use uuid::Uuid;
+
+pub(super) fn compaction_usage_context(
+    store: &SessionStore,
+    session_id: Uuid,
+) -> Result<UsageContext, String> {
+    let origin = store
+        .workflow_dispatch_origin(session_id)
+        .map_err(to_string)?
+        .filter(|origin| matches!(origin, UsageOrigin::Automation | UsageOrigin::AgentSession))
+        .unwrap_or(UsageOrigin::ContextCompaction);
+    Ok(UsageContext::new(origin))
+}
+
 /// One metered provider call that turns this chat's transcript into the
 /// checkpoint a manual `/compact` stores.
 ///
@@ -91,18 +104,21 @@ pub(crate) fn run_compaction_summary_call(
         app,
         &summary_request,
         None,
-        UsageContext::new(
-            store
-                .workflow_dispatch_origin(session_id)
-                .map_err(to_string)?
-                .filter(|origin| {
-                    matches!(origin, UsageOrigin::Automation | UsageOrigin::AgentSession)
-                })
-                .unwrap_or(UsageOrigin::ContextCompaction),
-        ),
+        compaction_usage_context(store, session_id)?,
     )
-    .map(|output| (output.response, output.billed_usage))
+    .and_then(compaction_summary_output)
     .map_err(|error| gyro_core::security::redact_secrets(&error.to_string()))
+}
+
+fn compaction_summary_output(
+    output: ProviderRunnerOutput,
+) -> anyhow::Result<(String, Option<ProviderContextUsage>)> {
+    anyhow::ensure!(!output.answer_cut_off, "the provider summary was cut off");
+    anyhow::ensure!(
+        !output.paused_at_tool_budget,
+        "the provider reached its tool budget before it finished summarizing"
+    );
+    Ok((output.response, output.billed_usage))
 }
 
 pub(crate) fn compact_local_provider_chat(
@@ -237,4 +253,36 @@ pub(crate) fn compact_local_provider_chat(
         .map_err(to_string)?;
     emit_provider_activity_event(app, request, &completed, Some(0));
     Ok(ProviderContextCompactionResponse { activity_events })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn context_compaction_rejects_incomplete_provider_summaries() {
+        let output = |answer_cut_off, paused_at_tool_budget| ProviderRunnerOutput {
+            accounted_usage: None,
+            activities: Vec::new(),
+            context_usage: None,
+            billed_usage: Some(ProviderContextUsage {
+                input_tokens: Some(400),
+                ..ProviderContextUsage::default()
+            }),
+            rate_limits: Vec::new(),
+            response: "Earlier decisions and remaining work".into(),
+            paused_at_tool_budget,
+            answer_cut_off,
+            resume_cursor: None,
+            retry_count: 0,
+            resumed: false,
+            output_summary: None,
+            streamed_text: None,
+        };
+        assert!(compaction_summary_output(output(true, false)).is_err());
+        assert!(compaction_summary_output(output(false, true)).is_err());
+        let (summary, usage) = compaction_summary_output(output(false, false)).unwrap();
+        assert_eq!(summary, "Earlier decisions and remaining work");
+        assert_eq!(usage.and_then(|usage| usage.input_tokens), Some(400));
+    }
 }

@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { Monitor, Smartphone, Tablet, ScanLine } from "lucide-react";
+import { Monitor, Smartphone, Tablet, ScanLine } from "./icons";
 import { browserViewportGeometry } from "./browser-viewport.ts";
 import type { BrowserPreview, BrowserViewportMode } from "./types.ts";
 

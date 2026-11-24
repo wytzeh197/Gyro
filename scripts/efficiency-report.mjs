@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { sha256 } from "./efficiency-run-manifest.mjs";
 import {
   pairedQuality,
   tokenBreakdown,
@@ -10,16 +11,39 @@ const p95 = (values) =>
   values.length
     ? [...values].sort((a, b) => a - b)[Math.ceil(values.length * 0.95) - 1]
     : null;
+const median = (values) => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? sorted[middle]
+    : sorted.length
+      ? (sorted[middle - 1] + sorted[middle]) / 2
+      : null;
+};
 const key = (r) =>
   JSON.stringify([
     r.task,
     r.repositorySnapshot,
+    r.verificationContract ?? null,
     r.provider,
     r.model,
     r.effort,
     r.trial,
     r.sessionCondition,
   ]);
+function verificationContract(required) {
+  if (required === undefined || (Array.isArray(required) && required.length === 0))
+    return null;
+  if (!Array.isArray(required) || !required.every((command) =>
+    typeof command?.program === "string" && Array.isArray(command.args) &&
+    command.args.every((arg) => typeof arg === "string") &&
+    (command.cwd == null || typeof command.cwd === "string")))
+    return undefined;
+  return "sha256:" + sha256(JSON.stringify([
+    "foreground-test/final-fixture-v1",
+    required.map(({ program, args, cwd }) => [program, args, cwd ?? "."]),
+  ]));
+}
 const completeUsage = (tokens) =>
   tokens?.measured === true &&
   tokens.accounting?.source === "provider" &&
@@ -37,20 +61,30 @@ const validCost = (cost) =>
   cost.estimated === true &&
   Number.isSafeInteger(cost.micros) &&
   cost.micros >= 0;
-const verified = (row) => row.outcome === "done" && row.verified === true;
-const validIdentity = (row) =>
+const verified = (row) =>
+  row.outcome === "done" && row.verified === true &&
+  (row.verificationContract == null ||
+    (row.independentVerifierPassed === true && row.requiredVerification?.verified === true));
+const nonnegativeCount = (value) => Number.isSafeInteger(value) && value >= 0;
+const validIdentity = (row, nativeVersion) =>
   [row.task, row.provider, row.model].every(
     (value) => typeof value === "string" && value.trim().length > 0,
   ) &&
   typeof row.effort === "string" &&
   typeof row.repositorySnapshot === "string" &&
   /^sha256:[0-9a-f]{64}$/.test(row.repositorySnapshot) &&
+  (row.verificationContract == null ||
+    (typeof row.verificationContract === "string" &&
+      /^sha256:[0-9a-f]{64}$/.test(row.verificationContract) &&
+      (row.verified !== true ||
+        (row.independentVerifierPassed === true && row.requiredVerification?.verified === true)))) &&
   Number.isSafeInteger(row.trial) &&
   row.trial > 0 &&
-  Number.isSafeInteger(row.retries) &&
-  row.retries >= 0 &&
-  Number.isSafeInteger(row.generationRequests) &&
-  row.generationRequests >= 0 &&
+  (nativeVersion
+    ? row.nativeCliVersion === nativeVersion &&
+      nonnegativeCount(row.gyroToolRequests)
+    : nonnegativeCount(row.retries) &&
+      nonnegativeCount(row.generationRequests)) &&
   typeof row.verified === "boolean" &&
   ["fresh-session", "resumed-session"].includes(row.sessionCondition) &&
   row.comparison === "gyro";
@@ -80,11 +114,14 @@ function expectedCohort(spec, provider, model, effort) {
     return null;
   const keys = new Set();
   for (const task of spec.tasks) {
+    const contract = verificationContract(task.requiredVerificationCommands);
+    if (contract === undefined) return null;
     for (const sessionCondition of spec.cacheConditions) {
       for (let trial = 1; trial <= spec.trials; trial++) {
         const row = {
           task: task.id,
           repositorySnapshot: task.repositorySnapshot,
+          verificationContract: contract,
           provider,
           model,
           effort,
@@ -94,8 +131,10 @@ function expectedCohort(spec, provider, model, effort) {
           verified: false,
           retries: 0,
           generationRequests: 0,
+          nativeCliVersion: spec.nativeCliVersion,
+          gyroToolRequests: 0,
         };
-        if (!validIdentity(row)) return null;
+        if (!validIdentity(row, spec.nativeCliVersion)) return null;
         keys.add(key(row));
       }
     }
@@ -105,7 +144,75 @@ function expectedCohort(spec, provider, model, effort) {
     ? keys
     : null;
 }
+
+const pairDelta = ([base, candidate]) =>
+  Number(verified(candidate)) - Number(verified(base));
+const meanPairDelta = (pairs) =>
+  pairs.length
+    ? pairs.reduce((sum, pair) => sum + pairDelta(pair), 0) / pairs.length
+    : null;
+
+function leaveOneSourceRevisionOut(pairs, tasks) {
+  const revisionsByTask = new Map();
+  for (const { id, sourceRevisions } of tasks) {
+    if (
+      !Array.isArray(sourceRevisions) ||
+      !sourceRevisions.length ||
+      !sourceRevisions.every(
+        (revision) => typeof revision === "string" && /^[0-9a-f]{40}$/.test(revision),
+      )
+    ) {
+      return null;
+    }
+    revisionsByTask.set(id, new Set(sourceRevisions));
+  }
+  const revisions = [
+    ...new Set(tasks.flatMap(({ sourceRevisions }) => sourceRevisions)),
+  ].sort();
+  if (revisions.length < 2) return null;
+  return revisions.map((sourceRevision) => {
+    // Multi-file scenarios count against each revision they use.
+    const remaining = pairs.filter(
+      ([, candidate]) => !revisionsByTask.get(candidate.task).has(sourceRevision),
+    );
+    return { sourceRevision, pairs: remaining.length, delta: meanPairDelta(remaining) };
+  });
+}
+
+// Resample task IDs together so fresh and resumed runs remain paired. Related
+// tasks can still share source, so test that sensitivity separately.
+function holdoutQuality(pairs, tasks, complete) {
+  if (!complete || !pairs.length) return null;
+  const scores = new Map(tasks.map(({ id }) => [id, []]));
+  for (const pair of pairs) scores.get(pair[1].task).push(pairDelta(pair));
+  const means = [...scores.values()].map(
+    (items) => items.reduce((sum, value) => sum + value, 0) / items.length,
+  );
+  let seed = 0x4759524f;
+  const samples = Array.from({ length: 4000 }, () => {
+    let sum = 0;
+    for (let draw = 0; draw < means.length; draw++) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      sum += means[Math.floor((seed / 2 ** 32) * means.length)];
+    }
+    return sum / means.length;
+  }).sort((a, b) => a - b);
+  const conditions = Object.fromEntries(
+    ["fresh-session", "resumed-session"].map((condition) => {
+      const rows = pairs.filter(([, r]) => r.sessionCondition === condition);
+      return [condition, meanPairDelta(rows)];
+    }),
+  );
+  return {
+    delta: meanPairDelta(pairs),
+    conditions,
+    pairedTaskBootstrap95: [samples[99], samples[3899]],
+    leaveOneSourceRevisionOut: leaveOneSourceRevisionOut(pairs, tasks),
+  };
+}
 export function report(records, spec = null) {
+  const nativeVersion = spec?.nativeCliVersion;
+  const heldOut = spec?.heldOut === true;
   const expectedPairs =
     spec &&
     Array.isArray(spec.tasks) &&
@@ -237,9 +344,11 @@ export function report(records, spec = null) {
             new Set(pairs.map(([, b]) => key(b))).size === pairs.length &&
             selected.length === evaluated.length &&
             baselineRows.every(
-              (r) => ["done", "failed"].includes(r.outcome) && validIdentity(r),
+              (r) =>
+                ["done", "failed"].includes(r.outcome) &&
+                validIdentity(r, nativeVersion),
             ) &&
-            selected.every(validIdentity) &&
+            selected.every((row) => validIdentity(row, nativeVersion)) &&
             baselineRows.every((row) => expected.has(key(row))) &&
             selected.every((row) => expected.has(key(row))) &&
             new Set(baselineRows.map(key)).size === baselineRows.length &&
@@ -281,11 +390,11 @@ export function report(records, spec = null) {
             variantP95 !== null &&
             BigInt(variantP95) * 10n <= BigInt(baselineP95) * 11n;
           const effortGate = pairs.every(([a, b]) => {
-            if (
-              a.requestedEffortCoverage !== "observed" ||
-              b.requestedEffortCoverage !== "observed"
-            )
-              return false;
+            const recorded = (row) =>
+              row.requestedEffortCoverage === "observed" ||
+              (nativeVersion &&
+                row.requestedEffortCoverage === "native-launch-configured");
+            if (!recorded(a) || !recorded(b)) return false;
             const baselineEffort = effort.trim() || null;
             return (
               a.requestedReasoningEffort === baselineEffort &&
@@ -293,13 +402,60 @@ export function report(records, spec = null) {
                 (variant === "routine-profile" ? "low" : baselineEffort)
             );
           });
+          const attemptsWithConfirmedPrefixReuse = selected.filter((row) => {
+            const count = row.efficiencyEvents?.confirmedPrefixReuses;
+            return nonnegativeCount(count) && count > 0;
+          }).length;
+          const prefixRequired =
+            variant === "stable-api-prefix" ||
+            (variant === "harness-candidate" && spec?.candidatePolicies?.stableApiPrefix);
+          const prefixObserved = attemptsWithConfirmedPrefixReuse > 0;
+          const prefixExercised = !prefixRequired || prefixObserved;
           const qualifies =
             complete &&
             regressions.length === 0 &&
             effortGate &&
             latencyGate &&
             costGate &&
+            prefixExercised &&
             completePairs.length === pairs.length;
+          const holdout =
+            heldOut && variant === "harness-candidate"
+              ? holdoutQuality(pairs, spec.tasks, complete)
+              : null;
+          const criticalTasks = new Set(
+            spec?.tasks?.filter((task) => task.critical).map((task) => task.id),
+          );
+          const safetyGate =
+            selected.every((row) => row.scopeVerified === true) &&
+            !regressions.some((row) => criticalTasks.has(row.task));
+          const nativeQualityGate =
+            complete &&
+            effortGate &&
+            latencyGate &&
+            safetyGate &&
+            regressions.length === 0;
+          const checkpointObserved = selected.some(
+            (row) => row.checkpointRecoveries > 0,
+          );
+          const exercised =
+            (!spec?.candidatePolicies?.checkpointRecovery ||
+              checkpointObserved) &&
+            prefixExercised;
+          const holdoutQualifies =
+            holdout !== null &&
+            pairs.length === 48 &&
+            criticalTasks.size > 0 &&
+            holdout.delta >= 0.05 &&
+            Object.values(holdout.conditions).every((delta) => delta > 0) &&
+            holdout.pairedTaskBootstrap95[0] > 0 &&
+            holdout.leaveOneSourceRevisionOut?.every(({ delta }) => delta > 0) &&
+            safetyGate &&
+            effortGate &&
+            latencyGate &&
+            exercised &&
+            (nativeVersion ||
+              (costGate && completePairs.length === pairs.length));
           groups.push({
             provider,
             model,
@@ -310,6 +466,7 @@ export function report(records, spec = null) {
                 ? "Gyro-requested low vs provider default; provider compliance unverified"
                 : "matched Gyro-requested effort",
             attempts: selected.length,
+            attemptsWithConfirmedPrefixReuse,
             evaluated: evaluated.length,
             successes,
             budgetStops: selected.filter((r) =>
@@ -321,6 +478,25 @@ export function report(records, spec = null) {
             ).length,
             failedAttempts: evaluated.length - successes,
             pairedQuality: pairedQuality(pairs, complete),
+            holdoutQuality: holdout,
+            exercised: { checkpointObserved, prefixObserved },
+            nativeCliVersion: nativeVersion ?? null,
+            scopeVerified: safetyGate,
+            gyroToolRequests: selected.every((r) =>
+              nonnegativeCount(r.gyroToolRequests),
+            )
+              ? selected.reduce((n, r) => n + r.gyroToolRequests, 0)
+              : null,
+            schemaValidToolRequests: selected.every((r) =>
+              nonnegativeCount(r.schemaValidToolRequests),
+            )
+              ? selected.reduce((n, r) => n + r.schemaValidToolRequests, 0)
+              : null,
+            checkpointRecoveries: selected.every((r) =>
+              nonnegativeCount(r.checkpointRecoveries),
+            )
+              ? selected.reduce((n, r) => n + r.checkpointRecoveries, 0)
+              : null,
             tokenBreakdown: tokenBreakdown(selected),
             failureBreakdown: failureBreakdown(selected),
             retries: selected.every(
@@ -369,6 +545,8 @@ export function report(records, spec = null) {
             costPerVerifiedTaskMicros: perTask,
             costReduction: reduction,
             p95Ms: variantP95,
+            medianMs: median(timedPairs.map(([, b]) => b.elapsedMs)),
+            baselineMedianMs: median(timedPairs.map(([a]) => a.elapsedMs)),
             p95Slowdown: slowdown,
             regressions,
             gate:
@@ -376,24 +554,35 @@ export function report(records, spec = null) {
                 ? "native-comparison"
                 : variant === "baseline"
                   ? "baseline"
-                  : qualifies
-                    ? "pilot-qualified"
-                    : !complete
-                      ? "incomplete"
-                      : regressions.length
-                        ? "correctness-regression"
-                        : !effortGate
-                          ? "effort-not-comparable"
-                          : slowdown !== null && !latencyGate
-                            ? "latency-regression"
-                            : reduction === null
-                              ? "unknown-cost"
-                              : "target-not-met",
+                  : heldOut
+                    ? holdoutQualifies
+                      ? "holdout-qualified"
+                      : "holdout-not-qualified"
+                    : nativeVersion
+                      ? nativeQualityGate
+                        ? "native-pilot-qualified"
+                        : "native-pilot-not-qualified"
+                      : qualifies
+                        ? "pilot-qualified"
+                        : !complete
+                          ? "incomplete"
+                          : regressions.length
+                            ? "correctness-regression"
+                            : !effortGate
+                              ? "effort-not-comparable"
+                              : slowdown !== null && !latencyGate
+                                ? "latency-regression"
+                                : !prefixExercised
+                                  ? "policy-not-exercised"
+                                  : reduction === null
+                                    ? "unknown-cost"
+                                    : "target-not-met",
           });
         }
   return {
     schema: "gyro.efficiency-report.v2",
     expectedPairs,
+    holdoutFingerprint: heldOut ? sha256(JSON.stringify(spec.tasks)) : null,
     groups,
     limitations: [
       "Pilot evidence does not prove production-wide quality equivalence.",
@@ -405,6 +594,7 @@ export function report(records, spec = null) {
       "Routine-profile compares Gyro-requested low effort with an unspecified provider default; it does not prove what effort the provider used.",
       "Paired quality changes describe this cohort, not statistical significance or production-wide improvement. Incomplete cohorts have no success-rate delta.",
       "Input includes cache reads and writes; output includes reasoning. Unknown token breakdowns stay unknown, and observed subtotals are available in JSON.",
+      "Owned adapters count schema-valid model tool requests before broker checks. Broker request events are recorded after preflight and before approvals. Neither count measures completed actions.",
     ],
   };
 }
@@ -440,6 +630,13 @@ export function markdown(result) {
         const f = g.failureBreakdown;
         return `| ${g.provider} / ${g.model} / ${shownEffort(g.effort)} | ${g.variant} | ${f.executionFailed} | ${f.verificationFailed} | ${f.verificationUnknown} | ${f.budgetStopped} | ${f.unavailable} |`;
       })
+      .join("\n") +
+    "\n\nTool requests (all attempts):\n\n| Provider / model / effort | Variant | Schema-valid model requests | Broker request events |\n|---|---|---:|---:|\n" +
+    result.groups
+      .map(
+        (g) =>
+          `| ${g.provider} / ${g.model} / ${shownEffort(g.effort)} | ${g.variant} | ${number(g.schemaValidToolRequests)} | ${number(g.gyroToolRequests)} |`,
+      )
       .join("\n") +
     "\n\nSession conditions and provider-reported cache reads:\n\n| Provider / model / effort | Variant | Fresh / resumed | Cache read / reported zero / unknown |\n|---|---|---:|---:|\n" +
     result.groups
