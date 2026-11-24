@@ -279,6 +279,10 @@ pub fn provider_approval_instructions(request: &ProviderChatRequest) -> Vec<&'st
 /// Recognize an explicit request for Gyro's app-owned browser without treating
 /// ordinary implementation discussion about browser code as a live browse.
 pub fn user_requests_gyro_browser(message: &str) -> bool {
+    const WORKSPACE_FILE_SUFFIXES: &[&str] = &[
+        "cjs", "css", "cts", "csv", "html", "js", "json", "jsonc", "jsx", "md", "mdx", "mjs",
+        "mts", "py", "rs", "scss", "sql", "toml", "ts", "tsx", "txt", "vue", "xml", "yaml", "yml",
+    ];
     let lowercase = message.to_lowercase();
     let normalized = message
         .chars()
@@ -294,18 +298,33 @@ pub fn user_requests_gyro_browser(message: &str) -> bool {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
+    // Preserve punctuation inside each word so filenames keep their identity.
+    let surface = format!(
+        " {} ",
+        lowercase
+            .split_whitespace()
+            .map(|word| {
+                let word = word.trim_matches(|character: char| !character.is_alphabetic());
+                word.strip_suffix("'s")
+                    .or_else(|| word.strip_suffix("’s"))
+                    .unwrap_or(word)
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
     let names_gyro_browser = [
-        "gyro browser",
-        "gyro s browser",
-        "in app browser",
-        "embedded browser",
-        "browser rail",
+        " gyro browser ",
+        " gyro s browser ",
+        " in app browser ",
+        " in-app browser ",
+        " embedded browser ",
+        " browser rail ",
     ]
     .iter()
-    .any(|phrase| normalized.contains(phrase));
-    let names_web_surface = ["website", "web page", "webpage", "site"]
+    .any(|phrase| surface.contains(phrase));
+    let names_web_surface = [" website ", " web page ", " webpage ", " site "]
         .iter()
-        .any(|phrase| normalized.contains(phrase));
+        .any(|phrase| surface.contains(phrase));
     let names_web_address = lowercase.contains("http://")
         || lowercase.contains("https://")
         || lowercase.split_whitespace().any(|token| {
@@ -328,11 +347,18 @@ pub fn user_requests_gyro_browser(message: &str) -> bool {
             let Some((_, suffix)) = host.rsplit_once('.') else {
                 return false;
             };
+            // Bare workspace filenames often look like dot-separated hosts.
             suffix.len() >= 2
                 && suffix
                     .chars()
                     .all(|character| character.is_ascii_alphabetic())
-                && !matches!(suffix, "rs" | "js" | "ts" | "tsx" | "jsx" | "json" | "md")
+                && host.split('.').all(|label| {
+                    !label.is_empty()
+                        && label
+                            .bytes()
+                            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                })
+                && (host.starts_with("www.") || !WORKSPACE_FILE_SUFFIXES.contains(&suffix))
         });
     if !names_gyro_browser && !names_web_surface && !names_web_address {
         return false;
