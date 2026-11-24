@@ -7263,12 +7263,12 @@ expect(
     ),
   "Open composer menus should close with Escape even when the macOS webview does not retain trigger focus.",
 );
-// Model rail: provider marks down the left, the previewed provider's models
-// beside them once a mark is clicked, instead of a drill-down.
+// Model rail: provider marks in a horizontal row, the previewed provider's
+// models beneath them once a mark is clicked, instead of a drill-down.
 expect(
   modelRailSource.includes("export const ComposerModelRail = forwardRef(") &&
     modelRailSource.includes('role="tablist"') &&
-    modelRailSource.includes('aria-orientation="vertical"') &&
+    modelRailSource.includes('aria-orientation="horizontal"') &&
     modelRailSource.includes('role="menuitemradio"') &&
     // Models change on click or arrow keys only; hovering a mark is inert.
     modelRailSource.includes("onClick={() => setPreviewId(provider.id)}") &&

@@ -15148,7 +15148,7 @@ button.gyro-response-changed-files:hover {
     calc(100vw - 24px)
   );
   --gyro-model-rail-width: min(
-    calc(var(--gyro-space-panel) * 20),
+    calc(360px * var(--gyro-ui-scale, 1)),
     calc(100vw - 24px)
   );
   --gyro-model-rail-accent: var(--gyro-accent);
@@ -15156,16 +15156,14 @@ button.gyro-response-changed-files:hover {
   max-width: 212px;
 }
 :root .gyro-composer-popover.gyro-model-rail {
-  display: grid;
-  grid-template-columns:
-    calc(var(--gyro-model-rail-tile) + var(--gyro-space-panel))
-    minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   width: var(--gyro-model-rail-width);
   min-width: 0;
   max-width: none;
-  /* Keep the picker compact; the model list scrolls within this height. */
-  height: min(calc(var(--gyro-space-panel) * 24), calc(100vh - 96px));
+  /* Hug the rows. A short search stays a short panel; a long catalog scrolls. */
+  height: auto;
+  max-height: min(calc(var(--gyro-space-panel) * 24), calc(100vh - 96px));
   padding: 0;
   gap: 0;
   border-radius: var(--gyro-radius-md);

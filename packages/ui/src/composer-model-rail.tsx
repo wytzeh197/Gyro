@@ -4,8 +4,9 @@ import {
   Copy,
   ExternalLink,
   Plus,
-  Settings2,
+  Search,
   TriangleAlert,
+  X,
 } from "./icons";
 import {
   useContext,
@@ -52,11 +53,20 @@ function contextLabel(tokens?: number) {
 function useScrollEdges(
   ref: { current: HTMLElement | null },
   contentKey?: string,
+  axis: "x" | "y" = "y",
 ) {
   useLayoutEffect(() => {
     const scroller = ref.current;
     if (!scroller) return;
     const update = () => {
+      if (axis === "x") {
+        scroller.dataset.overflowStart = String(scroller.scrollLeft > 1);
+        scroller.dataset.overflowEnd = String(
+          scroller.scrollLeft + scroller.clientWidth <
+            scroller.scrollWidth - 1,
+        );
+        return;
+      }
       scroller.dataset.overflowStart = String(scroller.scrollTop > 1);
       scroller.dataset.overflowEnd = String(
         scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 1,
@@ -70,7 +80,55 @@ function useScrollEdges(
       scroller.removeEventListener("scroll", update);
       observer.disconnect();
     };
-  }, [ref, contentKey]);
+  }, [ref, contentKey, axis]);
+}
+
+type ModelSearchHit =
+  | {
+      kind: "model";
+      provider: ModelRailProvider;
+      model: ModelRailProvider["models"][number];
+    }
+  | { kind: "connect"; provider: ModelRailProvider };
+
+const SEARCH_RESULT_LIMIT = 12;
+
+/**
+ * Models the person can use that match the query, then providers that match
+ * but still need a connection. The provider in use stays at the top.
+ */
+function matchingModels(
+  providers: ModelRailProvider[],
+  query: string,
+  activeProviderId?: string,
+): ModelSearchHit[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+  const models: Extract<ModelSearchHit, { kind: "model" }>[] = [];
+  const connect: Extract<ModelSearchHit, { kind: "connect" }>[] = [];
+  for (const provider of providers) {
+    const providerMatches =
+      provider.label.toLowerCase().includes(needle) ||
+      provider.id.toLowerCase().includes(needle);
+    if (!provider.connected) {
+      if (providerMatches) connect.push({ kind: "connect", provider });
+      continue;
+    }
+    for (const model of provider.models) {
+      const modelMatches =
+        model.displayName.toLowerCase().includes(needle) ||
+        Boolean(model.description?.toLowerCase().includes(needle));
+      if (providerMatches || modelMatches) {
+        models.push({ kind: "model", provider, model });
+      }
+    }
+  }
+  models.sort((left, right) => {
+    const leftRank = left.provider.id === activeProviderId ? 0 : 1;
+    const rightRank = right.provider.id === activeProviderId ? 0 : 1;
+    return leftRank - rightRank;
+  });
+  return [...models, ...connect].slice(0, SEARCH_RESULT_LIMIT);
 }
 
 /** Whose account a CLI provider signs in with, in the words its sign-in page uses. */
@@ -269,10 +327,11 @@ function SignInProgress({
 }
 
 /**
- * Providers down a rail of their own marks, the previewed provider's models
- * beside it. A provider's models show only once its mark is clicked (or
- * arrowed to), so sweeping the pointer across the rail never swaps the list,
- * and the rail keeps its order so a logo is always where the hand remembers it.
+ * Provider marks in a horizontal row, that provider's models beneath them.
+ * A mark's models show only once it is clicked (or arrowed to), so sweeping
+ * the pointer across the row never swaps the list, and the row keeps its
+ * order so a logo is always where the hand remembers it. Search sits on the
+ * right and grows leftward; typing lists the connected model that matches.
  */
 export const ComposerModelRail = forwardRef(function ComposerModelRail({
   id,
@@ -303,13 +362,29 @@ export const ComposerModelRail = forwardRef(function ComposerModelRail({
 }, surfaceRef: ForwardedRef<HTMLDivElement>) {
   const connected = providers.filter((provider) => provider.connected);
   const available = providers.filter((provider) => !provider.connected);
-  const [previewId, setPreviewId] = useState(
+  const [previewId, setPreviewIdState] = useState(
     () =>
       connected.find((provider) => provider.id === activeProviderId)?.id ??
       connected[0]?.id ??
       providers[0]?.id,
   );
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeHit, setActiveHit] = useState(0);
+  // Choosing a provider leaves the search field, but drops the query so the
+  // models for that mark show again.
+  const setPreviewId = (providerId: string) => {
+    setPreviewIdState(providerId);
+    setSearchQuery("");
+  };
   const preview = providers.find((provider) => provider.id === previewId);
+  const trimmedQuery = searchQuery.trim();
+  const searchHits = trimmedQuery
+    ? matchingModels(providers, trimmedQuery, activeProviderId)
+    : [];
+  const searching = searchOpen && trimmedQuery.length > 0;
+  const currentHit =
+    searchHits.length > 0 ? Math.min(activeHit, searchHits.length - 1) : 0;
   const { signIns } = useContext(ProviderSignInContext);
   const previewSignIn =
     preview && !preview.connected ? signIns[preview.id] : undefined;
@@ -318,8 +393,14 @@ export const ComposerModelRail = forwardRef(function ComposerModelRail({
   const [resolvedPlacement, setResolvedPlacement] = useState(placement);
   const railRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  useScrollEdges(railRef);
-  useScrollEdges(listRef, previewId);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
+  useScrollEdges(
+    railRef,
+    providers.map((provider) => provider.id).join("\0"),
+    "x",
+  );
+  useScrollEdges(listRef, searching ? trimmedQuery : previewId);
 
   // Land on the model in use so Enter re-confirms and arrows start from it.
   useEffect(() => {
@@ -341,7 +422,7 @@ export const ComposerModelRail = forwardRef(function ComposerModelRail({
     const position = (event?: Event) => {
       if (event?.target instanceof Node && panel.contains(event.target)) return;
       const listScroll = listRef.current?.scrollTop ?? 0;
-      const railScroll = railRef.current?.scrollTop ?? 0;
+      const railScroll = railRef.current?.scrollLeft ?? 0;
       const bounds = clippingBounds(panel);
       const pad = 12;
       const anchor = control.getBoundingClientRect();
@@ -384,7 +465,7 @@ export const ComposerModelRail = forwardRef(function ComposerModelRail({
       panel.style.translate = `${(left - naturalLeft) / scaleX}px 0`;
       setResolvedPlacement(direction);
       if (listRef.current) listRef.current.scrollTop = listScroll;
-      if (railRef.current) railRef.current.scrollTop = railScroll;
+      if (railRef.current) railRef.current.scrollLeft = railScroll;
     };
     position();
     const observer = new ResizeObserver(() => position());
@@ -417,12 +498,15 @@ export const ComposerModelRail = forwardRef(function ComposerModelRail({
       tab?.focus();
       if (tab?.dataset.providerId) setPreviewId(tab.dataset.providerId);
     };
-    if (event.key === "ArrowDown") move(index + 1);
-    else if (event.key === "ArrowUp") move(index - 1);
+    if (event.key === "ArrowRight") move(index + 1);
+    else if (event.key === "ArrowLeft") move(index - 1);
     else if (event.key === "Home") move(0);
     else if (event.key === "End") move(tabs.length - 1);
-    else if (event.key === "ArrowRight") {
-      const items = focusIn(listRef.current, '[role="menuitemradio"], button');
+    else if (event.key === "ArrowDown") {
+      const items = focusIn(
+        listRef.current,
+        '[role="menuitemradio"], [role="option"], button',
+      );
       (
         items.find((item) => item.getAttribute("aria-checked") === "true") ??
         items[0]
@@ -431,21 +515,72 @@ export const ComposerModelRail = forwardRef(function ComposerModelRail({
     event.preventDefault();
   };
 
+  const focusProviderTab = () =>
+    railRef.current
+      ?.querySelector<HTMLElement>('[aria-selected="true"]')
+      ?.focus();
+
   const onListKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const items = focusIn(listRef.current, '[role="menuitemradio"]');
     const index = items.indexOf(document.activeElement as HTMLElement);
     if (event.key === "ArrowDown") items[(index + 1) % items.length]?.focus();
-    else if (event.key === "ArrowUp")
-      items[(index - 1 + items.length) % items.length]?.focus();
+    else if (event.key === "ArrowUp" && index > 0)
+      items[index - 1]?.focus();
+    else if (event.key === "ArrowUp" || event.key === "ArrowLeft")
+      focusProviderTab();
     else if (event.key === "Home") items[0]?.focus();
     else if (event.key === "End") items.at(-1)?.focus();
-    else if (event.key === "ArrowLeft")
-      railRef.current
-        ?.querySelector<HTMLElement>('[aria-selected="true"]')
-        ?.focus();
     else return;
     event.preventDefault();
   };
+
+  const chooseHit = (hit: ModelSearchHit) => {
+    if (hit.kind === "model") onSelectModel(hit.provider.id, hit.model.id);
+    else onConnect(hit.provider.id);
+  };
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    requestAnimationFrame(() => searchButtonRef.current?.focus());
+  };
+
+  const onSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeSearch();
+      return;
+    }
+    if (!searchHits.length) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveHit((index) =>
+        Math.min(
+          searchHits.length - 1,
+          Math.min(index, searchHits.length - 1) + 1,
+        ),
+      );
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveHit((index) => Math.max(0, index - 1));
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const hit = searchHits[currentHit];
+      if (hit) chooseHit(hit);
+    }
+  };
+
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
+
+  useEffect(() => {
+    if (!searching) return;
+    listRef.current
+      ?.querySelector<HTMLElement>('[role="option"][aria-selected="true"]')
+      ?.scrollIntoView({ block: "nearest" });
+  }, [searching, currentHit, trimmedQuery]);
 
   const railTile = (provider: ModelRailProvider) => {
     const selected = provider.id === previewId;
@@ -531,10 +666,13 @@ export const ComposerModelRail = forwardRef(function ComposerModelRail({
       ref={panelRef}
       role="dialog"
     >
-      <div className="gyro-model-rail-side">
+      <div
+        className="gyro-model-rail-bar"
+        data-search={searchOpen ? "open" : "closed"}
+      >
         <div
           aria-label="Providers"
-          aria-orientation="vertical"
+          aria-orientation="horizontal"
           className="gyro-model-rail-providers"
           onKeyDown={onRailKeyDown}
           ref={railRef}
@@ -550,26 +688,149 @@ export const ComposerModelRail = forwardRef(function ComposerModelRail({
             </>
           ) : null}
         </div>
-        {/* Outside the scroller, so the gear never sits on half a logo. */}
+        <div
+          className={`gyro-model-rail-search${searchOpen ? " is-open" : ""}`}
+        >
+          <div className="gyro-model-rail-search-shell">
+            <Search
+              aria-hidden="true"
+              className="gyro-model-rail-search-glyph"
+              size={15}
+            />
+            <input
+              aria-activedescendant={
+                searching && searchHits.length > 0
+                  ? `${id}-hit-${currentHit}`
+                  : undefined
+              }
+              aria-autocomplete="list"
+              aria-controls={searching ? `${id}-search-results` : undefined}
+              aria-expanded={searching}
+              aria-hidden={searchOpen ? undefined : true}
+              aria-label="Search models"
+              autoComplete="off"
+              className="gyro-model-rail-search-input"
+              onChange={(event) => {
+                setSearchQuery(event.target.value);
+                setActiveHit(0);
+              }}
+              onKeyDown={onSearchKeyDown}
+              placeholder="Search models"
+              ref={searchInputRef}
+              role="combobox"
+              spellCheck={false}
+              tabIndex={searchOpen ? 0 : -1}
+              type="text"
+              value={searchQuery}
+            />
+            <button
+              aria-expanded={searchOpen}
+              aria-label={searchOpen ? "Close search" : "Search models"}
+              className="gyro-model-rail-tile is-utility"
+              onClick={() => {
+                if (searchOpen) closeSearch();
+                else setSearchOpen(true);
+              }}
+              ref={searchButtonRef}
+              type="button"
+            >
+              {searchOpen ? (
+                <X aria-hidden="true" size={15} />
+              ) : (
+                <Search aria-hidden="true" size={15} />
+              )}
+            </button>
+          </div>
+        </div>
         <button
-          aria-label="Manage providers"
+          aria-label="Add a provider"
           className="gyro-model-rail-tile is-utility"
           onClick={onManageProviders}
-          tabIndex={-1}
-          title="Manage providers"
+          title="Add a provider"
           type="button"
         >
-          <Settings2 size={15} />
+          <Plus aria-hidden="true" size={15} />
         </button>
       </div>
 
       <div
-        aria-labelledby={`${id}-heading`}
+        aria-labelledby={searching ? undefined : `${id}-heading`}
         className="gyro-model-rail-pane"
         id={`${id}-models`}
         role="tabpanel"
       >
-        {preview ? (
+        {searching ? (
+          <div
+            aria-label="Matching models"
+            className="gyro-model-rail-dropdown"
+            id={`${id}-search-results`}
+            ref={listRef}
+            role="listbox"
+          >
+            {searchHits.length === 0 ? (
+              <p className="gyro-model-rail-search-empty" role="status">
+                No connected model matches.
+              </p>
+            ) : (
+              searchHits.map((hit, index) => {
+                const model = hit.kind === "model" ? hit.model : undefined;
+                const checked =
+                  hit.kind === "model" &&
+                  hit.provider.id === activeProviderId &&
+                  hit.model.id === activeModelId;
+                const context = contextLabel(model?.contextWindowTokens);
+                const current = index === currentHit;
+                return (
+                  <button
+                    aria-selected={current}
+                    className={[
+                      "gyro-model-rail-hit",
+                      current ? "is-current" : "",
+                      checked ? "is-active" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    id={`${id}-hit-${index}`}
+                    key={
+                      hit.kind === "model"
+                        ? `${hit.provider.id}:${hit.model.id}`
+                        : `connect:${hit.provider.id}`
+                    }
+                    onClick={() => chooseHit(hit)}
+                    onMouseEnter={() => setActiveHit(index)}
+                    role="option"
+                    tabIndex={-1}
+                    type="button"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="gyro-model-rail-hit-logo"
+                    >
+                      {renderLogo(hit.provider)}
+                    </span>
+                    <span className="gyro-model-rail-hit-provider">
+                      {hit.provider.label}
+                    </span>
+                    <span className="gyro-model-rail-hit-name">
+                      {model ? model.displayName : "Not connected"}
+                    </span>
+                    {context ? (
+                      <span
+                        className="gyro-model-rail-context"
+                        title={`${model?.contextWindowTokens?.toLocaleString()} token context`}
+                      >
+                        {context}
+                      </span>
+                    ) : null}
+                    <span aria-hidden="true" className="gyro-model-rail-check">
+                      {checked ? <Check size={14} /> : null}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        ) : preview ? (
           <>
             <header className="gyro-model-rail-head">
               <strong id={`${id}-heading`}>{preview.label}</strong>

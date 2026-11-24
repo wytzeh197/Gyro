@@ -26365,35 +26365,49 @@ textarea:focus-visible,
   }
 }
 
-/* Model rail: provider marks down the left, the previewed provider's models
-   beside them. One panel replaces the model → provider → model drill-down. */
+/* Model rail: provider marks in a row, that provider's models beneath them.
+   Search and add sit on the right of the row. */
 
-.gyro-model-rail-side {
+.gyro-model-rail-bar {
   display: flex;
-  flex-direction: column;
+  flex: none;
   align-items: center;
-  min-height: 0;
-  padding-bottom: var(--gyro-space-standard);
-  border-right: 1px solid var(--gyro-border-heavy);
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 6px 6px 8px;
+  border-bottom: 1px solid var(--gyro-border-heavy);
   background: color-mix(in srgb, var(--gyro-text) 2.5%, transparent);
 }
 .gyro-model-rail-providers {
   display: flex;
-  flex: 1;
-  flex-direction: column;
+  flex: 1 1 auto;
+  flex-direction: row;
   align-items: center;
   gap: var(--gyro-space-compact);
-  align-self: stretch;
-  min-height: 0;
-  padding: var(--gyro-space-standard) 0;
-  overflow-y: auto;
+  min-width: 0;
+  padding: 2px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
   scrollbar-width: none;
 }
 /* Either scroller fades only at an end that hides more, never a hard cut. */
 .gyro-model-rail-providers,
-.gyro-model-rail-list {
+.gyro-model-rail-list,
+.gyro-model-rail-dropdown {
   --gyro-model-rail-fade-start: 0px;
   --gyro-model-rail-fade-end: 0px;
+}
+.gyro-model-rail-providers {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black var(--gyro-model-rail-fade-start),
+    black calc(100% - var(--gyro-model-rail-fade-end)),
+    transparent
+  );
+}
+.gyro-model-rail-list,
+.gyro-model-rail-dropdown {
   mask-image: linear-gradient(
     to bottom,
     transparent,
@@ -26404,13 +26418,15 @@ textarea:focus-visible,
 }
 :is(
   .gyro-model-rail-providers,
-  .gyro-model-rail-list
+  .gyro-model-rail-list,
+  .gyro-model-rail-dropdown
 )[data-overflow-start="true"] {
   --gyro-model-rail-fade-start: 18px;
 }
 :is(
   .gyro-model-rail-providers,
-  .gyro-model-rail-list
+  .gyro-model-rail-list,
+  .gyro-model-rail-dropdown
 )[data-overflow-end="true"] {
   --gyro-model-rail-fade-end: 24px;
 }
@@ -26419,9 +26435,9 @@ textarea:focus-visible,
 }
 .gyro-model-rail-divider {
   flex: none;
-  width: 18px;
-  height: 1px;
-  margin: 3px 0;
+  width: 1px;
+  height: 18px;
+  margin: 0 3px;
   background: var(--gyro-border-heavy);
 }
 
@@ -26453,6 +26469,7 @@ textarea:focus-visible,
 }
 .gyro-model-rail-tile.is-selected {
   background: var(--gyro-surface-raised);
+  color: var(--gyro-text);
   box-shadow:
     0 0 0 1px var(--gyro-border-heavy),
     0 1px 3px rgb(0 0 0 / 8%);
@@ -26461,19 +26478,19 @@ textarea:focus-visible,
 .gyro-model-rail-tile.is-selected::before {
   content: "";
   position: absolute;
-  left: -7px;
-  top: 10px;
-  bottom: 10px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
+  left: 8px;
+  right: 8px;
+  bottom: 3px;
+  height: 2px;
+  border-radius: 2px;
   background: var(--gyro-model-rail-accent);
 }
 /* A dot marks the provider the composer is using right now. */
 .gyro-model-rail-tile.is-in-use::after {
   content: "";
   position: absolute;
+  top: 4px;
   right: 4px;
-  bottom: 4px;
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -26489,18 +26506,93 @@ textarea:focus-visible,
   filter: grayscale(0.4);
   opacity: 0.85;
 }
-/* The gear sits below the scroller, reachable however many providers scroll. */
-.gyro-model-rail-tile.is-utility {
-  width: 30px;
-  height: 30px;
-  margin-top: 3px;
+/* Search and add match the logo tiles so the row is one height. */
+.gyro-model-rail-bar .gyro-model-rail-tile.is-utility {
+  width: var(--gyro-model-rail-tile);
+  height: var(--gyro-model-rail-tile);
   color: var(--gyro-faint);
 }
 .gyro-model-rail-tile.is-utility:hover {
   color: var(--gyro-text);
 }
+/* The field grows left from the icon. Logos stay in the row and scroll. */
+.gyro-model-rail-search {
+  position: relative;
+  flex: 0 0 auto;
+  height: var(--gyro-model-rail-tile);
+}
+.gyro-model-rail-search-shell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: var(--gyro-model-rail-tile);
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--gyro-radius-md);
+  transition:
+    width calc(220ms * var(--gyro-motion-factor, 1)) var(--gyro-ease),
+    box-shadow calc(160ms * var(--gyro-motion-factor, 1)) var(--gyro-ease);
+}
+.gyro-model-rail-search .gyro-model-rail-tile {
+  flex: none;
+}
+.gyro-model-rail-search-glyph {
+  flex: none;
+  width: 0;
+  margin: 0;
+  opacity: 0;
+  color: var(--gyro-faint);
+  transition:
+    width calc(220ms * var(--gyro-motion-factor, 1)) var(--gyro-ease),
+    margin calc(220ms * var(--gyro-motion-factor, 1)) var(--gyro-ease),
+    opacity calc(140ms * var(--gyro-motion-factor, 1)) var(--gyro-ease);
+}
+.gyro-model-rail-bar[data-search="open"] .gyro-model-rail-search-shell {
+  width: 176px;
+  background: var(--gyro-surface);
+  box-shadow: 0 0 0 1px var(--gyro-border-heavy);
+}
+.gyro-model-rail-bar[data-search="open"] .gyro-model-rail-search-glyph {
+  width: 15px;
+  margin-left: 10px;
+  opacity: 1;
+}
+.gyro-model-rail-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: var(--gyro-font-support);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity calc(140ms * var(--gyro-motion-factor, 1)) var(--gyro-ease);
+}
+.gyro-model-rail-search-input::placeholder {
+  color: var(--gyro-faint);
+}
+.gyro-model-rail-bar[data-search="open"] .gyro-model-rail-search-input {
+  padding: 0 2px 0 8px;
+  opacity: 1;
+  pointer-events: auto;
+}
+.gyro-model-rail-bar[data-search="open"] .gyro-model-rail-search-shell:focus-within {
+  box-shadow: 0 0 0 1.5px var(--gyro-model-rail-accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .gyro-model-rail-search-shell,
+  .gyro-model-rail-search-glyph,
+  .gyro-model-rail-search-input {
+    transition: none;
+  }
+}
 .gyro-model-rail-tile:focus-visible,
 .gyro-model-rail-model:focus-visible,
+.gyro-model-rail-hit:focus-visible,
 .gyro-model-rail-empty button:focus-visible {
   outline: 1.9px solid var(--gyro-model-rail-accent);
   outline-offset: -1.9px;
@@ -26508,9 +26600,11 @@ textarea:focus-visible,
 
 .gyro-model-rail-pane {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 /* One shared text inset aligns the title, class labels and model names. */
 .gyro-model-rail-head {
@@ -26583,8 +26677,10 @@ textarea:focus-visible,
   margin-top: 1px;
 }
 
-.gyro-model-rail-list {
+.gyro-model-rail-list,
+.gyro-model-rail-dropdown {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 1px;
   min-height: 0;
@@ -26593,6 +26689,66 @@ textarea:focus-visible,
   overflow-y: auto;
   animation: gyro-model-rail-swap calc(140ms * var(--gyro-motion-factor, 1))
     ease-out;
+}
+.gyro-model-rail-hit {
+  display: grid;
+  grid-template-columns: 16px 4.75rem minmax(0, 1fr) auto 16px;
+  align-items: center;
+  flex-shrink: 0;
+  gap: var(--gyro-space-standard);
+  min-height: 34px;
+  padding: 0 var(--gyro-space-standard);
+  border: 0;
+  border-radius: var(--gyro-radius-md);
+  background: transparent;
+  color: var(--gyro-text);
+  font: inherit;
+  font-size: var(--gyro-font-support);
+  text-align: left;
+  cursor: pointer;
+}
+.gyro-model-rail-hit.is-active {
+  background: color-mix(in srgb, var(--gyro-model-rail-accent) 9%, transparent);
+}
+.gyro-model-rail-hit.is-current,
+.gyro-model-rail-hit:hover {
+  background: var(--gyro-control-hover);
+}
+.gyro-model-rail-hit-logo {
+  display: grid;
+  place-items: center;
+}
+.gyro-model-rail-hit-logo .gyro-provider-logo {
+  width: 16px;
+  height: 16px;
+}
+.gyro-model-rail-hit-provider {
+  overflow: hidden;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-model-rail-hit-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gyro-model-rail-hit.is-active .gyro-model-rail-hit-name {
+  font-weight: 500;
+}
+.gyro-model-rail-hit .gyro-model-rail-context {
+  grid-column: 4;
+}
+.gyro-model-rail-hit .gyro-model-rail-check {
+  grid-column: 5;
+}
+.gyro-model-rail-search-empty {
+  margin: 0;
+  padding: 14px 8px;
+  color: var(--gyro-muted);
+  font-size: var(--gyro-font-micro);
+  line-height: 1.4;
 }
 /* A class (Opus, Fable, GPT-6) heads the models that belong to it. */
 .gyro-model-rail-class {
@@ -26617,7 +26773,8 @@ textarea:focus-visible,
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .gyro-model-rail-list {
+  .gyro-model-rail-list,
+  .gyro-model-rail-dropdown {
     animation: none;
   }
 }
