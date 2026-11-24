@@ -32,10 +32,10 @@ impl PreparedWorkspaceSandbox {
     /// Mutable symlink components in authority paths are rejected. `/tmp` and
     /// `/var` are accepted only as their fixed macOS system aliases.
     ///
-    /// Gyro's private directory is unreadable, except for the selected workspace
-    /// strictly inside its managed `worktrees/<repo>/<task>` or
-    /// `sessions/workspaces/<task>` trees. Selecting a private/container root is
-    /// not a way to grant access to other sessions, configuration, or sockets.
+    /// Within Gyro's private directory, commands can read the selected managed
+    /// `worktrees/<repo>/<task>` or `sessions/workspaces/<task>` workspace and
+    /// stat its exact parent directories for path resolution. Other sessions,
+    /// configuration, and sockets stay outside this read scope.
     pub fn prepare(
         workspace: &Path,
         cwd: &Path,
@@ -265,11 +265,18 @@ mod macos {
             let filter = policy.path_filter(path);
             write_exclusions.push(format!("(require-not {filter})"));
         }
+        let mut managed_ancestors = BTreeSet::new();
         for private_root in &private_roots {
             let private_filter = policy.path_filter(private_root);
             let exclusion = if workspace.starts_with(private_root) {
                 ensure!(is_managed_workspace(&workspace, private_root),
                     "only an individual managed workspace may be selected inside Gyro's private data directory");
+                managed_ancestors.extend(
+                    workspace
+                        .ancestors()
+                        .skip(1)
+                        .take_while(|path| path.starts_with(private_root)),
+                );
                 format!(
                     "(require-not (require-all {private_filter} (require-not {workspace_filter})))"
                 )
@@ -283,6 +290,14 @@ mod macos {
             "\n(allow file-read* (require-all {}))\n",
             read_exclusions.join(" ")
         ));
+        // Runtimes resolving a known workspace file can stat each directory
+        // along its canonical path. Allow metadata for those exact directories.
+        for path in managed_ancestors {
+            let parameter = policy.parameter(path);
+            policy.source.push_str(&format!(
+                "(allow file-read-metadata (literal (param \"{parameter}\")))\n"
+            ));
+        }
         policy.source.push_str(&format!("(allow file-write* (require-all (require-any {workspace_filter} {scratch_filter}) {}))\n", write_exclusions.join(" ")));
 
         // Prevent changing an authority path so the next command receives a

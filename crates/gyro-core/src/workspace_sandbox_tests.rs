@@ -365,6 +365,18 @@ mod native {
             )
             .unwrap();
             succeeds(&fixture.shell(&sandbox, "printf local > result && cat result", &[]));
+            for ancestor in fixture
+                .workspace
+                .ancestors()
+                .skip(1)
+                .take_while(|path| path.starts_with(&private))
+            {
+                succeeds(&fixture.shell(&sandbox, "/usr/bin/stat -f '%p' \"$1\"", &[ancestor]));
+                let listing = fixture.shell(&sandbox, "/bin/ls -A \"$1\"", &[ancestor]);
+                denied(&listing);
+                assert!(listing.stdout.is_empty());
+            }
+            denied(&fixture.shell(&sandbox, "/usr/bin/stat -f '%p' \"$1\"", &[&sibling]));
             denied(&fixture.shell(&sandbox, "cat \"$1\"", &[&private.join("config.json")]));
             denied(&fixture.shell(&sandbox, "cat \"$1\"", &[&sibling.join("private-file")]));
             denied(&fixture.shell(&sandbox, "printf escaped > \"$1/result\"", &[&sibling]));
