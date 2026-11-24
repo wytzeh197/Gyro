@@ -12,6 +12,39 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// Recognize direct test invocations for batch ordering and test receipts.
+pub fn is_foreground_test_command<'a>(
+    program: &str,
+    mut arguments: impl Iterator<Item = &'a str>,
+) -> bool {
+    let program = program
+        .trim()
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default();
+    let program = program.strip_suffix(".exe").unwrap_or(program);
+    let first = arguments.next().unwrap_or_default();
+    let second = arguments.next().unwrap_or_default();
+    let runs_tests = match program {
+        "node" => first == "--test",
+        "pytest" => true,
+        "python" | "python3" => first == "-m" && matches!(second, "pytest" | "unittest"),
+        "npm" | "pnpm" | "yarn" => first == "test" || (first == "run" && second == "test"),
+        "bun" | "cargo" | "deno" | "dotnet" | "go" => first == "test",
+        _ => false,
+    };
+    runs_tests
+        && ![first, second]
+            .into_iter()
+            .chain(arguments)
+            .any(|argument| {
+                matches!(
+                    argument,
+                    "-h" | "--help" | "--version" | "--list" | "--collect-only" | "--co"
+                )
+            })
+}
+
 const EXECUTION_CHANNEL_CAPACITY: usize = 128;
 const EXECUTION_READ_CHUNK_BYTES: usize = 8 * 1024;
 const EXECUTION_POLL_INTERVAL: Duration = Duration::from_millis(20);

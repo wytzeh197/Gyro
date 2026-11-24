@@ -291,6 +291,17 @@ pub fn execute_capabilities(
     host.execute_capabilities(session_id, calls)
 }
 
+pub(super) fn execute_native_tool_batch(
+    host: &dyn RunnerHost,
+    request: &ProviderChatRequest,
+    calls: &[(CapabilityId, serde_json::Value)],
+    slots: impl Iterator<Item = usize>,
+) -> anyhow::Result<Vec<CapabilityResponse>> {
+    super::tool_batch::execute_with_reused_tests(calls, slots, &request.message, |unique| {
+        execute_capabilities(host, &request.session_id, unique)
+    })
+}
+
 pub trait ProviderRunner: Send + Sync {
     fn kind(&self) -> ProviderAdapterKind;
 

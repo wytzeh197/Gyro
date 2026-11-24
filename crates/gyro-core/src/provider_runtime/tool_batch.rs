@@ -711,6 +711,246 @@ pub fn model_response_text(response: &CapabilityResponse) -> anyhow::Result<Stri
     Ok(serde_json::to_string(&payload)?)
 }
 
+pub fn is_workspace_test(id: CapabilityId, arguments: &serde_json::Value) -> bool {
+    id == CapabilityId::WorkspaceRunTest
+        || (id == CapabilityId::WorkspaceRunCommand
+            && crate::execution::is_foreground_test_command(
+                arguments["program"].as_str().unwrap_or_default(),
+                arguments["args"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(serde_json::Value::as_str),
+            ))
+}
+
+pub(super) fn execute_with_reused_tests(
+    calls: &[(CapabilityId, serde_json::Value)],
+    slots: impl Iterator<Item = usize>,
+    user_message: &str,
+    execute: impl FnOnce(
+        &[(CapabilityId, serde_json::Value)],
+    ) -> anyhow::Result<Vec<CapabilityResponse>>,
+) -> anyhow::Result<Vec<CapabilityResponse>> {
+    let mut duplicates = Vec::new();
+    let mut previous_slot: Option<usize> = None;
+    let mut first = 0;
+    for (index, slot) in slots.enumerate() {
+        if previous_slot.is_some_and(|previous| previous.checked_add(1) == Some(slot))
+            && calls[index] == calls[index - 1]
+            && is_reusable_foreground_test(&calls[index])
+        {
+            duplicates.push((index, first));
+        } else {
+            first = index;
+        }
+        previous_slot = Some(slot);
+    }
+    if duplicates.is_empty() || requests_repeated_tests(user_message) {
+        return execute(calls);
+    }
+
+    let mut omitted = duplicates.iter().peekable();
+    let unique = calls
+        .iter()
+        .enumerate()
+        .filter_map(|(index, call)| {
+            if omitted
+                .next_if(|(duplicate, _)| *duplicate == index)
+                .is_some()
+            {
+                None
+            } else {
+                Some(call.clone())
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut executed = execute(&unique)?.into_iter();
+    let mut omitted = duplicates.into_iter().peekable();
+    let mut results = Vec::with_capacity(calls.len());
+    for index in 0..calls.len() {
+        if let Some((_, first)) = omitted.next_if(|(duplicate, _)| *duplicate == index) {
+            results.push(reused_test_response(&results[first]));
+        } else {
+            results.push(
+                executed
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("missing executed test batch result"))?,
+            );
+        }
+    }
+    anyhow::ensure!(executed.next().is_none(), "unexpected test batch result");
+    Ok(results)
+}
+
+fn is_reusable_foreground_test((id, arguments): &(CapabilityId, serde_json::Value)) -> bool {
+    !arguments["background"].as_bool().unwrap_or(false)
+        && arguments["networkDestinations"]
+            .as_array()
+            .is_none_or(Vec::is_empty)
+        && is_workspace_test(*id, arguments)
+}
+
+fn requests_repeated_tests(message: &str) -> bool {
+    message
+        .to_ascii_lowercase()
+        .split(|character: char| !character.is_ascii_alphabetic() && character != '-')
+        .any(|word| {
+            matches!(
+                word,
+                "again"
+                    | "repeat"
+                    | "repeated"
+                    | "repeatedly"
+                    | "repetition"
+                    | "rerun"
+                    | "reruns"
+                    | "re-run"
+                    | "twice"
+                    | "thrice"
+                    | "times"
+                    | "iterations"
+                    | "consecutive"
+                    | "flaky"
+                    | "flake"
+                    | "flakiness"
+            )
+        })
+}
+
+fn reused_test_response(original: &CapabilityResponse) -> CapabilityResponse {
+    let call_id = Uuid::new_v4();
+    let mut response = CapabilityResponse {
+        schema: original.schema.clone(),
+        app_version: original.app_version.clone(),
+        compatible: original.compatible,
+        call_id,
+        status: original.status,
+        result: None,
+        error: original.error.clone(),
+    };
+    if let Some(result) = &original.result {
+        let mut data = serde_json::json!({"reusedCallId": original.call_id, "executed": false});
+        for field in ["status", "exitCode"] {
+            if let Some(value) = result.data.get(field) {
+                data[field] = value.clone();
+            }
+        }
+        response.result = Some(crate::CapabilityResult {
+            call_id,
+            capability_id: result.capability_id,
+            summary: "This identical test used the preceding tool result. Gyro started no additional test process.".into(),
+            data,
+            resource: None,
+        });
+    }
+    if let Some(error) = &mut response.error {
+        error.message = format!("This duplicate test did not start another process. Use the earlier test result ({}). {}", original.call_id, error.message);
+    }
+    response
+}
+
+#[test]
+fn reuses_one_observed_result_for_adjacent_identical_tests() {
+    use serde_json::json;
+    let calls = [
+        (
+            CapabilityId::WorkspaceRunCommand,
+            json!({"program":"node","args":["--test","sum.test.mjs"],"cwd":"."}),
+        ),
+        (
+            CapabilityId::WorkspaceRunCommand,
+            json!({"cwd":".","args":["--test","sum.test.mjs"],"program":"node"}),
+        ),
+        (
+            CapabilityId::WorkspaceRunCommand,
+            json!({"program":"node","args":["--test","sum.test.mjs"],"cwd":"."}),
+        ),
+    ];
+    let source_id = Uuid::new_v4();
+    let results = execute_with_reused_tests(&calls, 0..3, "Run the test", |unique| {
+        assert_eq!(unique, &calls[..1]);
+        Ok(vec![CapabilityResponse::completed(
+            "fixture",
+            crate::CapabilityResult {
+                call_id: source_id,
+                capability_id: CapabilityId::WorkspaceRunCommand,
+                summary: "Test failed".into(),
+                data: json!({"status":"failed","exitCode":1,"stdout":"Long test output"}),
+                resource: None,
+            },
+        )])
+    })
+    .unwrap();
+    assert_eq!(results.len(), 3);
+    assert_eq!(results[0].call_id, source_id);
+    assert_eq!(
+        results[0].result.as_ref().unwrap().data["stdout"],
+        "Long test output"
+    );
+    for result in &results[1..] {
+        assert_ne!(result.call_id, source_id);
+        assert_eq!(
+            result.result.as_ref().unwrap().data,
+            json!({"reusedCallId":source_id,"executed":false,"status":"failed","exitCode":1})
+        );
+    }
+    assert_ne!(results[1].call_id, results[2].call_id);
+}
+
+#[test]
+fn preserves_explicit_repeats_and_test_boundaries() {
+    use serde_json::json;
+    let test = (CapabilityId::WorkspaceRunTest, json!({"taskId":"test"}));
+    let background = (
+        CapabilityId::WorkspaceRunTest,
+        json!({"taskId":"test","background":true}),
+    );
+    let network = (
+        CapabilityId::WorkspaceRunCommand,
+        json!({"program":"node","args":["--test"],"networkDestinations":["example.com"]}),
+    );
+    let other = (
+        CapabilityId::WorkspaceRunCommand,
+        json!({"program":"node","args":["--version"]}),
+    );
+    for (call, slots, prompt) in [
+        (test.clone(), [0, 1], "Run the exact same test twice."),
+        (test, [0, 2], "Run the test."),
+        (background, [0, 1], "Run the test."),
+        (network, [0, 1], "Run the test."),
+        (other, [0, 1], "Run the command."),
+    ] {
+        let calls = [call.clone(), call];
+        execute_with_reused_tests(&calls, slots.into_iter(), prompt, |unique| {
+            assert_eq!(unique, calls);
+            Ok(vec![])
+        })
+        .unwrap();
+    }
+}
+
+#[test]
+fn a_denied_test_is_not_resent_for_duplicate_approval() {
+    let call = (
+        CapabilityId::WorkspaceRunTest,
+        serde_json::json!({"taskId":"test"}),
+    );
+    let denied = CapabilityResponse::failed("fixture", Uuid::new_v4(), "denied", "Approval denied");
+    let calls = [call.clone(), call];
+    let results = execute_with_reused_tests(&calls, 0..2, "Run the test", |unique| {
+        assert_eq!(unique, &calls[..1]);
+        Ok(vec![denied.clone()])
+    })
+    .unwrap();
+    assert_eq!(results[0], denied);
+    assert!(results[1].result.is_none());
+    assert_eq!(results[1].status, denied.status);
+    let error = results[1].error.as_ref().unwrap();
+    assert_eq!(error.code, "denied");
+    assert!(error.message.contains(&denied.call_id.to_string()));
+}
+
 pub fn ordered<T: Send>(
     calls: &[(CapabilityId, serde_json::Value)],
     invoke: impl Fn(CapabilityId, &serde_json::Value) -> anyhow::Result<T> + Sync,

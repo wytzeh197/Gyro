@@ -696,7 +696,8 @@ pub fn run_openai_compatible_chat(
                 .iter()
                 .map(|(_, _, id, args)| (*id, args.clone()))
                 .collect::<Vec<_>>();
-            let results = runner::execute_capabilities(host, &request.session_id, &batch)?;
+            let slots = prepared.iter().map(|(slot, _, _, _)| *slot);
+            let results = runner::execute_native_tool_batch(host, request, &batch, slots)?;
             for result in &results {
                 catalog_memory.observe(result);
             }
