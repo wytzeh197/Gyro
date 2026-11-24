@@ -1112,6 +1112,27 @@ impl SessionStore {
             .map_err(Into::into)
     }
 
+    pub fn mutation_proposal_status_for_turn(
+        &self,
+        proposal_id: Uuid,
+        session_id: Uuid,
+        turn_id: Option<Uuid>,
+    ) -> Result<Option<MutationProposalStatus>> {
+        let status: Option<String> = self
+            .conn
+            .query_row(
+                "select status from mutation_proposals where id = ?1 and session_id = ?2 and turn_id is ?3",
+                params![
+                    proposal_id.to_string(),
+                    session_id.to_string(),
+                    turn_id.map(|id| id.to_string()),
+                ],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(status.as_deref().map(MutationProposalStatus::from_str))
+    }
+
     pub fn list_pending_mutation_proposals(
         &self,
         session_id: Uuid,

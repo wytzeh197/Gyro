@@ -111,6 +111,9 @@ pub struct Config {
     pub cache_assembly: bool,
     /// Experimental catalog routing for request-owned tool loops only.
     pub compact_tool_catalog: bool,
+    /// Start native Ollama workspace requests with fewer tool schemas.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub focused_workspace_catalog: bool,
     pub recoverable_evidence: bool,
     /// Retired results keep identity and a spill address, without a preview.
     /// Off is not written: `deny_unknown_fields` makes an older build reject the key.
@@ -155,6 +158,7 @@ impl Default for Config {
             structured_evidence: true,
             cache_assembly: true,
             compact_tool_catalog: false,
+            focused_workspace_catalog: false,
             recoverable_evidence: false,
             tight_evidence: false,
             batch_reads: false,

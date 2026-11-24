@@ -311,7 +311,25 @@ impl RunnerHost for TauriRunnerHost {
         session_id: &str,
         calls: &[(CapabilityId, serde_json::Value)],
     ) -> anyhow::Result<Vec<CapabilityResponse>> {
-        provider_tool_batch::execute(&self.app, session_id, calls)
+        provider_tool_batch::execute(
+            &self.app,
+            session_id,
+            calls,
+            &self.cancellation(session_id)?,
+        )
+    }
+
+    fn resolve_workspace_edit_reviews(
+        &self,
+        session_id: &str,
+        results: &mut [CapabilityResponse],
+    ) -> anyhow::Result<()> {
+        provider_tool_batch::resolve_workspace_edit_reviews(
+            &self.app,
+            session_id,
+            results,
+            &self.cancellation(session_id)?,
+        )
     }
 
     fn acp_mcp_servers(&self, session_id: &str) -> anyhow::Result<Vec<serde_json::Value>> {

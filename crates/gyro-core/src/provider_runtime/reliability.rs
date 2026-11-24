@@ -486,6 +486,12 @@ pub fn validate_tool_call(
     }
     validate_compatibility_schema_value(&normalized, &schema, "arguments")
         .map_err(|error| {
+            if id == CapabilityId::WorkspaceEdit && !arguments["path"].is_string() {
+                return format!(
+                    "Invalid Gyro tool arguments: {error}. {} No action was executed.",
+                    "Send path in the edit call itself, even after reading the file. Use the workspace-relative path of the intended file, oldString copied exactly from the read, and newString set to the replacement."
+                );
+            }
             let catalog = if provider_tool_batch::inline_tool_schema(id) {
                 String::new()
             } else {

@@ -33,6 +33,8 @@ struct Spec {
     execution_budget: Budget,
     #[serde(default)]
     prices: Vec<PriceSnapshot>,
+    #[serde(default)]
+    ollama_endpoint: Option<String>,
     tasks: Vec<Task>,
 }
 #[derive(Deserialize)]
@@ -54,6 +56,8 @@ struct NativeComparison {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Budget {
     max_observed_tokens: u64,
+    #[serde(default)]
+    max_tool_rounds_per_turn: Option<usize>,
     #[serde(default)]
     max_tokens_per_turn: Option<u64>,
     max_calls: u32,
@@ -103,11 +107,19 @@ fn benchmark_config(spec: &Spec) -> GyroConfig {
     config.efficiency.prices = spec.prices.clone();
     config.usage_guard.max_calls_per_window = spec.execution_budget.max_calls;
     config.usage_guard.max_tokens_per_call = spec.execution_budget.max_observed_tokens;
+    if let Some(limit) = spec.execution_budget.max_tool_rounds_per_turn {
+        config.usage_guard.max_tool_rounds = limit;
+    }
     for provider in &mut config.model_providers {
         provider.enabled = spec
             .providers
             .iter()
             .any(|selected| selected.id == provider.id);
+        if provider.id == "ollama" {
+            if let Some(endpoint) = &spec.ollama_endpoint {
+                provider.base_url = Some(endpoint.clone());
+            }
+        }
     }
     config
 }
@@ -152,6 +164,25 @@ fn validate(spec: &Spec) -> anyhow::Result<()> {
         spec.execution_budget.max_calls > 0 && spec.execution_budget.max_observed_tokens > 0,
         "Explicit finite maxCalls and maxObservedTokens are required"
     );
+    if let Some(rounds) = spec.execution_budget.max_tool_rounds_per_turn {
+        anyhow::ensure!(
+            rounds > 0
+                && spec.providers.iter().all(|provider| {
+                    gyro_core::efficiency::controls(&provider.id).owns_requests
+                        && provider.native_comparison.is_none()
+                }),
+            "A positive maxToolRoundsPerTurn requires Gyro-owned provider requests"
+        );
+    }
+    if let Some(endpoint) = &spec.ollama_endpoint {
+        anyhow::ensure!(
+            spec.providers.len() == 1
+                && spec.providers[0].id == "ollama"
+                && !endpoint.trim().is_empty(),
+            "An Ollama endpoint override requires a single Ollama provider"
+        );
+        gyro_core::ollama_endpoint(Some(endpoint))?;
+    }
     let mut ids = HashSet::new();
     for p in &spec.providers {
         anyhow::ensure!(
@@ -204,6 +235,7 @@ fn validate(spec: &Spec) -> anyhow::Result<()> {
                     | "retrieval"
                     | "progress-detection"
                     | "compact-tool-catalog"
+                    | "focused-workspace-catalog"
                     | "recoverable-evidence"
                     | "tight-evidence"
                     | "batch-reads"
@@ -455,6 +487,7 @@ fn apply_efficiency_variant(e: &mut gyro_core::efficiency::Config, variant: &str
     e.repository_retrieval = variant == "combined" || variant == "retrieval";
     e.progress_detection = variant == "combined" || variant == "progress-detection";
     e.compact_tool_catalog = variant == "combined" || variant == "compact-tool-catalog";
+    e.focused_workspace_catalog = variant == "focused-workspace-catalog";
     e.recoverable_evidence = variant == "combined" || variant == "recoverable-evidence";
     // Keep mutually exclusive evidence policies separate from the combined candidate.
     e.tight_evidence = variant == "tight-evidence";

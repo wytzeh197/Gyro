@@ -267,6 +267,7 @@ pub fn run_openai_compatible_chat(
             provider_reliability::configured_tool_rounds().or(compatibility.then_some(16));
         let mut compatibility = compatibility;
         let mut malformed_responses = 0usize;
+        let mut verification_followup = provider_tool_batch::requests_workspace_test(request);
         let mut completed_rounds = 0usize;
         let mut output_continuations = 0usize;
         let mut joined_output = String::new();
@@ -666,6 +667,7 @@ pub fn run_openai_compatible_chat(
             ));
             let mut prepared = Vec::new();
             let mut ordered_replies = Vec::new();
+            let mut rejected_edits = provider_tool_batch::RejectedWorkspaceEdits::default();
             for (tool_call_id, name, _arguments, parsed) in calls {
                 let slot = ordered_replies.len();
                 let mut errors = Vec::new();
@@ -682,9 +684,19 @@ pub fn run_openai_compatible_chat(
                     )
                 {
                     provider_tool_batch::observe_tool(id);
+                    if let Some(reply) = rejected_edits.test_reply(
+                        id,
+                        &resolved_arguments,
+                        &name,
+                        Some(&tool_call_id),
+                    )? {
+                        ordered_replies.push(Some(reply));
+                        continue;
+                    }
                     ordered_replies.push(None);
                     prepared.push((slot, tool_call_id, id, resolved_arguments));
                 } else {
+                    rejected_edits.record(slot, &name, &parsed, compact_catalog);
                     ordered_replies.push(errors.pop());
                 }
             }
@@ -697,7 +709,24 @@ pub fn run_openai_compatible_chat(
                 .map(|(_, _, id, args)| (*id, args.clone()))
                 .collect::<Vec<_>>();
             let slots = prepared.iter().map(|(slot, _, _, _)| *slot);
-            let results = runner::execute_native_tool_batch(host, request, &batch, slots)?;
+            let mut results = runner::execute_native_tool_batch(host, request, &batch, slots)?;
+            rejected_edits.add_confirmed_path_feedback(
+                &request.message,
+                &mut ordered_replies,
+                prepared
+                    .iter()
+                    .zip(&results)
+                    .map(|((slot, _, _, args), response)| (*slot, args, response)),
+            );
+            let remind_verification = rejected_edits.is_empty()
+                && round_budget.is_none_or(|limit| round + 1 < limit)
+                && provider_tool_batch::review_before_requested_test(
+                    host,
+                    &request.session_id,
+                    &batch,
+                    &mut results,
+                    &mut verification_followup,
+                )?;
             for result in &results {
                 catalog_memory.observe(result);
             }
@@ -730,6 +759,9 @@ pub fn run_openai_compatible_chat(
                 ordered_replies[slot] = Some(reply);
             }
             provider_tool_batch::append_ordered_tool_messages(&mut messages, ordered_replies)?;
+            if remind_verification {
+                messages.push(serde_json::json!({"role":"user", "content":provider_tool_batch::REQUESTED_VERIFICATION_FOLLOWUP}));
+            }
             // Chat Completions accepts images only in user messages. Finish all
             // tool results before appending the corresponding screenshot bytes.
             if !captured_images.is_empty() {

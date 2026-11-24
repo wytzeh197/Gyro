@@ -1,8 +1,10 @@
 //! Shared tool advertisement, bounded observations and ordered read batches.
 use super::{
     catalog::{delegation_tool, ToolCatalog},
+    host::RunnerHost,
     reliability as provider_reliability,
     support::efficiency_config,
+    types::{ChatMode, ProviderChatRequest},
 };
 use crate::{
     timing, CapabilityClass, CapabilityId, CapabilityResourceRef, CapabilityResponse,
@@ -10,6 +12,7 @@ use crate::{
 };
 use serde::Serialize;
 use std::borrow::Cow;
+use std::collections::HashSet;
 use uuid::Uuid;
 // Explicit allowlist: these observe disk state without changing the workspace,
 // opening an editor, running a command, or driving a shared browser session.
@@ -21,6 +24,409 @@ pub fn independent_read(id: CapabilityId) -> bool {
             | CapabilityId::WorkspaceRead
             | CapabilityId::WorkspaceReadRange
     )
+}
+
+pub fn is_workspace_edit(id: CapabilityId) -> bool {
+    matches!(
+        id,
+        CapabilityId::WorkspaceEdit | CapabilityId::WorkspaceProposeEdit
+    )
+}
+
+fn roots_may_match(left: Option<&str>, right: Option<&str>) -> bool {
+    left.is_none() || right.is_none() || left == right
+}
+
+/// Retain failed edits as ordering evidence even when schema validation keeps
+/// them out of the executable batch.
+#[derive(Default)]
+pub(crate) struct RejectedWorkspaceEdits {
+    roots: HashSet<Option<String>>,
+    missing_paths: Vec<(usize, Option<String>)>,
+}
+
+impl RejectedWorkspaceEdits {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.roots.is_empty()
+    }
+
+    pub(crate) fn has_missing_paths(&self) -> bool {
+        !self.missing_paths.is_empty()
+    }
+
+    pub(crate) fn record(
+        &mut self,
+        slot: usize,
+        name: &str,
+        arguments: &serde_json::Value,
+        compact: bool,
+    ) {
+        let (target, arguments) = if compact && name == COMPACT_INVOKE {
+            (
+                arguments["name"].as_str().unwrap_or_default(),
+                &arguments["arguments"],
+            )
+        } else {
+            (name, arguments)
+        };
+        let capability = CapabilityId::from_provider_tool_name(target);
+        if capability.is_some_and(is_workspace_edit) {
+            let root = arguments["rootId"].as_str().map(str::to_owned);
+            if capability == Some(CapabilityId::WorkspaceEdit)
+                && arguments.is_object()
+                && arguments.get("path").is_none()
+                && arguments["oldString"].is_string()
+                && arguments["newString"].is_string()
+            {
+                self.missing_paths.push((slot, root.clone()));
+            }
+            self.roots.insert(root);
+        }
+    }
+
+    pub(crate) fn add_confirmed_path_feedback<'a>(
+        &self,
+        user_message: &str,
+        replies: &mut [Option<serde_json::Value>],
+        observed: impl Iterator<Item = (usize, &'a serde_json::Value, &'a CapabilityResponse)> + Clone,
+    ) -> bool {
+        let mut confirmed = false;
+        for (edit_slot, root) in &self.missing_paths {
+            let paths = observed
+                .clone()
+                .filter_map(|(read_slot, args, response)| {
+                    let result = response.result.as_ref()?;
+                    if read_slot >= *edit_slot
+                        || args["rootId"].as_str() != root.as_deref()
+                        || response.status != CapabilityStatus::Completed
+                        || result.capability_id != CapabilityId::WorkspaceRead
+                    {
+                        return None;
+                    }
+                    let path = result.data["path"].as_str()?;
+                    (crate::normalize_capability_relative_path(path)
+                        .ok()
+                        .as_deref()
+                        == Some(path)
+                        && !crate::capability_path_is_sensitive(path)
+                        && names_exact_workspace_path(user_message, path))
+                    .then_some(path)
+                })
+                .collect::<HashSet<_>>();
+            let Some(path) = paths.iter().next().filter(|_| paths.len() == 1) else {
+                continue;
+            };
+            if let Some(reply) = replies[*edit_slot].as_mut() {
+                if let Some(error) = reply["content"].as_str() {
+                    reply["content"] = format!("{error} The user named {path:?}, and an earlier call in this batch read it successfully. If this edit targets that file, retry gyro_workspace_edit with path set to {path:?}. Include oldString and newString again.").into();
+                    confirmed = true;
+                }
+            }
+        }
+        confirmed
+    }
+
+    pub(crate) fn test_reply(
+        &self,
+        id: CapabilityId,
+        arguments: &serde_json::Value,
+        name: &str,
+        call_id: Option<&str>,
+    ) -> anyhow::Result<Option<serde_json::Value>> {
+        if self.is_empty() || !is_workspace_test(id, arguments) {
+            return Ok(None);
+        }
+        let root = arguments["rootId"].as_str();
+        // An omitted or malformed root could mean the same workspace. Two
+        // different explicit roots can be verified independently.
+        if !self
+            .roots
+            .iter()
+            .any(|rejected| roots_may_match(rejected.as_deref(), root))
+        {
+            return Ok(None);
+        }
+        let response = CapabilityResponse::failed(
+            env!("CARGO_PKG_VERSION"),
+            Uuid::new_v4(),
+            "verification-not-run",
+            "No test was started. Gyro rejected an earlier edit in this batch. Correct that edit using its tool error, then submit the test after the change is applied.",
+        );
+        let mut reply =
+            serde_json::json!({"role":"tool", "content":model_response_text(&response)?});
+        if let Some(call_id) = call_id {
+            reply["tool_call_id"] = call_id.into();
+        } else {
+            reply["tool_name"] = name.into();
+        }
+        Ok(Some(reply))
+    }
+}
+
+fn names_exact_workspace_path(message: &str, path: &str) -> bool {
+    fn boundary(character: char) -> bool {
+        character.is_whitespace()
+            || matches!(
+                character,
+                '`' | '\'' | '"' | '(' | ')' | '[' | ']' | ',' | ':' | ';' | '!' | '?'
+            )
+    }
+    message.match_indices(path).any(|(start, _)| {
+        let before = message[..start].chars().next_back();
+        let after = &message[start + path.len()..];
+        before.is_none_or(boundary)
+            && (after.chars().next().is_none_or(boundary)
+                || after
+                    .strip_prefix('.')
+                    .is_some_and(|rest| rest.chars().next().is_none_or(boundary)))
+    })
+}
+
+pub(crate) const REQUESTED_VERIFICATION_FOLLOWUP: &str = "Workspace review applied the edits above. Finish the requested changes and run the test the user requested before replying. Report the actual tool result, including the exit code if available.";
+
+pub(crate) fn requests_workspace_test(request: &ProviderChatRequest) -> bool {
+    if request.mode != ChatMode::Normal
+        || request.workspace_path.is_none()
+        || request.internal_purpose.is_some()
+    {
+        return false;
+    }
+    let text = request
+        .message
+        .to_ascii_lowercase()
+        .replace("don't", "do not");
+    let mut requested = false;
+    for clause in text.split(['.', ';', '\n', '!', '?']) {
+        let words: Vec<_> = clause
+            .split(|c: char| !c.is_ascii_alphanumeric() && c != '-')
+            .filter(|word| !word.is_empty())
+            .collect();
+        for (index, word) in words.iter().enumerate() {
+            if !matches!(*word, "run" | "rerun" | "re-run" | "execute") {
+                continue;
+            }
+            let tail = &words[index + 1..];
+            let Some(test) = tail.iter().take(6).position(|part| {
+                matches!(*part, "test" | "tests" | "--test" | "pytest" | "unittest")
+            }) else {
+                continue;
+            };
+            if words[index.saturating_sub(4)..index]
+                .iter()
+                .chain(&tail[..test])
+                .any(|part| {
+                    matches!(
+                        *part,
+                        "not" | "never" | "without" | "avoid" | "skip" | "how" | "whether"
+                    )
+                })
+            {
+                return false;
+            }
+            requested = true;
+        }
+    }
+    requested
+}
+
+#[test]
+fn verification_review_requires_an_explicit_test_request() {
+    let mut request: ProviderChatRequest = serde_json::from_value(serde_json::json!({
+        "sessionId":"fixture", "providerId":"ollama", "workspacePath":"/fixture", "message":""
+    }))
+    .unwrap();
+    for (message, expected) in [
+        (
+            "Fix the workspace code. Then run node --test sum.test.mjs.",
+            true,
+        ),
+        (
+            "Please rerun the unit tests after applying the patch.",
+            true,
+        ),
+        ("Add a regression test and wait for review.", false),
+        ("Fix the code, but don't run npm test.", false),
+        ("Run lint, not the tests.", false),
+        ("Show me how to run the tests.", false),
+    ] {
+        request.message = message.into();
+        assert_eq!(requests_workspace_test(&request), expected, "{message}");
+    }
+    request.message = "Run cargo test after completing the changes.".into();
+    request.mode = ChatMode::Plan;
+    assert!(!requests_workspace_test(&request));
+}
+
+pub(crate) fn review_before_requested_test(
+    host: &dyn RunnerHost,
+    session_id: &str,
+    batch: &[(CapabilityId, serde_json::Value)],
+    results: &mut [CapabilityResponse],
+    available: &mut bool,
+) -> anyhow::Result<bool> {
+    if !*available {
+        return Ok(false);
+    }
+    let edits = batch
+        .iter()
+        .zip(results.iter())
+        .enumerate()
+        .filter(|(_, ((id, _), _))| is_workspace_edit(*id));
+    let mut pending = false;
+    for (index, ((_, arguments), response)) in edits {
+        match (
+            response.status,
+            response
+                .result
+                .as_ref()
+                .and_then(|result| result.data["status"].as_str()),
+        ) {
+            (CapabilityStatus::Completed, Some("pending")) => {
+                let root = arguments["rootId"].as_str();
+                if batch[index + 1..].iter().any(|(id, args)| {
+                    roots_may_match(root, args["rootId"].as_str()) && is_workspace_test(*id, args)
+                }) {
+                    // A test ordered after this edit already had a chance to
+                    // await its review. A baseline test cannot satisfy it.
+                    return Ok(false);
+                }
+                pending = true;
+            }
+            (CapabilityStatus::Completed, Some("applied")) => {}
+            _ => return Ok(false),
+        }
+    }
+    if !pending {
+        return Ok(false);
+    }
+    *available = false;
+    host.resolve_workspace_edit_reviews(session_id, results)?;
+    Ok(batch
+        .iter()
+        .zip(results.iter())
+        .filter(|((id, _), _)| is_workspace_edit(*id))
+        .all(|(_, response)| {
+            response
+                .result
+                .as_ref()
+                .is_some_and(|result| result.data["applied"] == true)
+        }))
+}
+
+#[test]
+fn rejected_edit_defers_verification_for_the_same_or_implicit_root() {
+    use serde_json::json;
+    let mut edits = RejectedWorkspaceEdits::default();
+    let command = json!({"rootId":"app","program":"node","args":["--test","sum.test.mjs"]});
+    let reply = |edits: &RejectedWorkspaceEdits, args: &serde_json::Value| {
+        edits
+            .test_reply(
+                CapabilityId::WorkspaceRunCommand,
+                args,
+                "gyro_workspace_run_command",
+                Some("test-id"),
+            )
+            .unwrap()
+    };
+    assert!(reply(&edits, &command).is_none());
+    edits.record(0, "gyro_workspace_read", &json!({"rootId":"app"}), false);
+    assert!(reply(&edits, &command).is_none());
+    edits.record(
+        0,
+        COMPACT_INVOKE,
+        &json!({"name":"gyro_workspace_edit","arguments":{"rootId":"app"}}),
+        true,
+    );
+    let blocked = reply(&edits, &command).unwrap();
+    assert_eq!(blocked["tool_call_id"], "test-id");
+    let result: serde_json::Value =
+        serde_json::from_str(blocked["content"].as_str().unwrap()).unwrap();
+    assert_eq!(result["error"]["code"], "verification-not-run");
+    assert!(reply(
+        &edits,
+        &json!({"rootId":"other","program":"node","args":["--test"]})
+    )
+    .is_none());
+    assert!(reply(
+        &edits,
+        &json!({"rootId":"app","program":"node","args":["--version"]})
+    )
+    .is_none());
+    assert!(edits
+        .test_reply(
+            CapabilityId::WorkspaceRunTest,
+            &json!({"taskId":"test"}),
+            "gyro_workspace_run_test",
+            None
+        )
+        .unwrap()
+        .is_some());
+    edits.record(
+        0,
+        "gyro_workspace_propose_edit",
+        &json!("malformed input"),
+        false,
+    );
+    assert!(reply(
+        &edits,
+        &json!({"rootId":"other","program":"node","args":["--test"]})
+    )
+    .is_some());
+}
+
+#[test]
+fn missing_edit_path_feedback_requires_one_earlier_user_named_file_in_the_same_root() {
+    use serde_json::json;
+    let mut rejected = RejectedWorkspaceEdits::default();
+    rejected.record(
+        2,
+        "gyro_workspace_edit",
+        &json!({"rootId":"app","oldString":"before","newString":"after"}),
+        false,
+    );
+    let observed_read = |path: &str| {
+        CapabilityResponse::completed(
+            "fixture",
+            crate::CapabilityResult {
+                call_id: Uuid::new_v4(),
+                capability_id: CapabilityId::WorkspaceRead,
+                summary: "Read file".into(),
+                data: json!({"path":path}),
+                resource: None,
+            },
+        )
+    };
+    let primary = observed_read("src/main.mjs");
+    let alternate = observed_read("src/other.mjs");
+    let app = json!({"rootId":"app"});
+    let other = json!({"rootId":"other"});
+    let correction =
+        |message, observations: Vec<(usize, &serde_json::Value, &CapabilityResponse)>| {
+            let mut replies = vec![
+                None,
+                None,
+                Some(json!({"role":"tool","content":"Missing path"})),
+            ];
+            rejected.add_confirmed_path_feedback(message, &mut replies, observations.into_iter());
+            replies[2].as_ref().unwrap()["content"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+    assert!(correction("Edit src/main.mjs.", vec![(0, &app, &primary)])
+        .contains("path set to \"src/main.mjs\""));
+    for (message, observations) in [
+        ("Edit src/main.mjs.backup.", vec![(0, &app, &primary)]),
+        ("Edit /src/main.mjs.", vec![(0, &app, &primary)]),
+        ("Edit src/main.mjs.", vec![(0, &other, &primary)]),
+        ("Edit src/main.mjs.", vec![(3, &app, &primary)]),
+        (
+            "Edit src/main.mjs and src/other.mjs.",
+            vec![(0, &app, &primary), (1, &app, &alternate)],
+        ),
+    ] {
+        assert_eq!(correction(message, observations), "Missing path");
+    }
 }
 
 pub fn model_tools(

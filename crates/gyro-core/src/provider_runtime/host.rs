@@ -176,6 +176,15 @@ pub trait RunnerHost: Send + Sync {
         session_id: &str,
         calls: &[(CapabilityId, serde_json::Value)],
     ) -> anyhow::Result<Vec<CapabilityResponse>>;
+    /// Refresh pending workspace edit results from review decisions. The host
+    /// owns the approval wait and may leave the results pending.
+    fn resolve_workspace_edit_reviews(
+        &self,
+        _session_id: &str,
+        _results: &mut [CapabilityResponse],
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
     fn acp_mcp_servers(&self, session_id: &str) -> anyhow::Result<Vec<serde_json::Value>>;
     fn acp_conversation_history(&self, session_id: &str) -> Option<String>;
     fn request_approval(

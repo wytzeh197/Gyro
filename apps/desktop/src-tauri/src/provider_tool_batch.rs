@@ -19,10 +19,18 @@ pub(crate) use gyro_core::provider_runtime::tool_batch::{
     compact_cli_catalog_active, observe_response, ordered, spill_result_data, BASELINE_GUIDANCE,
     COMPACT_CATALOG_ENV, COMPACT_GUIDANCE, COMPACT_INVOKE,
 };
-use gyro_core::{CapabilityId, CapabilityResponse, CapabilityRunMode};
+use gyro_core::provider_runtime::tool_batch::{is_workspace_edit, is_workspace_test};
 #[cfg(test)]
-use gyro_core::{CapabilityResourceRef, CapabilityStatus};
-#[cfg(test)]
+use gyro_core::CapabilityResourceRef;
+use gyro_core::{
+    CancellationToken, CapabilityId, CapabilityResponse, CapabilityRunMode, CapabilityStatus,
+    MutationProposalStatus,
+};
+use std::{
+    collections::HashMap,
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 use uuid::Uuid;
 pub(crate) fn model_tools(
     mode: CapabilityRunMode,
@@ -105,10 +113,37 @@ pub(super) fn execute(
     app: &tauri::AppHandle,
     session_id: &str,
     calls: &[(CapabilityId, serde_json::Value)],
+    cancellation: &CancellationToken,
 ) -> anyhow::Result<Vec<CapabilityResponse>> {
-    let results = ordered(calls, |id, arguments| {
-        invoke_run_capability(app, session_id, id, arguments.clone())
-    })?;
+    let mut default_root = None;
+    if calls
+        .iter()
+        .any(|(_, arguments)| arguments.get("rootId").is_some())
+        && calls.iter().any(|(id, arguments)| {
+            arguments.get("rootId").is_none()
+                && (is_workspace_edit(*id) || is_workspace_test(*id, arguments))
+        })
+    {
+        let store = crate::stores::open_store().map_err(anyhow::Error::msg)?;
+        if let Some(session) = store.get_session(Uuid::parse_str(session_id)?)? {
+            if let [root] = session.workspace_identity.roots.as_slice() {
+                default_root = Some(root.id.clone());
+            }
+        }
+    }
+    let results = execute_with_edit_outcomes(
+        calls,
+        default_root.as_deref(),
+        |id, arguments| {
+            anyhow::ensure!(
+                !cancellation.is_cancelled(),
+                "{}: cancelled before workspace tool dispatch",
+                gyro_core::provider_runtime::limits::PROVIDER_STOP_MARKER,
+            );
+            invoke_run_capability(app, session_id, id, arguments.clone())
+        },
+        |proposals| wait_for_edit_review(app, session_id, proposals, cancellation),
+    )?;
     for ((_, args), response) in calls.iter().zip(&results) {
         observe_response(
             response,
@@ -118,6 +153,180 @@ pub(super) fn execute(
         );
     }
     Ok(results)
+}
+
+fn pending_workspace_edit(response: &CapabilityResponse) -> Option<Uuid> {
+    let result = response.result.as_ref()?;
+    if response.status != CapabilityStatus::Completed
+        || !is_workspace_edit(result.capability_id)
+        || result.data["status"] != "pending"
+    {
+        return None;
+    }
+    result.data["proposalId"].as_str()?.parse().ok()
+}
+
+pub(super) fn resolve_workspace_edit_reviews(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    results: &mut [CapabilityResponse],
+    cancellation: &CancellationToken,
+) -> anyhow::Result<()> {
+    let pending = results
+        .iter()
+        .filter_map(pending_workspace_edit)
+        .collect::<Vec<_>>();
+    if !pending.is_empty() {
+        let decisions = wait_for_edit_review(app, session_id, &pending, cancellation)?;
+        update_reviewed_edits(results, &decisions.into_iter().collect());
+    }
+    Ok(())
+}
+
+fn wait_for_edit_review(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    proposals: &[Uuid],
+    cancellation: &CancellationToken,
+) -> anyhow::Result<Vec<(Uuid, MutationProposalStatus)>> {
+    use MutationProposalStatus::{Applied, Applying, Failed, Pending, Rejected};
+    let bound = crate::capabilities::bridge::active_provider_capability_context(app, session_id)?;
+    let session = Uuid::parse_str(session_id)?;
+    let turn = bound.turn_id.as_deref().map(Uuid::parse_str).transpose()?;
+    let store = crate::stores::open_store().map_err(anyhow::Error::msg)?;
+    let deadline = Instant::now() + crate::app::limits::PROVIDER_APPROVAL_TIMEOUT;
+    let mut remaining = proposals.to_vec();
+    let mut decisions = Vec::new();
+    let _approval_wait = crate::delegated_agents::ApprovalWait::start(app, session, turn);
+    loop {
+        anyhow::ensure!(
+            !cancellation.is_cancelled(),
+            "{}: cancelled while waiting for workspace edit review",
+            gyro_core::provider_runtime::limits::PROVIDER_STOP_MARKER,
+        );
+        let mut blocked = false;
+        let mut index = 0;
+        while index < remaining.len() {
+            match store.mutation_proposal_status_for_turn(remaining[index], session, turn)? {
+                Some(status @ (Applied | Failed | Rejected)) => {
+                    blocked |= status != Applied;
+                    decisions.push((remaining.swap_remove(index), status));
+                }
+                Some(Applying | Pending) => index += 1,
+                None => {
+                    blocked = true;
+                    remaining.swap_remove(index);
+                }
+            }
+        }
+        if blocked || remaining.is_empty() || Instant::now() >= deadline {
+            return Ok(decisions);
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
+fn execute_with_edit_outcomes(
+    calls: &[(CapabilityId, serde_json::Value)],
+    default_root: Option<&str>,
+    invoke: impl Fn(CapabilityId, &serde_json::Value) -> anyhow::Result<CapabilityResponse> + Sync,
+    wait_for_reviews: impl Fn(&[Uuid]) -> anyhow::Result<Vec<(Uuid, MutationProposalStatus)>> + Sync,
+) -> anyhow::Result<Vec<CapabilityResponse>> {
+    #[derive(Default)]
+    struct EditState {
+        // A root with None has an edit that cannot be confirmed by review.
+        unapplied: HashMap<Option<String>, Option<Vec<Uuid>>>,
+        reviewed: HashMap<Uuid, MutationProposalStatus>,
+    }
+    let state = Mutex::new(EditState::default());
+    let mut results = ordered(calls, |id, arguments| {
+        let edit = is_workspace_edit(id);
+        let test = is_workspace_test(id, arguments);
+        if !edit && !test {
+            return invoke(id, arguments);
+        }
+        // Edits and tests are ordered barriers. Only read workers run in parallel.
+        let root = arguments["rootId"]
+            .as_str()
+            .or(default_root)
+            .map(str::to_owned);
+        let mut state = state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("could not read edit outcomes for this tool batch"))?;
+        if test {
+            if let Some(pending) = state.unapplied.remove(&root) {
+                let applied = if let Some(proposals) = pending {
+                    state.reviewed.extend(wait_for_reviews(&proposals)?);
+                    proposals
+                        .iter()
+                        .all(|id| state.reviewed.get(id) == Some(&MutationProposalStatus::Applied))
+                } else {
+                    false
+                };
+                if !applied {
+                    state.unapplied.insert(root, None);
+                    return Ok(CapabilityResponse::failed(
+                        env!("CARGO_PKG_VERSION"),
+                        Uuid::new_v4(),
+                        "verification-not-run",
+                        "No test was started. An earlier edit for this workspace in the same batch was not applied. Verify after confirming the edit was applied. Run a baseline test separately if needed.",
+                    ));
+                }
+            }
+        }
+        let result = invoke(id, arguments)?;
+        if edit
+            && !(result.status == CapabilityStatus::Completed
+                && result
+                    .result
+                    .as_ref()
+                    .is_some_and(|edit| edit.data["applied"] == true))
+        {
+            if let Some(proposal) = pending_workspace_edit(&result) {
+                if let Some(pending) = state
+                    .unapplied
+                    .entry(root)
+                    .or_insert_with(|| Some(Vec::new()))
+                {
+                    pending.push(proposal);
+                }
+            } else {
+                state.unapplied.insert(root, None);
+            }
+        }
+        Ok(result)
+    })?;
+    let reviewed = state
+        .into_inner()
+        .map_err(|_| anyhow::anyhow!("could not read reviewed edits"))?
+        .reviewed;
+    update_reviewed_edits(&mut results, &reviewed);
+    Ok(results)
+}
+
+fn update_reviewed_edits(
+    results: &mut [CapabilityResponse],
+    reviewed: &HashMap<Uuid, MutationProposalStatus>,
+) {
+    for response in results {
+        if let Some(status) = pending_workspace_edit(response).and_then(|id| reviewed.get(&id)) {
+            if let Some(result) = &mut response.result {
+                let applied = *status == MutationProposalStatus::Applied;
+                result.data["status"] = status.as_str().into();
+                result.data["applied"] = applied.into();
+                result.data["approvalRequired"] = false.into();
+                if let Some(data) = result.data.as_object_mut() {
+                    data.remove("nextStep");
+                }
+                let path = result.data["path"].as_str().unwrap_or("workspace file");
+                result.summary = if applied {
+                    format!("Applied reviewed edit to {path}")
+                } else {
+                    format!("Review of edit to {path} ended as {}", status.as_str())
+                };
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -999,6 +1208,152 @@ mod tests {
             assert!(!independent_read(id));
         }
     }
+    #[test]
+    fn only_tests_after_unapplied_edits_in_the_same_root_are_deferred() {
+        use gyro_core::CapabilityId::{WorkspaceEdit, WorkspaceRunCommand, WorkspaceRunTest};
+        use serde_json::json;
+        let calls = [
+            (
+                WorkspaceRunTest,
+                json!({"rootId":"app","taskId":"package:test"}),
+            ),
+            (WorkspaceEdit, json!({"rootId":"app","path":"main.mjs"})),
+            (
+                WorkspaceRunCommand,
+                json!({"rootId":"app","program":"node","args":["--test","sum.test.mjs"]}),
+            ),
+            (
+                WorkspaceRunTest,
+                json!({"rootId":"app","taskId":"package:test"}),
+            ),
+            (
+                WorkspaceRunTest,
+                json!({"rootId":"other","taskId":"package:test"}),
+            ),
+            (
+                WorkspaceRunCommand,
+                json!({"rootId":"app","program":"node","args":["--version"]}),
+            ),
+        ];
+        for outcome in ["failed", "pending", "applied"] {
+            let invoked = Mutex::new(Vec::new());
+            let results = execute_with_edit_outcomes(
+                &calls,
+                None,
+                |id, arguments| {
+                    invoked.lock().unwrap().push((id, arguments.clone()));
+                    let call_id = Uuid::new_v4();
+                    if id == WorkspaceEdit && outcome == "failed" {
+                        return Ok(CapabilityResponse::failed(
+                            "fixture",
+                            call_id,
+                            "stale-edit-base",
+                            "Read the updated file",
+                        ));
+                    }
+                    Ok(CapabilityResponse::completed(
+                        "fixture",
+                        CapabilityResult {
+                            call_id,
+                            capability_id: id,
+                            summary: "Fixture observed tool".into(),
+                            data: json!({"applied":outcome == "applied"}),
+                            resource: None,
+                        },
+                    ))
+                },
+                |_| Ok(Vec::new()),
+            )
+            .unwrap();
+            let expected = if outcome == "applied" {
+                calls.to_vec()
+            } else {
+                for result in &results[2..4] {
+                    assert_eq!(result.error.as_ref().unwrap().code, "verification-not-run");
+                    assert!(result.result.is_none());
+                }
+                [
+                    calls[0].clone(),
+                    calls[1].clone(),
+                    calls[4].clone(),
+                    calls[5].clone(),
+                ]
+                .to_vec()
+            };
+            assert_eq!(invoked.into_inner().unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn a_batched_test_waits_for_all_exact_edits_and_reports_the_reviewed_state() {
+        use gyro_core::CapabilityId::{WorkspaceEdit, WorkspaceRunCommand, WorkspaceRunTest};
+        use serde_json::json;
+        use MutationProposalStatus::{Applied, Pending, Rejected};
+        let proposal_ids = [Uuid::new_v4(), Uuid::new_v4()];
+        let calls = [
+            (WorkspaceEdit, json!({"path":"a.mjs"})),
+            (WorkspaceEdit, json!({"rootId":"app","path":"b.mjs"})),
+            (
+                WorkspaceRunCommand,
+                json!({"rootId":"app","program":"node","args":["--test","sum.test.mjs"]}),
+            ),
+            (WorkspaceRunTest, json!({"taskId":"package:test"})),
+        ];
+        for decisions in [
+            Vec::new(),
+            vec![(proposal_ids[0], Applied), (proposal_ids[1], Rejected)],
+            vec![(proposal_ids[0], Applied), (proposal_ids[1], Applied)],
+        ] {
+            let approved =
+                decisions.len() == 2 && decisions.iter().all(|(_, status)| *status == Applied);
+            let edits = AtomicUsize::new(0);
+            let tests = AtomicUsize::new(0);
+            let reviews = AtomicUsize::new(0);
+            let results = execute_with_edit_outcomes(
+                &calls,
+                Some("app"),
+                |id, arguments| {
+                    let data = if id == WorkspaceEdit {
+                        let proposal = proposal_ids[edits.fetch_add(1, Ordering::SeqCst)];
+                        json!({"status":"pending", "proposalId":proposal, "path":arguments["path"], "applied":false, "approvalRequired":true, "nextStep":"Wait for review"})
+                    } else {
+                        assert_eq!(reviews.load(Ordering::SeqCst), 1);
+                        tests.fetch_add(1, Ordering::SeqCst);
+                        json!({"status":"done","exitCode":0})
+                    };
+                    Ok(CapabilityResponse::completed("fixture", CapabilityResult {
+                        call_id: Uuid::new_v4(), capability_id: id, summary: "Fixture observed tool".into(), data, resource: None,
+                    }))
+                },
+                |pending| {
+                    assert_eq!(pending, proposal_ids);
+                    reviews.fetch_add(1, Ordering::SeqCst);
+                    Ok(decisions.clone())
+                },
+            ).unwrap();
+            assert_eq!(reviews.load(Ordering::SeqCst), 1);
+            assert_eq!(tests.load(Ordering::SeqCst), if approved { 2 } else { 0 });
+            for (result, id) in results[..2].iter().zip(proposal_ids) {
+                let expected = decisions
+                    .iter()
+                    .find(|(proposal, _)| *proposal == id)
+                    .map_or(Pending, |(_, status)| *status);
+                let data = &result.result.as_ref().unwrap().data;
+                assert_eq!(data["status"], expected.as_str());
+                assert_eq!(data["applied"], expected == Applied);
+                assert_eq!(data["approvalRequired"], expected == Pending);
+                assert_eq!(data.get("nextStep").is_none(), expected != Pending);
+            }
+            for result in &results[2..] {
+                if approved {
+                    assert_eq!(result.result.as_ref().unwrap().data["exitCode"], 0);
+                } else {
+                    assert_eq!(result.error.as_ref().unwrap().code, "verification-not-run");
+                }
+            }
+        }
+    }
+
     #[test]
     fn failed_read_never_starts_a_later_write() {
         let calls = [

@@ -5,6 +5,28 @@ history and internal loops remain provider-owned. API runners own their messages
 and Gyro tools. Subscription allowance is not represented as a monetary token
 bucket.
 
+## Focused Ollama tool catalog
+
+Set `efficiency.enabled`, `efficiency.experimental`, and
+`efficiency.focusedWorkspaceCatalog` to `true` to try the focused catalog on
+native-tool Ollama models. Gyro initially supplies the workspace tools and
+`gyro_tool_catalog` when a normal chat explicitly requests workspace work.
+Catalog discovery expands the schemas for the rest of the turn. If the model
+requests an omitted, permitted tool, Gyro defers the action until the model
+reissues the call with the full catalog available. Actions later in the same
+batch wait too, so they can run in order. The broker reviews each fresh call
+under the current approvals.
+
+If an exact-replacement call omits `path`, Gyro can name the file when the user
+named it and an earlier read in the same batch confirmed it. If the focused
+catalog sees the omission again, Gyro supplies its full schemas for the next
+tool round. If the user requested a test and the model stops after receiving
+the confirmed path, Gyro can use one remaining tool round to offer the full
+schemas. The model submits a new edit under the current approvals.
+
+Use the `focused-workspace-catalog` benchmark variant alongside `baseline`.
+The `compactToolCatalog` option takes precedence if both controls are enabled.
+
 ## Provider-path audit and upgrades (2026-11-11)
 
 This audit covers Gyro's six executable adapter families at source and local-test
