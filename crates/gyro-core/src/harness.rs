@@ -3,6 +3,7 @@ use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
+use std::io::{self, Write};
 use uuid::Uuid;
 
 pub const HARNESS_SCHEMA_V1: &str = "gyro.harness.v1";
@@ -336,8 +337,10 @@ where
 }
 
 pub fn validate_harness_payload_value(payload: Value) -> Result<Value> {
-    let encoded = serde_json::to_vec(&payload)?;
-    if encoded.len() > MAX_HARNESS_EVENT_PAYLOAD_BYTES {
+    // Every accepted harness event passed through here. Encoding it into a
+    // buffer only to read `.len()` copied up to 128 KiB and dropped it. The
+    // counter is the same compact JSON and keeps none of it.
+    if json_byte_len(&payload)? > MAX_HARNESS_EVENT_PAYLOAD_BYTES {
         return Err(anyhow!(
             "harness event payload cannot exceed {MAX_HARNESS_EVENT_PAYLOAD_BYTES} bytes"
         ));
@@ -346,8 +349,7 @@ pub fn validate_harness_payload_value(payload: Value) -> Result<Value> {
 }
 
 pub fn validate_provider_resume_cursor_value(cursor: Value) -> Result<Value> {
-    let encoded = serde_json::to_vec(&cursor)?;
-    if encoded.len() > MAX_HARNESS_RESUME_CURSOR_BYTES {
+    if json_byte_len(&cursor)? > MAX_HARNESS_RESUME_CURSOR_BYTES {
         return Err(anyhow!(
             "provider resume cursor cannot exceed {MAX_HARNESS_RESUME_CURSOR_BYTES} bytes"
         ));
@@ -375,6 +377,29 @@ pub fn validate_provider_resume_cursor_value(cursor: Value) -> Result<Value> {
         return Err(anyhow!("provider resume cursor fields are too large"));
     }
     Ok(cursor)
+}
+
+/// Compact JSON length of `value`.
+///
+/// `Value` serialization does not fail for a writer that accepts every
+/// buffer. A failure still rejects the value, which is what `to_vec` did.
+fn json_byte_len(value: &Value) -> Result<usize> {
+    struct ByteCounter(usize);
+
+    impl Write for ByteCounter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0 = self.0.saturating_add(buf.len());
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut counter = ByteCounter(0);
+    serde_json::to_writer(&mut counter, value)?;
+    Ok(counter.0)
 }
 
 pub fn decode_provider_resume_cursor<T>(cursor: Value) -> Result<T>
@@ -453,6 +478,63 @@ mod tests {
         let error = validate_harness_payload_value(payload).unwrap_err();
 
         assert!(error.to_string().contains("harness event payload"));
+    }
+
+    #[test]
+    fn payload_byte_limit_matches_compact_json() {
+        let quotes = serde_json::json!({ "q": "\"".repeat(64) });
+        let crabs = serde_json::json!({ "c": "🦀".repeat(40) });
+        let mixed = serde_json::json!({
+            "items": [1, true, null, "a\nb", { "k": "v" }],
+        });
+        for value in [quotes, crabs, mixed] {
+            assert_eq!(
+                json_byte_len(&value).unwrap(),
+                serde_json::to_vec(&value).unwrap().len()
+            );
+        }
+
+        let shell = serde_json::json!({
+            "schema": HARNESS_SCHEMA_V1,
+            "kind": "note",
+            "body": "",
+        });
+        let slack = MAX_HARNESS_EVENT_PAYLOAD_BYTES - json_byte_len(&shell).unwrap();
+        let fitting = serde_json::json!({
+            "schema": HARNESS_SCHEMA_V1,
+            "kind": "note",
+            "body": "x".repeat(slack),
+        });
+        assert_eq!(
+            json_byte_len(&fitting).unwrap(),
+            serde_json::to_vec(&fitting).unwrap().len()
+        );
+        assert_eq!(
+            json_byte_len(&fitting).unwrap(),
+            MAX_HARNESS_EVENT_PAYLOAD_BYTES
+        );
+        assert!(validate_harness_payload_value(fitting).is_ok());
+
+        let over = serde_json::json!({
+            "schema": HARNESS_SCHEMA_V1,
+            "kind": "note",
+            "body": "x".repeat(slack + 1),
+        });
+        assert_eq!(
+            json_byte_len(&over).unwrap(),
+            MAX_HARNESS_EVENT_PAYLOAD_BYTES + 1
+        );
+        assert!(validate_harness_payload_value(over).is_err());
+
+        let cursor = serde_json::json!({
+            "kind": "codex-session",
+            "sessionId": format!("\"{}", "🦀".repeat(8)),
+        });
+        assert_eq!(
+            json_byte_len(&cursor).unwrap(),
+            serde_json::to_vec(&cursor).unwrap().len()
+        );
+        assert!(validate_provider_resume_cursor_value(cursor).is_ok());
     }
 
     #[test]
