@@ -128,7 +128,8 @@ pub(crate) fn provider_usage_refresh_slots() -> &'static Mutex<HashMap<String, I
 ///    (`rate_limit_event`): the window, its reset, and a used percentage only
 ///    when that frame included one. Gyro does not read Claude Code's OAuth
 ///    token, keychain entry, `~/.claude/.credentials.json`, or
-///    `api.anthropic.com/api/oauth/usage`.
+///    `api.anthropic.com/api/oauth/usage`. A refresh reads those stored
+///    windows and does not write them back.
 /// 4. **Kimi** — stored windows only. Gyro does not read
 ///    `~/.kimi-code/credentials`, refresh a token under the Kimi CLI client
 ///    id, or call `/coding/v1/usages`.
@@ -151,7 +152,13 @@ pub(crate) fn get_provider_usage_blocking(
     };
     let mut snapshot = match live {
         Ok(snapshot) => {
-            remember_provider_rate_limits(provider_id, &snapshot.windows, &snapshot.fetched_at);
+            // A live poll names every current window, so it replaces the store.
+            // Claude's "poll" is a reread of that store. Writing the reread
+            // back races the stream: it was captured first, and an equal
+            // observed_at lets it overwrite the rate_limit_event recorded after.
+            if usage_poll_replaces_stored_windows(provider_id) {
+                remember_provider_rate_limits(provider_id, &snapshot.windows, &snapshot.fetched_at);
+            }
             snapshot
         }
         Err(error) => {
@@ -381,6 +388,60 @@ pub(crate) fn remember_provider_rate_limits(
     windows: &[ProviderRateLimitWindow],
     observed_at: &str,
 ) {
+    if !usage_poll_replaces_stored_windows(provider_id) || windows.is_empty() {
+        return;
+    }
+    let store = match open_store() {
+        Ok(store) => store,
+        Err(error) => {
+            warn_unrecorded_rate_limits(&error);
+            return;
+        }
+    };
+    remember_polled_provider_rate_limits(&store, provider_id, windows, observed_at);
+}
+
+/// True when a usage reading is a live account poll that replaces the store.
+///
+/// Claude is not: the only reading is the `rate_limit_event` already stored.
+/// Replaying that snapshot through `replace_provider_rate_limits` deletes
+/// windows the event added and, when `observed_at` ties, overwrites the ones
+/// it updated.
+pub(crate) fn usage_poll_replaces_stored_windows(provider_id: &str) -> bool {
+    matches!(provider_id, "openai" | "xai")
+}
+
+/// Replace stored windows with one live account poll, on a store the caller holds.
+///
+/// A store-backed provider is a no-op. The snapshot those refreshes hold was
+/// read before this turn's `rate_limit_event` is recorded, and writing it
+/// back afterwards is what used to drop that event.
+pub(crate) fn remember_polled_provider_rate_limits(
+    store: &SessionStore,
+    provider_id: &str,
+    windows: &[ProviderRateLimitWindow],
+    observed_at: &str,
+) {
+    if !usage_poll_replaces_stored_windows(provider_id) || windows.is_empty() {
+        return;
+    }
+    if let Err(error) = store.replace_provider_rate_limits(
+        provider_id,
+        &provider_rate_limit_records(windows, observed_at),
+    ) {
+        warn_unrecorded_rate_limits(&error.to_string());
+    }
+}
+
+/// Persist stream windows before the settled reread starts.
+///
+/// Best-effort, same as the ledger: failing to write a limit must not fail
+/// the turn that reported it. The reread publishes whatever the store holds
+/// when its thread runs, so this write has to land first.
+pub(crate) fn record_streamed_provider_rate_limits(
+    provider_id: &str,
+    windows: &[ProviderRateLimitWindow],
+) {
     if windows.is_empty() {
         return;
     }
@@ -391,12 +452,7 @@ pub(crate) fn remember_provider_rate_limits(
             return;
         }
     };
-    if let Err(error) = store.replace_provider_rate_limits(
-        provider_id,
-        &provider_rate_limit_records(windows, observed_at),
-    ) {
-        warn_unrecorded_rate_limits(&error.to_string());
-    }
+    remember_provider_rate_limits_in(&store, provider_id, windows);
 }
 
 /// The stored shape of a set of windows, all observed at the same moment.

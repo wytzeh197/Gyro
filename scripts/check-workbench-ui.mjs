@@ -7363,20 +7363,24 @@ expect(
   "Provider tool activities should carry a note so the run rail can name what each tool ran on.",
 );
 
-// Claude plan windows need the account usage endpoint — the stream names the
-// window and reset but never utilization, which left the composer on em dashes.
+// Claude plan windows come from stream-json rate_limit_event frames. Gyro does
+// not read Claude Code's OAuth token or the account usage endpoint. The update
+// tip still reads the archive size.
 expect(
-  tauriSource.includes("fetch_anthropic_provider_usage") &&
-    tauriSource.includes("provider_usage_windows_from_anthropic_usage") &&
-    tauriSource.includes("claude_oauth_access_token") &&
-    tauriSource.includes("/api/oauth/usage") &&
+  tauriSource.includes("provider_rate_limit_from_claude_stream") &&
+    tauriSource.includes("record_streamed_provider_rate_limits") &&
+    tauriSource.includes("usage_poll_replaces_stored_windows") &&
+    tauriSource.includes("rate_limit_event") &&
+    !tauriSource.includes("fetch_anthropic_provider_usage") &&
+    !tauriSource.includes("provider_usage_windows_from_anthropic_usage") &&
+    !tauriSource.includes("claude_oauth_access_token") &&
     tauriSource.includes("updater_platform_key") &&
     updateStateSource.includes("formatUpdateSize") &&
     updateStateSource.includes("updateSizeLabel") &&
     updateStateSource.includes("updateVersionTag") &&
     updateControllerSource.includes("updateArchiveSize") &&
     updateControllerSource.includes('invoke<string>("updater_platform_key")'),
-  "Anthropic plan usage and the update tip should read live account windows and archive size.",
+  "Claude plan windows should come from stream-json rate_limit_event frames, and the update tip should read archive size.",
 );
 
 // The model, provider and provider-model panes all resolve to the one rail.

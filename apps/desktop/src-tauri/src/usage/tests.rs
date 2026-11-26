@@ -181,6 +181,99 @@ fn rate_limit_windows_keep_the_newest_reading_shortest_first() {
     assert_eq!(windows[1].id, "weekly");
 }
 
+/// A settled refresh used to reread the store and write that snapshot back
+/// after the stream had already recorded a `rate_limit_event`. The replay's
+/// `observed_at` ties the row the event just updated, so the replace put the
+/// stale status back and deleted windows the event had added.
+#[test]
+fn claude_rate_limit_event_beats_a_stale_store_reread() {
+    let temp = tempfile::tempdir().expect("temp store");
+    let store = SessionStore::open(GyroPaths::from_base_dir(temp.path().join("store")))
+        .expect("open store");
+    let now = chrono::Utc::now();
+    let observed_at = (now - chrono::Duration::seconds(30)).to_rfc3339();
+    let resets_at_unix = now.timestamp() + 3 * 60 * 60;
+    let resets_at = chrono::DateTime::from_timestamp(resets_at_unix, 0)
+        .expect("reset time")
+        .to_rfc3339();
+    store
+        .record_provider_rate_limits(
+            "anthropic",
+            &[gyro_core::ProviderRateLimitRecord {
+                window_id: "five-hour".into(),
+                label: "5-hour limit".into(),
+                status: "ok".into(),
+                used_percent: Some(40),
+                resets_at: Some(resets_at),
+                observed_at: observed_at.clone(),
+            }],
+        )
+        .expect("seed stale window");
+
+    let stale_five_hour = provider_rate_limit_from_claude_stream(&serde_json::json!({
+        "type": "rate_limit_event",
+        "rate_limit_info": {
+            "status": "allowed",
+            "resetsAt": resets_at_unix,
+            "rateLimitType": "five_hour",
+            "utilization": 0.4
+        }
+    }))
+    .expect("stale five-hour window");
+    let fresh = [
+        provider_rate_limit_from_claude_stream(&serde_json::json!({
+            "type": "rate_limit_event",
+            "rate_limit_info": {
+                "status": "approaching_limit",
+                "resetsAt": resets_at_unix,
+                "rateLimitType": "five_hour"
+            }
+        }))
+        .expect("fresh five-hour window"),
+        provider_rate_limit_from_claude_stream(&serde_json::json!({
+            "type": "rate_limit_event",
+            "rate_limit_info": {
+                "status": "allowed",
+                "resetsAt": resets_at_unix + 7 * 24 * 60 * 60,
+                "rateLimitType": "weekly"
+            }
+        }))
+        .expect("fresh weekly window"),
+    ];
+    // The turn records the event, then the reread that started earlier
+    // tries to write its captured snapshot back.
+    crate::usage::fetch::remember_provider_rate_limits_in(&store, "anthropic", &fresh);
+    crate::usage::fetch::remember_polled_provider_rate_limits(
+        &store,
+        "anthropic",
+        &[stale_five_hour],
+        &observed_at,
+    );
+
+    let stored = store
+        .provider_rate_limits("anthropic", now)
+        .expect("read windows");
+    let five_hour = stored
+        .iter()
+        .find(|window| window.window_id == "five-hour")
+        .expect("five-hour window");
+    assert_eq!(five_hour.status, "warning");
+    assert_eq!(five_hour.used_percent, Some(40));
+    assert!(
+        stored.iter().any(|window| window.window_id == "weekly"),
+        "the event's weekly window must survive the stale replace"
+    );
+    assert!(!crate::usage::fetch::usage_poll_replaces_stored_windows(
+        "anthropic"
+    ));
+    assert!(crate::usage::fetch::usage_poll_replaces_stored_windows(
+        "openai"
+    ));
+    assert!(crate::usage::fetch::usage_poll_replaces_stored_windows(
+        "xai"
+    ));
+}
+
 #[test]
 fn unknown_rate_limit_windows_still_reach_the_composer() {
     let window = provider_rate_limit_from_claude_stream(&serde_json::json!({

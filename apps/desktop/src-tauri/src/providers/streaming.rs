@@ -28,7 +28,10 @@ use crate::{
         provider_run::{stop_provider_run, ProviderStopReason},
     },
     text::push_bounded,
-    usage::{fetch::publish_settled_provider_usage, types::ProviderRateLimitWindow},
+    usage::{
+        fetch::{publish_settled_provider_usage, record_streamed_provider_rate_limits},
+        types::ProviderRateLimitWindow,
+    },
 };
 use gyro_core::{
     timing, CancellationToken, CredentialPolicy, ExecutionRequest, ExecutionStream,
@@ -837,6 +840,10 @@ pub(crate) fn run_streaming_command(
     if let Some(usage) = &stream_state.context_usage {
         emit_provider_context_usage(app, request, usage);
     }
+    // Before the settled reread. That reread runs on another thread and
+    // publishes the stored snapshot; recording afterwards let a stale
+    // snapshot replace this turn's rate_limit_event windows.
+    record_streamed_provider_rate_limits(&request.provider_id, &stream_state.rate_limits);
     publish_settled_provider_usage(app, &request.provider_id);
     match outcome.termination {
         // Nothing else can read the reason back: the token is shared, but the
