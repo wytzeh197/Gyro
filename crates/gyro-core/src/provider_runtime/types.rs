@@ -205,7 +205,7 @@ pub enum ProviderAdapterKind {
     OpenAiCodex,
     AnthropicClaude,
     KimiAcp,
-    /// Google Antigravity's official CLI (`agy`) in headless stream-json mode.
+    /// Google Antigravity's official ACP server (`agy acp`), Gemini models only.
     AntigravityCli,
     Ollama,
     /// Straight HTTPS to an OpenAI-compatible endpoint: the providers Gyro

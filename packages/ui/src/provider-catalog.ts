@@ -356,9 +356,8 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       supportsApprovals: true,
       supportsImages: true,
       supportsResume: true,
-      // Plan windows read from the Kimi account endpoint behind the CLI's own
-      // usage view, using the sign-in the CLI already holds.
-      supportsUsage: true,
+      // Plan limits are not read from the Kimi CLI credential file.
+      supportsUsage: false,
       visibility: "standard",
     },
     models: [
@@ -474,7 +473,7 @@ export const providerCatalog: ProviderCatalogEntry[] = [
       {
         id: "antigravity-default",
         displayName: "Automatic",
-        description: "Uses the model configured in Google Antigravity. Connect to discover available models.",
+        description: "Gyro runs Gemini models through Antigravity. Connect to discover them, then pick a Gemini model.",
       },
     ],
     effort: "medium",

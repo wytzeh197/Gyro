@@ -95,11 +95,6 @@ use crate::{
         },
     },
     ipc::cli::{bind_cli_ipc_listener, provider_host_ipc_paths, write_bounded_json_line},
-    kimi_usage::{
-        fetch_kimi_provider_usage, kimi_sign_in_at, kimi_sign_in_renewal,
-        provider_usage_windows_from_kimi_usages, store_kimi_sign_in, KimiSignIn, KimiSignInRenewal,
-        KIMI_NO_PLAN_LIMITS,
-    },
     ollama_runner::{ollama_compatibility_catalog, validate_ollama_compatibility_call},
     provider_accounting,
     provider_activity::{
@@ -219,9 +214,8 @@ use crate::{
     },
     usage::{
         fetch::{
-            claude_oauth_access_token_at, fetch_anthropic_provider_usage,
-            get_provider_usage_blocking, provider_usage_windows_from_anthropic_usage,
-            provider_usage_windows_from_codex, provider_usage_windows_from_xai_billing,
+            get_provider_usage_blocking, provider_usage_windows_from_codex,
+            provider_usage_windows_from_xai_billing,
         },
         types::{CodexRateLimitSnapshot, CodexRateLimitWindow},
     },

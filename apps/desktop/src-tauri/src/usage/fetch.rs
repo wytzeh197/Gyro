@@ -1,10 +1,5 @@
-#[cfg(target_os = "macos")]
-use crate::command_execution::run_bounded_command_with_cancellation;
 use crate::{
     app::limits::{CODEX_USAGE_TIMEOUT, PROVIDER_USAGE_UPDATED_EVENT},
-    claude_usage_cli,
-    diagnostics::export::user_home_directory,
-    kimi_usage::fetch_kimi_provider_usage,
     providers::{
         codex_app_server::{
             codex_app_server_result, receive_codex_app_server_response,
@@ -17,16 +12,12 @@ use crate::{
         CodexRateLimitSnapshot, CodexRateLimitsResponse, ProviderRateLimitWindow,
         ProviderUsageSnapshot,
     },
-    usage_poll,
 };
 use gyro_core::provider_runtime::codex_client::{CodexClient, CodexClientOptions};
-#[cfg(target_os = "macos")]
-use gyro_core::{CancellationToken, ExecutionTermination};
 use gyro_core::{SessionStore, UsageTotals};
 use std::{
     collections::{HashMap, HashSet},
-    fs,
-    process::{Command, Stdio},
+    process::Stdio,
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
@@ -67,12 +58,11 @@ pub(crate) async fn get_provider_usage(
 /// Read the plan again because a running turn just touched it, and push the
 /// result to every window.
 ///
-/// Claude Code announces a plan window at the start of each request but never
-/// says how full it is, so the announcement is the cue to ask the account API.
-/// A new request's occupancy is the same cue: the meter moves during the turn,
-/// not only after it. The poll behind `fresh` coalesces bursts, and a second
-/// start inside that minute is skipped, so a tool-heavy turn still costs at
-/// most one account read a minute.
+/// Claude's plan card is whatever Claude Code already emitted in stream-json.
+/// A `rate_limit_event` names the window and its reset, and a used percentage
+/// only when that frame included one. Gyro does not read Claude Code's stored
+/// OAuth token or call the account usage API. The poll behind `fresh` still
+/// coalesces bursts so a tool-heavy turn pushes at most one reading a minute.
 pub(crate) fn publish_live_provider_usage(app: &tauri::AppHandle, provider_id: &str) {
     spawn_provider_usage_refresh(app, provider_id, true);
 }
@@ -91,7 +81,7 @@ pub(crate) fn spawn_provider_usage_refresh(
     provider_id: &str,
     respect_interval: bool,
 ) {
-    if !matches!(provider_id, "anthropic" | "openai" | "xai" | "kimi") {
+    if !matches!(provider_id, "anthropic" | "openai" | "xai") {
         return;
     }
     if !claim_provider_usage_refresh(provider_id, respect_interval) {
@@ -105,6 +95,10 @@ pub(crate) fn spawn_provider_usage_refresh(
         }
     });
 }
+
+/// How long a pushed reading stays fresh. A second start inside this window
+/// is skipped, so a tool-heavy turn still costs at most one push a minute.
+pub(crate) const ANTHROPIC_FRESH_USAGE_MAX_AGE: Duration = Duration::from_secs(60);
 
 pub(crate) fn claim_provider_usage_refresh(provider_id: &str, respect_interval: bool) -> bool {
     let Ok(mut slots) = provider_usage_refresh_slots().lock() else {
@@ -130,26 +124,29 @@ pub(crate) fn provider_usage_refresh_slots() -> &'static Mutex<HashMap<String, I
 ///
 /// 1. **OpenAI / Codex** — live `account/rateLimits/read` (5h + weekly used %).
 /// 2. **xAI / Grok Build** — live `_x.ai/billing` (weekly credit % + reset).
-/// 3. **Anthropic / Claude** — live `/api/oauth/usage` (5h + weekly used %),
-///    falling back to the windows streamed mid-answer, which carry a reset but
-///    no percentage.
-/// 4. **Kimi** — live `GET /coding/v1/usages` with the CLI's OAuth sign-in.
-///    An account outside the Kimi For Coding membership gets nothing back;
-///    that is a reading with no windows, not a failure.
+/// 3. **Anthropic / Claude** — windows Claude Code emitted in stream-json
+///    (`rate_limit_event`): the window, its reset, and a used percentage only
+///    when that frame included one. Gyro does not read Claude Code's OAuth
+///    token, keychain entry, `~/.claude/.credentials.json`, or
+///    `api.anthropic.com/api/oauth/usage`.
+/// 4. **Kimi** — stored windows only. Gyro does not read
+///    `~/.kimi-code/credentials`, refresh a token under the Kimi CLI client
+///    id, or call `/coding/v1/usages`.
 ///
 /// Gemini has no usage source here; use the ledger for spend.
 ///
 /// `fresh` asks for a reading taken within the last few seconds — set after a
-/// turn, whose spend an older cached reading cannot include.
+/// turn, whose spend an older cached reading cannot include. Claude and Kimi
+/// ignore it: there is no account call to refresh.
 pub(crate) fn get_provider_usage_blocking(
     provider_id: &str,
     fresh: bool,
 ) -> Result<ProviderUsageSnapshot, String> {
+    let _ = fresh;
     let live = match provider_id {
         "openai" => fetch_codex_provider_usage(provider_id),
         "xai" => fetch_xai_provider_usage(provider_id),
-        "anthropic" => fetch_anthropic_provider_usage(provider_id, fresh),
-        "kimi" => fetch_kimi_provider_usage(provider_id),
+        "anthropic" => stored_provider_usage(provider_id),
         _ => return stored_provider_usage(provider_id),
     };
     let mut snapshot = match live {
@@ -341,369 +338,6 @@ pub(crate) fn provider_usage_windows_from_xai_billing(
         used_percent: Some(used_percent),
         resets_at,
     }]
-}
-
-/// Where Claude Code keeps the OAuth token Gyro reuses to read plan usage.
-///
-/// The keychain entry is written by `claude login` and refreshed by the CLI on
-/// every run; the file is the same JSON on machines without a keychain.
-pub(crate) const CLAUDE_CREDENTIALS_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
-pub(crate) const CLAUDE_CREDENTIALS_FILE: &str = ".claude/.credentials.json";
-/// The account endpoint behind Claude Code's own `/usage`.
-pub(crate) const ANTHROPIC_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
-
-/// Read the Claude Code OAuth access token this machine already holds.
-///
-/// Gyro never asks for a second login: the plan windows belong to the same
-/// account the chat runs on, so the token the CLI keeps is the one to use.
-pub(crate) fn claude_oauth_access_token() -> Result<String, String> {
-    let raw = claude_credentials_json()
-        .ok_or_else(|| "Sign in to Claude Code to read your plan usage.".to_string())?;
-    claude_oauth_access_token_at(&raw, chrono::Utc::now().timestamp_millis())
-}
-
-/// The same, against a fixed clock.
-pub(crate) fn claude_oauth_access_token_at(raw: &str, now_ms: i64) -> Result<String, String> {
-    let parsed: serde_json::Value =
-        serde_json::from_str(raw).map_err(|_| "Claude Code credentials could not be read.")?;
-    let oauth = parsed.get("claudeAiOauth").unwrap_or(&parsed);
-    // A lapsed token is worth reporting plainly: the CLI mints a new one on its
-    // next run, so the user's fix is to use Claude rather than debug Gyro.
-    //
-    // Which fix, though, depends on the refresh token beside it. While that is
-    // still good, any Claude turn — including one sent from Gyro — refreshes
-    // the access token; once it too has lapsed, nothing short of signing in
-    // again will. Telling the two apart is the difference between "keep
-    // working" and "go log in", so the message says which one this is.
-    let lapsed = |key: &str| {
-        oauth
-            .get(key)
-            .and_then(serde_json::Value::as_i64)
-            .is_some_and(|at| at > 0 && at < now_ms)
-    };
-    if lapsed("expiresAt") {
-        return Err(if lapsed("refreshTokenExpiresAt") {
-            "Claude Code is signed out. Run `claude auth login` to read your plan usage.".into()
-        } else {
-            "Claude Code's token has lapsed. Send a Claude message to refresh it.".to_string()
-        });
-    }
-    oauth
-        .get("accessToken")
-        .and_then(serde_json::Value::as_str)
-        .filter(|token| !token.trim().is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| "Claude Code credentials do not include an access token.".to_string())
-}
-
-pub(crate) fn claude_credentials_json() -> Option<String> {
-    #[cfg(target_os = "macos")]
-    {
-        let mut command = Command::new("security");
-        command.args([
-            "find-generic-password",
-            "-s",
-            CLAUDE_CREDENTIALS_KEYCHAIN_SERVICE,
-            "-w",
-        ]);
-        // Bounded: the usage poll holds its lock across this read, and an
-        // unanswered Keychain prompt must not wedge every later poll.
-        let timeout = Duration::from_secs(30);
-        let cancel = CancellationToken::default();
-        if let Ok(output) =
-            run_bounded_command_with_cancellation(&command, timeout, None, 64 * 1024, 4096, cancel)
-        {
-            if matches!(
-                output.termination,
-                ExecutionTermination::Exited { code: Some(0) }
-            ) {
-                let raw = output.stdout.trim().to_string();
-                if !raw.is_empty() {
-                    return Some(raw);
-                }
-            }
-        }
-    }
-    let path = user_home_directory().ok()?.join(CLAUDE_CREDENTIALS_FILE);
-    fs::read_to_string(path).ok()
-}
-
-/// Post-turn reads accept a minute-old reading; idle ones hold five. The account
-/// endpoint allows few requests per account, and a 45-second poll locked it out.
-pub(crate) const ANTHROPIC_FRESH_USAGE_MAX_AGE: Duration = Duration::from_secs(60);
-pub(crate) const ANTHROPIC_USAGE_HOLD: Duration = Duration::from_secs(300);
-
-/// Ask the Anthropic account API what the plan windows are actually at.
-///
-/// The chat stream is not a source for this: Claude Code's `rate_limit_event`
-/// names the window and its reset but carries no utilization, which is why the
-/// composer sat on two em dashes. `/api/oauth/usage` is the same endpoint the
-/// CLI's own `/usage` reads, and it answers with a percentage per window.
-pub(crate) fn fetch_anthropic_provider_usage(
-    provider_id: &str,
-    fresh: bool,
-) -> Result<ProviderUsageSnapshot, String> {
-    static POLL: OnceLock<Mutex<usage_poll::UsagePoll<ProviderUsageSnapshot>>> = OnceLock::new();
-    let mut poll = POLL
-        .get_or_init(|| {
-            Mutex::new(
-                usage_poll::UsagePoll::holding(ANTHROPIC_USAGE_HOLD).holding_partial_for(
-                    ANTHROPIC_FRESH_USAGE_MAX_AGE,
-                    anthropic_usage_has_unmeasured_window,
-                ),
-            )
-        })
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let max_age = fresh.then_some(ANTHROPIC_FRESH_USAGE_MAX_AGE);
-    poll.read_within(
-        Instant::now(),
-        max_age,
-        |cooldown| match fetch_anthropic_provider_usage_once(provider_id, cooldown) {
-            Err(error) if anthropic_usage_needs_cli_refresh(&error) => {
-                refresh_anthropic_usage_through_cli(provider_id, cooldown, error)
-            }
-            other => other,
-        },
-    )
-}
-
-/// A reading that names a plan window without a level for it.
-///
-/// The 5-hour window is reported before the account has measured it, both while
-/// idle and in the first moments after the next message opens it. Such a reading
-/// is asked again after a minute rather than held for five, so the level shows
-/// up as soon as the account has one. A window whose reset has passed since the
-/// reading counts too: its level describes an allowance that no longer exists.
-pub(crate) fn anthropic_usage_has_unmeasured_window(snapshot: &ProviderUsageSnapshot) -> bool {
-    anthropic_usage_has_unmeasured_window_at(snapshot, chrono::Utc::now())
-}
-
-/// The same, against a fixed clock.
-pub(crate) fn anthropic_usage_has_unmeasured_window_at(
-    snapshot: &ProviderUsageSnapshot,
-    now: chrono::DateTime<chrono::Utc>,
-) -> bool {
-    snapshot.windows.iter().any(|window| {
-        let unmeasured = window.used_percent.is_none() && window.status != "exhausted";
-        let rolled_over = window
-            .resets_at
-            .as_deref()
-            .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
-            .is_some_and(|at| at <= now);
-        unmeasured || rolled_over
-    })
-}
-
-/// A lapsed or refused token is one only the CLI can renew. A rate limit or an
-/// outage is not, and asking the CLI then would only repeat the same request.
-pub(crate) fn anthropic_usage_needs_cli_refresh(error: &str) -> bool {
-    error.starts_with("Claude Code's token has lapsed")
-        || error.starts_with("Claude Code sign-in was rejected")
-}
-
-/// Let `claude -p /usage` renew the token, then read the account again.
-///
-/// The command makes no model request, so it costs nothing against the plan.
-/// When the endpoint still refuses, the levels the command printed are a live
-/// reading in their own right.
-pub(crate) fn refresh_anthropic_usage_through_cli(
-    provider_id: &str,
-    cooldown: &mut Duration,
-    original: String,
-) -> Result<ProviderUsageSnapshot, String> {
-    let cli_windows = match claude_usage_cli::read_claude_usage_via_cli() {
-        Ok(windows) => windows,
-        Err(cli_error) => {
-            eprintln!("Claude usage through the CLI failed: {cli_error}");
-            return Err(original);
-        }
-    };
-    fetch_anthropic_provider_usage_once(provider_id, cooldown).or_else(|_| {
-        Ok(ProviderUsageSnapshot {
-            stale: false,
-            error: None,
-            provider_id: provider_id.into(),
-            windows: cli_windows,
-            fetched_at: chrono::Utc::now().to_rfc3339(),
-        })
-    })
-}
-
-pub(crate) fn fetch_anthropic_provider_usage_once(
-    provider_id: &str,
-    cooldown: &mut Duration,
-) -> Result<ProviderUsageSnapshot, String> {
-    let token = claude_oauth_access_token()?;
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(5))
-        .timeout_read(Duration::from_secs(10))
-        .build();
-    let response = agent
-        .get(ANTHROPIC_USAGE_URL)
-        .set("Authorization", &format!("Bearer {token}"))
-        .set("anthropic-beta", "oauth-2025-04-20")
-        .set("Content-Type", "application/json")
-        .call()
-        .map_err(|error| match error {
-            ureq::Error::Status(401 | 403, _) => {
-                // The stored token had not lapsed by its own clock, so a refusal
-                // here means it is no longer a valid sign-in — revoked, or from
-                // an account that has since signed out. Another Claude turn will
-                // not mint a good one; only signing in again will.
-                "Claude Code sign-in was rejected. Run `claude auth login` to read your plan usage."
-                    .to_string()
-            }
-            ureq::Error::Status(429, response) => {
-                if let Some(retry) = usage_poll::retry_after(response.header("Retry-After"), chrono::Utc::now()) {
-                    *cooldown = (*cooldown).max(retry);
-                }
-                format!("Claude usage checks are temporarily rate-limited. Gyro will retry automatically after {} seconds.", cooldown.as_secs())
-            }
-            ureq::Error::Status(status, _) => {
-                format!("Anthropic usage request failed (HTTP {status}).")
-            }
-            ureq::Error::Transport(_) => {
-                "Anthropic usage is unreachable right now (offline?).".to_string()
-            }
-        })?;
-    let payload: serde_json::Value = response
-        .into_json()
-        .map_err(|_| "Anthropic usage response could not be read.".to_string())?;
-    let windows = provider_usage_windows_from_anthropic_usage(&payload);
-    if windows.is_empty() {
-        return Err("Anthropic reported no plan usage window for this account.".into());
-    }
-    Ok(ProviderUsageSnapshot {
-        stale: false,
-        error: None,
-        provider_id: provider_id.into(),
-        windows,
-        fetched_at: chrono::Utc::now().to_rfc3339(),
-    })
-}
-
-/// Map the account payload onto Gyro plan windows.
-///
-/// Every window is optional and a plan only carries the ones it meters, so an
-/// absent key is left out rather than rendered as an empty bar. Model-scoped
-/// weekly limits (Opus, Sonnet) only appear on plans that have them.
-pub(crate) fn provider_usage_windows_from_anthropic_usage(
-    payload: &serde_json::Value,
-) -> Vec<ProviderRateLimitWindow> {
-    let mut windows = anthropic_usage_windows_by_key(payload);
-    // Accounts can return both shapes with only some keyed windows populated.
-    // Resolve each window independently so a measured weekly key cannot hide
-    // a measured session limit in the list.
-    for incoming in anthropic_usage_windows_from_limits(payload) {
-        if let Some(existing) = windows.iter_mut().find(|window| window.id == incoming.id) {
-            if existing.used_percent.is_none() {
-                *existing = incoming;
-            }
-        } else {
-            windows.push(incoming);
-        }
-    }
-    windows
-}
-
-/// The long-standing shape: one object per window, keyed by its name.
-pub(crate) fn anthropic_usage_windows_by_key(
-    payload: &serde_json::Value,
-) -> Vec<ProviderRateLimitWindow> {
-    let mut windows: Vec<ProviderRateLimitWindow> = [
-        ("five_hour", "five-hour", "5-hour limit"),
-        ("seven_day", "weekly", "Weekly limit"),
-        ("seven_day_opus", "weekly-opus", "Weekly · Opus"),
-        ("seven_day_sonnet", "weekly-sonnet", "Weekly · Sonnet"),
-    ]
-    .into_iter()
-    .filter_map(|(key, id, label)| {
-        let window = payload.get(key)?;
-        let used_percent = window
-            .get("utilization")
-            .and_then(serde_json::Value::as_f64)
-            .map(|value| value.round().clamp(0.0, 100.0) as i32)?;
-        let status = match used_percent {
-            100 => "exhausted",
-            80..=99 => "warning",
-            _ => "ok",
-        };
-        Some(ProviderRateLimitWindow {
-            id: id.into(),
-            label: label.into(),
-            status: status.into(),
-            used_percent: Some(used_percent),
-            resets_at: window
-                .get("resets_at")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string),
-        })
-    })
-    .collect();
-    // The 5-hour session only opens with the first message after the last one
-    // closed, and until then the account reports it as null. Beside a measured
-    // week that null is still a window the plan meters. Leaving it out made the
-    // row vanish whenever Claude sat idle. It is not a measurement of zero:
-    // the level stays absent until the account reports a utilization.
-    let session_idle = payload.get("five_hour").is_some_and(|window| {
-        window.is_null()
-            || window
-                .get("utilization")
-                .and_then(serde_json::Value::as_f64)
-                .is_none()
-    });
-    if session_idle && windows.iter().any(|window| window.id == "weekly") {
-        windows.insert(
-            0,
-            ProviderRateLimitWindow {
-                id: "five-hour".into(),
-                label: "5-hour limit".into(),
-                status: "ok".into(),
-                used_percent: None,
-                resets_at: None,
-            },
-        );
-    }
-    windows
-}
-
-/// The newer `limits` list the same response also carries.
-///
-/// Only read when the keyed windows are missing, so a response that drops the
-/// old keys still yields a reading instead of "no plan usage window".
-pub(crate) fn anthropic_usage_windows_from_limits(
-    payload: &serde_json::Value,
-) -> Vec<ProviderRateLimitWindow> {
-    let Some(limits) = payload.get("limits").and_then(serde_json::Value::as_array) else {
-        return Vec::new();
-    };
-    limits
-        .iter()
-        .filter_map(|limit| {
-            let (id, label) = match limit.get("kind").and_then(serde_json::Value::as_str)? {
-                "session" => ("five-hour", "5-hour limit"),
-                "weekly_all" => ("weekly", "Weekly limit"),
-                "weekly_opus" => ("weekly-opus", "Weekly · Opus"),
-                "weekly_sonnet" => ("weekly-sonnet", "Weekly · Sonnet"),
-                _ => return None,
-            };
-            let used_percent = limit
-                .get("percent")
-                .and_then(serde_json::Value::as_f64)
-                .map(|value| value.round().clamp(0.0, 100.0) as i32)?;
-            Some(ProviderRateLimitWindow {
-                id: id.into(),
-                label: label.into(),
-                status: plan_window_status(used_percent).into(),
-                used_percent: Some(used_percent),
-                resets_at: limit
-                    .get("resets_at")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string),
-            })
-        })
-        .collect()
 }
 
 /// Replay a provider's last known windows, expired ones already dropped.

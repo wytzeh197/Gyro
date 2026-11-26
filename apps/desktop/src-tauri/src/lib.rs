@@ -38,7 +38,6 @@ mod capability_inspection;
 mod capability_output_budget;
 mod capability_workspace_helpers;
 mod chat_permissions;
-mod claude_usage_cli;
 mod cloud_connection;
 mod cloud_v3;
 mod code_mode;
@@ -61,7 +60,6 @@ mod goal_runner;
 #[cfg(test)]
 mod gyro_cloud;
 mod ide_evidence;
-mod kimi_usage;
 mod launch_integrity;
 mod live_model_context;
 mod local_check;

@@ -31,7 +31,8 @@ export function applyGoogleModelDiscovery(
           !id ||
           id.length > 200 ||
           /[\u0000-\u001f\u007f]/.test(id) ||
-          ids.has(id)
+          ids.has(id) ||
+          !isAntigravityGeminiModel(id)
         )
           continue;
         ids.add(id);
@@ -60,6 +61,17 @@ export function applyGoogleModelDiscovery(
       };
     }),
   };
+}
+
+/** Gemini ids only. Antigravity also lists Claude and GPT models; Gyro does not run those. */
+function isAntigravityGeminiModel(id: string): boolean {
+  const leaf = id.trim().split(/[/:]/).pop()?.trim().toLowerCase() ?? "";
+  return (
+    (leaf === "gemini" || leaf.startsWith("gemini-")) &&
+    !leaf.endsWith("-default") &&
+    !leaf.includes("claude") &&
+    !leaf.startsWith("gpt")
+  );
 }
 
 /** The agent's own label wins; a bare id (no label sent) gets Antigravity's name. */

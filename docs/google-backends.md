@@ -32,54 +32,26 @@ answers "installed?" and "signed in?" together.
 
 ## Execution
 
-One `agy` process per turn, in the CLI's headless ("print") mode:
+One `agy` process per turn, as Google's official ACP server, with no extra flags:
 
 ```
-agy -p <prompt> --output-format stream-json [--model <id>] [--effort <level>]
-    [--sandbox --mode accept-edits | --dangerously-skip-permissions]
-    [--conversation <id>]
+agy acp
 ```
 
-The stream is line-delimited JSON (`crates/gyro-core/src/antigravity_cli.rs`
-owns the contract):
-
-```
-{"event":"step_update","step_update":{"conversation_id":"…","step_type":"agent_response","text_delta":"Hel"}}
-{"event":"result","result":{"conversation_id":"…","status":"SUCCESS","response":"Hello\n",
- "usage":{"input_tokens":…,"output_tokens":…,"thinking_tokens":…,"cache_read_tokens":…,"total_tokens":…}}}
-```
-
-`step_update` frames drive the streaming text; the `result` frame is the answer
-backstop, the failure detail, the token counts, and the `conversation_id` the
-next turn resumes with `--conversation`. A stopped or failed turn still records
-that cursor, so the user's next message continues the same Antigravity thread.
-
-`--effort` is forwarded only for values the CLI documents (`low`, `medium`,
-`high`, `xhigh`, `max`); an unknown level is dropped rather than sent, because a
-rejected flag costs the whole turn.
+Gyro does not wrap `agy -p` or pass `--sandbox`, `--mode`, or
+`--dangerously-skip-permissions`. The prompt goes over the ACP session. Only
+Gemini model ids are sent. Claude, GPT, orchestrator modes, and the
+"Automatic" default are refused before the process starts.
 
 ## Approvals
 
-A headless `agy` run has no channel for a per-call approval dialog, so the
-provider descriptor reports `supports_approvals: false` and Gyro maps its own
-posture onto the CLI's launch flags instead:
-
-| Gyro posture | `agy` flags |
-| --- | --- |
-| Full Access (no command or edit approval required) | `--dangerously-skip-permissions` |
-| Plan mode / approval-gated | `--sandbox --mode accept-edits` |
-
-Every non-full-access run keeps Google's sandbox on, which is the containment
-the CLI offers without a dialog. Users who need a click-through approval should
-choose a provider whose CLI exposes a permission channel (Claude Code, Codex).
+The provider descriptor still reports `supports_approvals: false`. Permission
+requests that `agy acp` sends are answered by the shared ACP runner.
 
 ## Models and usage
 
-The model menu is the CLI's own inventory (`agy models`), not a hardcoded list,
-so an enterprise or plan-specific catalog appears without a Gyro release. The
-`antigravity-default` model id means "send no `--model`" and keeps the CLI's
-current default. Token counts come from the `result` frame of each run; plan
-windows (`supports_usage`) are not scraped yet.
+The model menu keeps Gemini ids from `agy models`. Non-Gemini ids are dropped.
+Plan windows (`supports_usage`) are not scraped.
 
 ## Verification
 

@@ -46,13 +46,12 @@ pub enum PromptDelivery {
     TrailingPositional,
     /// The prompt is sent over a stdio protocol after the process starts, so it
     /// never passes through argument parsing.
+    ///
+    /// Antigravity uses this form: Gyro launches unmodified `agy acp` and sends
+    /// the prompt on the ACP session, not as `agy -p`.
     Protocol,
     /// The prompt is the value of a dedicated flag, which must be the last pair
     /// on the command line.
-    ///
-    /// Google's Antigravity CLI takes its headless prompt as `-p <prompt>` and
-    /// offers no positional prompt, so the contract is that the flag and its
-    /// value close the vector.
     PromptFlag(&'static str),
 }
 
@@ -94,7 +93,7 @@ const CONTRACTS: &[ProviderCliContract] = &[
     ProviderCliContract {
         provider_id: "antigravity",
         program: "agy",
-        prompt_delivery: PromptDelivery::PromptFlag("-p"),
+        prompt_delivery: PromptDelivery::Protocol,
     },
     ProviderCliContract {
         provider_id: "cursor",

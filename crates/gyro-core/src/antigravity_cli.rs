@@ -1,11 +1,9 @@
-//! Contract for Google's official Antigravity CLI (`agy`).
+//! Parsers for Google's official Antigravity CLI (`agy`).
 //!
-//! Antigravity reaches Gyro through Google's first-party CLI rather than a
-//! separately provisioned ACP bridge. The CLI is installed by Google's own
-//! installer (`curl -fsSL https://antigravity.google/cli/install.sh | bash`,
-//! binary at `~/.local/bin/agy`), signs in once with a Google account and
-//! shares that credential across Antigravity surfaces, and in headless
-//! ("print") mode writes one JSON frame per line on stdout.
+//! Gyro launches Antigravity as the unmodified ACP server `agy acp`, limited
+//! to Gemini models. It does not wrap `agy -p`. The CLI can still emit the
+//! documented print-mode frames below; these parsers recognize them when a
+//! process writes them.
 //!
 //! The frame shapes below are the documented ones:
 //!
@@ -17,18 +15,10 @@
 //!   "thinking_tokens":…,"cache_read_tokens":…,"total_tokens":…}}}
 //! ```
 //!
-//! Headless runs cannot answer an interactive approval prompt, so Gyro maps its
-//! own approval posture onto the CLI's documented launch flags
-//! (`--sandbox`, `--mode`, `--dangerously-skip-permissions`) instead of
-//! expecting a per-call dialog.
-
 use serde_json::Value;
 
 /// Executable Gyro launches, resolved through the GUI PATH at spawn time.
 pub const PROGRAM: &str = "agy";
-
-/// Where the CLI keeps its settings and signed-in account.
-pub const CONFIG_DIR: &str = ".gemini/antigravity-cli";
 
 /// Shown when the CLI is installed but has no signed-in Google account.
 pub const SIGN_IN_HINT: &str =
@@ -36,103 +26,6 @@ pub const SIGN_IN_HINT: &str =
 
 /// What the CLI prints when it has no usable credential.
 pub const SIGN_IN_MARKER: &str = "Please sign in";
-
-/// Model id used when the user has not picked one. `--model` is omitted so the
-/// CLI keeps its own default, which tracks the plan's current model.
-pub const DEFAULT_MODEL: &str = "antigravity-default";
-
-/// `--effort` values the CLI accepts, in ascending order.
-pub const EFFORT_LEVELS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
-
-/// The CLI's own autonomy levels (`--mode`).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AntigravityMode {
-    /// Read-only: plans and explains without touching the workspace.
-    Plan,
-    /// Edits are accepted; shell work stays inside the sandbox.
-    AcceptEdits,
-    /// Everything is accepted without asking.
-    Auto,
-}
-
-impl AntigravityMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Plan => "plan",
-            Self::AcceptEdits => "accept-edits",
-            Self::Auto => "auto",
-        }
-    }
-}
-
-/// Translate Gyro's approval posture into the CLI's launch flags.
-///
-/// A headless run has no channel for a per-call approval prompt, so Gyro cannot
-/// forward an "ask me first" dialog. Full Access maps to the CLI's documented
-/// `--dangerously-skip-permissions`. Every other posture keeps Google's sandbox
-/// on, which is the containment the CLI offers without a dialog.
-pub fn posture_flags(full_access: bool, mode: AntigravityMode) -> Vec<String> {
-    if full_access && mode != AntigravityMode::Plan {
-        return vec!["--dangerously-skip-permissions".into()];
-    }
-    vec!["--sandbox".into(), "--mode".into(), mode.as_str().into()]
-}
-
-/// Headless tools cannot ask Gyro for permission. Keep advisory turns and any
-/// ask-first posture read-only instead of silently accepting edits.
-pub fn execution_mode(advisory: bool, ask_commands: bool, ask_edits: bool) -> AntigravityMode {
-    if advisory || ask_commands || ask_edits {
-        AntigravityMode::Plan
-    } else {
-        AntigravityMode::AcceptEdits
-    }
-}
-
-/// Normalize a requested effort to a value the CLI accepts.
-///
-/// Unknown levels are dropped rather than forwarded: `agy` rejects an
-/// out-of-range `--effort`, and a rejected flag costs the whole turn.
-pub fn effort_arg(reasoning_effort: Option<&str>) -> Option<&'static str> {
-    let requested = reasoning_effort.map(str::trim)?.to_ascii_lowercase();
-    EFFORT_LEVELS
-        .iter()
-        .copied()
-        .find(|level| *level == requested)
-}
-
-/// Arguments for one headless turn.
-///
-/// The prompt is the value of `-p` and always the final argument, which is what
-/// [`crate::provider_contract::audit_provider_args`] checks for.
-pub fn chat_args(
-    model_id: Option<&str>,
-    reasoning_effort: Option<&str>,
-    mode: AntigravityMode,
-    full_access: bool,
-    conversation_id: Option<&str>,
-    prompt: &str,
-) -> Vec<String> {
-    let mut args = vec!["--output-format".to_string(), "stream-json".to_string()];
-    if let Some(model) = model_id
-        .map(str::trim)
-        .filter(|model| !model.is_empty() && *model != DEFAULT_MODEL)
-    {
-        args.push("--model".into());
-        args.push(model.into());
-    }
-    if let Some(effort) = effort_arg(reasoning_effort) {
-        args.push("--effort".into());
-        args.push(effort.into());
-    }
-    args.extend(posture_flags(full_access, mode));
-    if let Some(conversation_id) = conversation_id.map(str::trim).filter(|id| !id.is_empty()) {
-        args.push("--conversation".into());
-        args.push(conversation_id.into());
-    }
-    args.push("-p".into());
-    args.push(prompt.into());
-    args
-}
 
 /// The payload of an `event`-keyed frame, if this frame is one.
 ///
@@ -338,27 +231,6 @@ mod tests {
     }
 
     #[test]
-    fn ask_first_and_advisory_turns_never_enable_automatic_edits() {
-        for (advisory, commands, edits) in [
-            (true, false, false),
-            (false, true, false),
-            (false, false, true),
-        ] {
-            let mode = execution_mode(advisory, commands, edits);
-            assert_eq!(mode, AntigravityMode::Plan);
-            let args = chat_args(None, None, mode, true, None, "review");
-            assert!(args.windows(2).any(|pair| pair == ["--mode", "plan"]));
-            assert!(!args
-                .iter()
-                .any(|arg| arg == "--dangerously-skip-permissions"));
-        }
-        assert_eq!(
-            execution_mode(false, false, false),
-            AntigravityMode::AcceptEdits
-        );
-    }
-
-    #[test]
     fn reads_top_level_init_conversation_and_headless_auth_error() {
         assert_eq!(
             conversation_id(
@@ -470,76 +342,17 @@ mod tests {
     }
 
     #[test]
-    fn chat_args_end_with_the_prompt() {
-        let args = chat_args(
-            Some("gemini-3.7-flash"),
-            Some("high"),
-            AntigravityMode::AcceptEdits,
-            false,
-            Some("conversation-1"),
-            "say hi",
-        );
-        assert_eq!(args.last().map(String::as_str), Some("say hi"));
-        assert_eq!(args[args.len() - 2], "-p");
-        assert!(args
-            .windows(2)
-            .any(|pair| pair == ["--model", "gemini-3.7-flash"]));
-        assert!(args
-            .windows(2)
-            .any(|pair| pair == ["--mode", "accept-edits"]));
-        assert!(args
-            .windows(2)
-            .any(|pair| pair == ["--conversation", "conversation-1"]));
-        assert!(args.iter().any(|arg| arg == "--sandbox"));
-        assert!(!args
-            .iter()
-            .any(|arg| arg == "--dangerously-skip-permissions"));
-    }
-
-    #[test]
-    fn full_access_skips_gyro_side_containment() {
-        let args = chat_args(None, None, AntigravityMode::Auto, true, None, "hi");
-        assert!(args
-            .iter()
-            .any(|arg| arg == "--dangerously-skip-permissions"));
-        assert!(!args.iter().any(|arg| arg == "--sandbox"));
-        // The CLI's own default model is not spelled out.
-        assert!(!args.iter().any(|arg| arg == "--model"));
-    }
-
-    #[test]
-    fn unknown_effort_is_dropped_instead_of_rejected() {
-        assert_eq!(effort_arg(Some("turbo")), None);
-        assert_eq!(effort_arg(Some("HIGH")), Some("high"));
-        let args = chat_args(
-            None,
-            Some("turbo"),
-            AntigravityMode::Plan,
-            false,
-            None,
-            "hi",
-        );
-        assert!(!args.iter().any(|arg| arg == "--effort"));
-    }
-
-    #[test]
-    fn argument_vectors_satisfy_the_spawn_contract() {
+    fn launch_contract_is_the_acp_protocol_not_print_mode() {
         let contract = crate::provider_contract::provider_cli_contract("antigravity")
             .expect("antigravity contract");
         assert_eq!(contract.program, PROGRAM);
-
-        let args = chat_args(None, None, AntigravityMode::Plan, false, None, "hi");
-        crate::provider_contract::audit_provider_args(contract, &args).expect("audited vector");
-
-        // A prompt with nothing after it, and one displaced by a later flag, are
-        // the two shapes the contract exists to reject.
         assert_eq!(
-            crate::provider_contract::audit_provider_args(contract, &["-p", ""]),
-            Err(crate::provider_contract::ArgContractViolation::MissingPrompt)
+            contract.prompt_delivery,
+            crate::provider_contract::PromptDelivery::Protocol
         );
-        assert_eq!(
-            crate::provider_contract::audit_provider_args(contract, &["-p", "hi", "--sandbox"]),
-            Err(crate::provider_contract::ArgContractViolation::UnterminatedPrompt)
-        );
+        let runtime = crate::provider_runtime::runners::kimi_acp::acp_provider_runtime("antigravity")
+            .expect("agy acp");
+        assert_eq!(runtime.program, PROGRAM);
+        assert_eq!(runtime.args, &["acp"]);
     }
 }

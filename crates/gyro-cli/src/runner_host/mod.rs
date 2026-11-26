@@ -593,12 +593,8 @@ impl RunnerHost for CliRunnerHost {
                 claude.interrupt();
             }
             claude.tokens()
-        } else if request.provider_id == "antigravity" {
-            gyro_core::provider_runtime::runners::antigravity::antigravity_accounted_usage(
-                &outcome.stdout,
-                self.resumed,
-            )
         } else {
+            // Antigravity usage comes from the ACP runner, not print-mode frames.
             None
         };
         if let Some(tokens) = tokens {

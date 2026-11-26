@@ -177,6 +177,15 @@ pub fn acp_provider_runtime(provider_id: &str) -> Option<AcpProviderRuntime> {
             program: "opencode",
             runner: "opencode-acp",
         }),
+        "antigravity" => Some(AcpProviderRuntime {
+            label: "Google Antigravity",
+            program: "agy",
+            args: &["acp"],
+            auth_methods: &[],
+            cursor_kind: "antigravity-acp-session",
+            default_model: "gemini-default",
+            runner: "agy-acp",
+        }),
         _ => None,
     }
 }

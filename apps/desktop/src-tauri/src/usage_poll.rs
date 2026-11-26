@@ -119,8 +119,8 @@ mod tests {
     use crate::{
         providers::stdout::claude_rate_limit_used_percent,
         usage::{
-            fetch::{provider_usage_windows_from_anthropic_usage, usage_refresh_fallback},
-            types::ProviderUsageSnapshot,
+            fetch::usage_refresh_fallback,
+            types::{ProviderRateLimitWindow, ProviderUsageSnapshot},
         },
     };
 
@@ -279,9 +279,13 @@ mod tests {
     fn failed_usage_refresh_keeps_cache_age_and_exposes_the_error() {
         let cached = ProviderUsageSnapshot {
             provider_id: "anthropic".into(),
-            windows: provider_usage_windows_from_anthropic_usage(&serde_json::json!({
-                "five_hour": {"utilization": 93}
-            })),
+            windows: vec![ProviderRateLimitWindow {
+                id: "five-hour".into(),
+                label: "5-hour limit".into(),
+                status: "warning".into(),
+                used_percent: Some(93),
+                resets_at: None,
+            }],
             fetched_at: "2026-09-12T13:00:00Z".into(),
             stale: false,
             error: None,
@@ -301,55 +305,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn mixed_anthropic_formats_fill_each_missing_window_without_overwriting_measured_keys() {
-        let windows = provider_usage_windows_from_anthropic_usage(&serde_json::json!({
-            "five_hour": null,
-            "seven_day": {"utilization": 52},
-            "limits": [
-                {"kind": "session", "percent": 8, "resets_at": "2026-11-01T15:00:00Z"},
-                {"kind": "weekly_all", "percent": 91},
-                {"kind": "weekly_opus", "percent": 12}
-            ]
-        }));
-        assert_eq!(windows.len(), 3);
-        assert_eq!(windows[0].id, "five-hour");
-        assert_eq!(windows[0].used_percent, Some(8));
-        assert_eq!(
-            windows[0].resets_at.as_deref(),
-            Some("2026-11-01T15:00:00Z")
-        );
-        assert_eq!(windows[1].used_percent, Some(52));
-        assert_eq!(windows[2].id, "weekly-opus");
-    }
-
-    #[test]
-    fn the_limits_list_answers_when_the_keyed_windows_are_gone() {
-        let windows = provider_usage_windows_from_anthropic_usage(&serde_json::json!({
-            "five_hour": null,
-            "seven_day": null,
-            "limits": [
-                {"kind": "session", "percent": 8, "resets_at": "2026-09-23T13:59:59Z"},
-                {"kind": "weekly_all", "percent": 84, "resets_at": "2026-09-27T16:59:59Z"},
-                {"kind": "something_new", "percent": 3}
-            ]
-        }));
-        let summary: Vec<_> = windows
-            .iter()
-            .map(|window| {
-                (
-                    window.id.as_str(),
-                    window.used_percent,
-                    window.status.as_str(),
-                )
-            })
-            .collect();
-        assert_eq!(
-            summary,
-            vec![
-                ("five-hour", Some(8), "ok"),
-                ("weekly", Some(84), "warning")
-            ]
-        );
-    }
 }

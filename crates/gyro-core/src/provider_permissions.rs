@@ -127,10 +127,10 @@ pub fn grok_session_meta(posture: ApprovalPosture) -> Option<Value> {
 
 /// Argv for an ACP CLI, including its subcommand, for the saved choice.
 ///
-/// `None` means this id is not an ACP CLI Gyro knows how to switch.
-/// Antigravity no longer runs an ACP server: its official CLI takes the posture
-/// as ordinary launch flags (`--sandbox`, `--mode`,
-/// `--dangerously-skip-permissions`), so it has no ACP argv here.
+/// `None` means this id is not an ACP CLI Gyro knows how to switch, or that
+/// the official argv must stay unmodified.
+/// Antigravity is `agy acp` with no print-mode or posture flags. The runner
+/// uses the identity's default args when this returns `None`.
 /// OpenCode uses a per-process Gyro agent whose rules follow the posture; it
 /// has no native bypass flag.
 pub fn acp_permission_args(

@@ -209,37 +209,6 @@ fn desktop_claude_permission_child_forwards_tool_context_to_the_app() {
     server.join().unwrap();
 }
 
-#[test]
-fn a_lapsed_claude_token_names_the_fix_its_refresh_token_still_allows() {
-    let now = 1_000_000_000_000i64;
-    let credentials = |expires: i64, refresh_expires: i64| {
-        serde_json::json!({
-            "claudeAiOauth": {
-                "accessToken": "token-value",
-                "expiresAt": expires,
-                "refreshTokenExpiresAt": refresh_expires,
-            }
-        })
-        .to_string()
-    };
-
-    assert_eq!(
-        claude_oauth_access_token_at(&credentials(now + 1, now + 2), now).unwrap(),
-        "token-value"
-    );
-    // The access token lapsed but the refresh token has not: using Claude
-    // at all is enough, and Gyro should not send the user to a login page.
-    assert_eq!(
-        claude_oauth_access_token_at(&credentials(now - 1, now + 2), now).unwrap_err(),
-        "Claude Code's token has lapsed. Send a Claude message to refresh it."
-    );
-    // Both lapsed, so nothing short of signing in again will help.
-    assert_eq!(
-        claude_oauth_access_token_at(&credentials(now - 2, now - 1), now).unwrap_err(),
-        "Claude Code is signed out. Run `claude auth login` to read your plan usage."
-    );
-}
-
 /// Claude runs load every Gyro tool up front (`ENABLE_TOOL_SEARCH=false`),
 /// so the advertised list is paid on each fresh session. Measured at
 /// ~38 KB (~9.5K tokens) for Normal mode; growth past this budget should be
@@ -439,29 +408,6 @@ fn claude_overage_counts_the_plan_limit_as_spent() {
     }))
     .unwrap();
     assert_eq!(allowed_on_overage.status, "exhausted");
-}
-
-/// An idle account has no open session, so `five_hour` comes back null.
-/// The plan still meters one. The level is absent until a later reading
-/// names a utilization; inventing zero would show a full allowance.
-#[test]
-fn anthropic_idle_session_keeps_an_unmeasured_five_hour_window() {
-    let windows = provider_usage_windows_from_anthropic_usage(&serde_json::json!({
-        "five_hour": serde_json::Value::Null,
-        "seven_day": {
-            "utilization": 3.0,
-            "resets_at": "2026-11-01T16:59:59.259573+00:00"
-        },
-        "seven_day_opus": serde_json::Value::Null
-    }));
-    assert_eq!(
-        windows
-            .iter()
-            .map(|window| (window.id.as_str(), window.used_percent))
-            .collect::<Vec<_>>(),
-        vec![("five-hour", None), ("weekly", Some(3))]
-    );
-    assert!(windows[0].resets_at.is_none());
 }
 
 #[test]

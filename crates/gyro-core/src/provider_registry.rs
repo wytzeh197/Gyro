@@ -17,7 +17,7 @@ pub enum ProviderExecutionKind {
     ClaudeCode,
     KimiAcp,
     AcpCli,
-    /// Google Antigravity's official CLI (`agy`) in headless print mode.
+    /// Google Antigravity's official CLI (`agy acp`), Gemini models only.
     AntigravityCli,
     OllamaApi,
     OpenAiCompatibleApi,
@@ -95,8 +95,9 @@ const PROVIDERS: &[ProviderDescriptor] = &[
         supports_approvals: true,
         supports_images: true,
         supports_resume: true,
-        // Usage windows scraped live from `kimi acp` `/usage`.
-        supports_usage: true,
+        // Plan limits are not read from the Kimi CLI credential file or
+        // `/coding/v1/usages`. The card stays off until a turn records windows.
+        supports_usage: false,
         support_tier: ProviderSupportTier::Supported,
     },
     ProviderDescriptor {
@@ -126,8 +127,8 @@ const PROVIDERS: &[ProviderDescriptor] = &[
     },
     ProviderDescriptor {
         id: "antigravity",
-        // Google's official CLI (`agy`) in headless stream-json mode. Its own
-        // Google sign-in replaces the former ACP bridge and Gemini API key.
+        // Official unmodified `agy acp`, limited to Gemini models. Gyro does
+        // not wrap `agy -p`.
         execution_kind: ProviderExecutionKind::AntigravityCli,
         health_kind: ProviderHealthKind::AntigravityCli,
         runner: "agy",
@@ -321,7 +322,8 @@ mod tests {
         assert_eq!(antigravity.runner, "agy");
         assert_eq!(antigravity.support_tier, ProviderSupportTier::Supported);
         assert!(!antigravity.supports_images && antigravity.supports_resume);
-        // A headless `agy` run has no channel for an approval dialog.
+        // Approval cards are not advertised. The ACP runner still answers
+        // permission requests the official `agy acp` server sends.
         assert!(!antigravity.supports_approvals);
         // Tokens are accounted per run; no plan window is scraped.
         assert!(!antigravity.supports_usage);
