@@ -149,7 +149,7 @@ const helpArticleGroups: { label: string; articles: HelpArticle[] }[] = [
       {
         title: "How do I report a problem?",
         answer:
-          "Search existing issues first. Include your Gyro version, macOS version, and steps to reproduce the problem. Export diagnostics from Settings → Data & privacy and review them before sharing; never include credentials or private project content. Gyro is alpha software with community support.",
+          "Search existing issues first. Include your Gyro version, macOS version, and steps to reproduce the problem. Export diagnostics from Settings → Data & privacy and review them before sharing; never include credentials or private project content. Gyro is beta software with community support.",
         section: "advanced",
       },
       {
@@ -310,7 +310,7 @@ export function SettingsHelp({
         <span>
           <strong>Gyro</strong>
           <span data-setting-key="version-and-build" tabIndex={-1}>
-            {version ?? "Version unavailable"}
+            {version ? `${version} · Beta` : "Version unavailable"}
           </span>
           <span data-setting-key="license" tabIndex={-1}>
             Apache-2.0

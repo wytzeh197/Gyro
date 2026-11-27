@@ -7974,6 +7974,16 @@ expect(
   "Permission controls should expose ask, sandboxed auto-approval, and orange Full Access as distinct backend modes.",
 );
 expect(
+  readRepoFile("packages/ui/src/settings-help.tsx").includes(
+    'data-setting-key="version-and-build"',
+  ) &&
+    readRepoFile("packages/ui/src/settings-help.tsx").includes(
+      '{version ? `${version} · Beta` : "Version unavailable"}',
+    ) &&
+    readRepoFile("packages/ui/src/surfaces.tsx").includes("Public Beta"),
+  "The Help footer should show a Beta label next to the installed version, and Updates should keep Public Beta.",
+);
+expect(
   !styleSource.includes(".gyro-tool-panel-reveal") &&
     styleSource.includes(".gyro-sidebar-footer") &&
     styleSource.includes(".gyro-sidebar-windowbar") &&
