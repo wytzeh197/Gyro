@@ -115,7 +115,25 @@ pub(super) fn capability_uses_workspace_root(id: CapabilityId) -> bool {
 pub(super) fn workspace_context_metadata(
     context: &WorkspaceContextSnapshot,
 ) -> WorkspaceContextSnapshot {
-    let mut visible = context.clone();
+    // Task logs live in `active_output` (stdout up to 2 MiB, stderr up to 1 MiB).
+    // Callers count or page them from the live snapshot. A derived `Clone`
+    // would copy those strings into a value that immediately drops them.
+    let mut visible = WorkspaceContextSnapshot {
+        schema: context.schema.clone(),
+        workspace_key: context.workspace_key.clone(),
+        revision: context.revision,
+        captured_at: context.captured_at,
+        availability: context.availability.clone(),
+        unavailable_reason: context.unavailable_reason.clone(),
+        active_path: context.active_path.clone(),
+        active_view: context.active_view.clone(),
+        visible_tabs: context.visible_tabs.clone(),
+        selection: context.selection.clone(),
+        buffers: context.buffers.clone(),
+        diagnostics: context.diagnostics.clone(),
+        test_failures: context.test_failures.clone(),
+        active_output: None,
+    };
     if let Some(selection) = visible
         .selection
         .as_mut()
