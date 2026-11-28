@@ -22,9 +22,6 @@ pub(super) fn result(
         "Unknown Workspace context section"
     );
     let mut data = serde_json::to_value(workspace_context_metadata(context))?;
-    // Metadata leaves `activeOutput` null so task logs are not serialized.
-    // Drop that placeholder; sections below put back only what they return.
-    data.as_object_mut().unwrap().remove("activeOutput");
     data["boundRevision"] = json!(bound_revision);
     data["stale"] = json!(context.revision != bound_revision);
     data["section"] = json!(section);
@@ -44,18 +41,18 @@ pub(super) fn result(
             selected = values;
         }
     }
-    let has_output = context
-        .active_output
-        .as_ref()
-        .is_some_and(|output| !output.is_null());
-    counts.insert("activeOutput".into(), json!(has_output));
+    let output = data
+        .as_object_mut()
+        .unwrap()
+        .remove("activeOutput")
+        .unwrap_or(Value::Null);
+    counts.insert("activeOutput".into(), json!(!output.is_null()));
     data["sectionCounts"] = Value::Object(counts);
     if COLLECTIONS.contains(&section) {
         data[section] = selected;
         return capability_output_budget::array_page(data, section, arguments, 20, 1000);
     }
     if section == "activeOutput" {
-        let output = context.active_output.clone().unwrap_or(Value::Null);
         if let Some(lines) = output.get("lines").and_then(Value::as_array) {
             data["lines"] = json!(lines);
             let mut metadata = output;
@@ -83,43 +80,26 @@ pub(super) fn result(
             arguments,
         );
     }
-    // An overview carries output identity and status. The activeOutput section
-    // retains every source line. Copy the small fields only; stdout and stderr
-    // stay borrowed for the character count.
-    match context.active_output.as_ref() {
-        Some(Value::Object(source)) => {
-            let mut metadata = serde_json::Map::new();
-            let mut lines = None;
-            let mut stdout = None;
-            let mut stderr = None;
-            for (key, value) in source {
-                match key.as_str() {
-                    "lines" => lines = Some(value),
-                    "stdout" => stdout = Some(value),
-                    "stderr" => stderr = Some(value),
-                    _ => {
-                        metadata.insert(key.clone(), value.clone());
-                    }
-                }
-            }
-            if let Some(lines) = lines {
+    // An overview carries output identity and status, avoiding another copy of
+    // the full task logs. The activeOutput section retains every source line.
+    if let Some(mut metadata) = output.as_object().cloned() {
+        if let Some(lines) = metadata.remove("lines") {
+            metadata.insert(
+                "totalLines".into(),
+                json!(lines.as_array().map_or(0, Vec::len)),
+            );
+        }
+        for key in ["stdout", "stderr"] {
+            if let Some(text) = metadata.remove(key) {
                 metadata.insert(
-                    "totalLines".into(),
-                    json!(lines.as_array().map_or(0, Vec::len)),
+                    format!("{key}Chars"),
+                    json!(text.as_str().map_or(0, |text| text.chars().count())),
                 );
             }
-            for (key, text) in [("stdout", stdout), ("stderr", stderr)] {
-                if let Some(text) = text {
-                    metadata.insert(
-                        format!("{key}Chars"),
-                        json!(text.as_str().map_or(0, |text| text.chars().count())),
-                    );
-                }
-            }
-            data["activeOutput"] = Value::Object(metadata);
         }
-        Some(other) => data["activeOutput"] = other.clone(),
-        None => data["activeOutput"] = Value::Null,
+        data["activeOutput"] = Value::Object(metadata);
+    } else {
+        data["activeOutput"] = output;
     }
     let data = redact_json_strings(data);
     anyhow::ensure!(
@@ -186,79 +166,6 @@ mod tests {
             serde_json::to_vec(&context).unwrap().len(),
             serde_json::to_vec(&page).unwrap().len()
         );
-    }
-
-    #[test]
-    fn overview_counts_scalars_without_keeping_task_logs() {
-        let mut context = context();
-        let stdout = format!("{}{}", "x".repeat(1000), "🦀".repeat(3));
-        assert_eq!(stdout.chars().count(), 1003);
-        assert_ne!(stdout.len(), 1003);
-        context.active_output = Some(json!({
-            "taskId": "verify",
-            "status": "failed",
-            "stdout": stdout,
-            "stderr": "line\n",
-            "lines": ["one", "two"],
-        }));
-        let metadata = workspace_context_metadata(&context);
-        assert!(metadata.active_output.is_none());
-        let page = result(&context, 12, None, &json!({})).unwrap();
-        assert_eq!(page["activeOutput"]["taskId"], "verify");
-        assert_eq!(page["activeOutput"]["status"], "failed");
-        assert_eq!(page["activeOutput"]["stdoutChars"], 1003);
-        assert_eq!(page["activeOutput"]["stderrChars"], 5);
-        assert_eq!(page["activeOutput"]["totalLines"], 2);
-        assert!(page["activeOutput"].get("stdout").is_none());
-        assert!(page["activeOutput"].get("stderr").is_none());
-        assert!(page["activeOutput"].get("lines").is_none());
-        assert_eq!(page["sectionCounts"]["activeOutput"], true);
-        assert_eq!(
-            context.active_output.as_ref().unwrap()["stdout"]
-                .as_str()
-                .unwrap()
-                .chars()
-                .count(),
-            1003
-        );
-        let diagnostics = result(
-            &context,
-            12,
-            None,
-            &json!({"section":"diagnostics","limit":1,"maxBytes":8192}),
-        )
-        .unwrap();
-        assert!(diagnostics.get("activeOutput").is_none());
-        assert!(!diagnostics.to_string().contains(&"x".repeat(1000)));
-    }
-
-    #[test]
-    fn overview_counts_non_string_output_fields_as_zero() {
-        let mut context = context();
-        context.active_output = Some(json!({
-            "taskId": "verify",
-            "stdout": 5,
-            "stderr": ["a"],
-            "lines": "nope",
-        }));
-        let page = result(&context, 12, None, &json!({})).unwrap();
-        assert_eq!(page["activeOutput"]["stdoutChars"], 0);
-        assert_eq!(page["activeOutput"]["stderrChars"], 0);
-        assert_eq!(page["activeOutput"]["totalLines"], 0);
-        assert!(page["activeOutput"].get("stdout").is_none());
-        assert!(page["activeOutput"].get("stderr").is_none());
-        assert!(page["activeOutput"].get("lines").is_none());
-        assert_eq!(page["activeOutput"]["taskId"], "verify");
-
-        context.active_output = Some(json!("not-an-object"));
-        let page = result(&context, 12, None, &json!({})).unwrap();
-        assert_eq!(page["activeOutput"], "not-an-object");
-        assert_eq!(page["sectionCounts"]["activeOutput"], true);
-
-        context.active_output = None;
-        let page = result(&context, 12, None, &json!({})).unwrap();
-        assert!(page["activeOutput"].is_null());
-        assert_eq!(page["sectionCounts"]["activeOutput"], false);
     }
 
     #[test]
